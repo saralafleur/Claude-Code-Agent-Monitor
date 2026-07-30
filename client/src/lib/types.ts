@@ -2315,6 +2315,12 @@ export interface SessionStats {
     /** Prompt-cache-write tokens summed over this session's agents. */
     cache_write_tokens: number;
   };
+  /** Per-turn ACTIVE context-size snapshots, oldest first — distinct from the
+   *  lifetime cumulative `tokens` above. Each point is input+cache_read+
+   *  cache_creation tokens for that one turn (what was actually sent to the
+   *  model on that call). Plotted over time this is a sawtooth: climbing
+   *  during normal work, dropping sharply at each /compact or /clear. */
+  context_series: Array<{ ts: string; tokens: number }>;
 }
 
 // ───── Workflow intelligence (events-derived) ─────

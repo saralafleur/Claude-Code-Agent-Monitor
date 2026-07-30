@@ -2,9 +2,12 @@
  * @file SessionOverview.tsx
  * @description Real-time stats panel rendered at the top of the Agents tab on the
  * Session detail page. Shows tile counters (events, tool calls, subagents, errors,
- * compactions, duration), top-tool usage bars, subagent-type breakdown, and a token
- * flow strip. Live-refreshes on `new_event` (debounced) so counters track the running
- * session without spamming the backend.
+ * compactions, duration), top-tool usage bars, subagent-type breakdown, a
+ * context-size-over-time sawtooth chart (live active context window per turn,
+ * distinct from lifetime totals - flags when a session is getting expensive to
+ * keep alive and whether a /compact or /clear actually brought it back down),
+ * and a token flow strip. Live-refreshes on `new_event` (debounced) so counters
+ * track the running session without spamming the backend.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -70,10 +73,11 @@ import {
   Clock,
   Coins,
   Bot,
+  Gauge,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
-import { fmt, formatDuration } from "../lib/format";
+import { fmt, formatDateTime, formatDuration, formatTime } from "../lib/format";
 import { styleForTool } from "./conversation/toolStyle";
 import type { Agent, Session, SessionStats } from "../lib/types";
 
@@ -457,6 +461,14 @@ export function SessionOverview({ session, agents }: SessionOverviewProps) {
         </div>
       </div>
 
+      {/* Context size over time - distinct from the token flow strip below:
+       *  that strip is a lifetime cumulative total, this is a live sawtooth of
+       *  the ACTIVE context window per turn, so a long-running session that's
+       *  gotten expensive to keep alive is visible before it becomes a
+       *  problem, and shows whether a /compact or /clear actually brought it
+       *  back down. */}
+      <ContextOverTimeChart series={stats.context_series} />
+
       {/* Token flow strip */}
       {totalTokens > 0 && (
         <div className="rounded-lg border border-surface-3 bg-surface-2/60 p-3.5">
@@ -492,6 +504,210 @@ export function SessionOverview({ session, agents }: SessionOverviewProps) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Context window ceiling used both as the chart's reference line and the
+ *  "consider /compact or /clear" threshold. Matches Claude's standard 200K
+ *  context window. */
+const CONTEXT_WARN_TOKENS = 200_000;
+
+/** A turn-to-turn drop of at least this fraction reads as a /compact or
+ *  /clear having run - normal usage only ever grows or holds steady. */
+const CONTEXT_DROP_RATIO = 0.4;
+
+/** Evenly spaced-in-TIME x positions (not point-index positions) for the axis
+ *  ticks and gridlines - first/last anchor the span, the rest subdivide it. */
+const CONTEXT_TICK_FRACTIONS = [0, 1 / 3, 2 / 3, 1];
+
+/**
+ * Sawtooth line chart of the session's ACTIVE context size per turn (not the
+ * lifetime cumulative total shown in the token-flow strip below). Renders
+ * nothing until there are at least two points to draw a line between.
+ */
+function ContextOverTimeChart({ series }: { series: SessionStats["context_series"] }) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  const chart = useMemo(() => {
+    if (!series || series.length < 2) return null;
+    const points = series.map((p) => ({ ts: new Date(p.ts).getTime(), tokens: p.tokens }));
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (!first || !last) return null;
+    const span = Math.max(1, last.ts - first.ts);
+    const maxTokens = Math.max(CONTEXT_WARN_TOKENS, ...points.map((p) => p.tokens));
+    const coords = points.map((p) => ({
+      x: ((p.ts - first.ts) / span) * 100,
+      y: 100 - (p.tokens / maxTokens) * 100,
+      ts: p.ts,
+      tokens: p.tokens,
+    }));
+    const firstCoord = coords[0];
+    const lastCoord = coords[coords.length - 1];
+    if (!firstCoord || !lastCoord) return null;
+    const drops = coords.filter((c, i) => {
+      if (i === 0) return false;
+      const prev = coords[i - 1];
+      return prev != null && c.tokens < prev.tokens * (1 - CONTEXT_DROP_RATIO);
+    });
+    const linePath = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x},${c.y}`).join(" ");
+    const areaPath = `${linePath} L${lastCoord.x},100 L${firstCoord.x},100 Z`;
+    const warnY = 100 - (CONTEXT_WARN_TOKENS / maxTokens) * 100;
+    // Ticks are placed at fixed fractions of the TIME span (inverting the same
+    // scale used for `x` above), not at fixed fractions of the point array -
+    // turns aren't evenly spaced in time, so the axis has to derive its own
+    // positions rather than reuse point indices.
+    const sameDay = new Date(first.ts).toDateString() === new Date(last.ts).toDateString();
+    const ticks = CONTEXT_TICK_FRACTIONS.map((f) => ({ x: f * 100, ts: first.ts + f * span }));
+    return { coords, drops, linePath, areaPath, warnY, latest: lastCoord, ticks, sameDay };
+  }, [series]);
+
+  if (!chart) return null;
+  const { coords, drops, linePath, areaPath, warnY, latest, ticks, sameDay } = chart;
+  const isHigh = latest.tokens >= CONTEXT_WARN_TOKENS;
+  const hovered = hoverIndex !== null ? coords[hoverIndex] : null;
+
+  const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const fraction = ((e.clientX - rect.left) / rect.width) * 100;
+    let closest = 0;
+    let closestDist = Infinity;
+    coords.forEach((c, i) => {
+      const dist = Math.abs(c.x - fraction);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = i;
+      }
+    });
+    setHoverIndex(closest);
+  };
+
+  return (
+    <div className="rounded-lg border border-surface-3 bg-surface-2/60 p-3.5 mb-5">
+      <div className="flex items-center justify-between mb-2.5">
+        <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+          <Gauge className="w-3.5 h-3.5 text-indigo-400" />
+          Context size over time
+        </h3>
+        <span className={`text-[10px] font-mono ${isHigh ? "text-amber-300" : "text-gray-500"}`}>
+          {fmt(latest.tokens)} tokens now
+          {isHigh ? " · consider /compact or /clear" : ""}
+        </span>
+      </div>
+      <div className="relative h-24">
+        <svg
+          ref={svgRef}
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="w-full h-full"
+          onMouseMove={handleMove}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
+          {/* Time-axis gridlines - faint, purely a visual reference for the
+           *  tick labels below; not part of the data. */}
+          {ticks.map((t) => (
+            <line
+              key={t.x}
+              x1={t.x}
+              x2={t.x}
+              y1={0}
+              y2={100}
+              className="stroke-gray-500/10"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          <line
+            x1={0}
+            x2={100}
+            y1={warnY}
+            y2={warnY}
+            className="stroke-amber-500/40"
+            strokeWidth={1}
+            strokeDasharray="2,2"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path d={areaPath} className="fill-indigo-500/10" stroke="none" />
+          <path
+            d={linePath}
+            fill="none"
+            className="stroke-indigo-500"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
+          {hovered && (
+            <line
+              x1={hovered.x}
+              x2={hovered.x}
+              y1={0}
+              y2={100}
+              className="stroke-gray-500/40"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+        <span className="absolute top-0.5 right-1 text-[9px] text-amber-400/70 font-mono pointer-events-none">
+          200K
+        </span>
+        {/* Drop markers and the hover dot are plain positioned HTML, not SVG
+         *  circles - the chart stretches non-uniformly (preserveAspectRatio
+         *  "none"), which would render SVG circles as ellipses. */}
+        {drops.map((d) => (
+          <span
+            key={d.ts}
+            className="absolute w-1.5 h-1.5 rounded-full bg-surface-1 border border-amber-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ left: `${d.x}%`, top: `${d.y}%` }}
+            title="Context compacted/cleared here"
+          />
+        ))}
+        {hovered && (
+          <>
+            <span
+              className="absolute w-2 h-2 rounded-full bg-indigo-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-2 ring-indigo-400/30"
+              style={{ left: `${hovered.x}%`, top: `${hovered.y}%` }}
+            />
+            <div
+              className="absolute -top-1 rounded-lg border border-border-light bg-[#0a0a12] px-2.5 py-1.5 text-[11px] text-gray-300 shadow-2xl pointer-events-none whitespace-nowrap"
+              style={{
+                left: `${hovered.x}%`,
+                transform: `translate(${
+                  hovered.x > 85 ? "-100%" : hovered.x < 15 ? "0%" : "-50%"
+                }, -100%)`,
+              }}
+            >
+              <p className="font-semibold text-gray-100">{fmt(hovered.tokens)} tokens</p>
+              <p className="text-gray-500">{formatDateTime(new Date(hovered.ts).toISOString())}</p>
+            </div>
+          </>
+        )}
+      </div>
+      {/* Time axis - labels are plain HTML (not SVG text) so they don't get
+       *  horizontally stretched by the chart's non-uniform SVG scaling. */}
+      <div className="relative h-3.5 mt-1">
+        {ticks.map((t, i) => (
+          <span
+            key={t.x}
+            className="absolute text-[9px] text-gray-500 font-mono whitespace-nowrap"
+            style={{
+              left: `${t.x}%`,
+              transform:
+                i === 0
+                  ? "translateX(0%)"
+                  : i === ticks.length - 1
+                    ? "translateX(-100%)"
+                    : "translateX(-50%)",
+            }}
+          >
+            {sameDay
+              ? formatTime(new Date(t.ts).toISOString())
+              : formatDateTime(new Date(t.ts).toISOString())}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

@@ -865,7 +865,7 @@ const processEvent = db.transaction((hookType, data) => {
   if (data.transcript_path) {
     const result = transcriptCache.extract(data.transcript_path);
     if (result) {
-      const { tokensByModel, compaction, latestModel } = result;
+      const { tokensByModel, compaction, latestModel, lastUsage } = result;
 
       // Keep session.model in sync with the user's *current* model — the
       // transcript's most recent assistant entry is the source of truth, since
@@ -966,6 +966,22 @@ const processEvent = db.transaction((hookType, data) => {
             tokens.codeExec
           );
         }
+      }
+
+      // Snapshot the current context size (one point-in-time reading of the
+      // active context window, distinct from tokensByModel's lifetime total)
+      // for the "context over time" chart. Skipped when the turn has no uuid
+      // (nothing to dedup against) — dedup relies on the UNIQUE constraint,
+      // and SQLite never treats two NULLs as equal so a null uuid would insert
+      // a fresh row on every hook event instead of being ignored.
+      if (lastUsage && lastUsage.uuid) {
+        stmts.insertContextSnapshot.run(
+          sessionId,
+          lastUsage.uuid,
+          lastUsage.timestamp || new Date().toISOString(),
+          lastUsage.contextTokens,
+          lastUsage.model
+        );
       }
 
       // Register API errors from transcript (quota limits, rate limits, overloaded, etc.)

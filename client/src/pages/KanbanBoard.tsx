@@ -1306,7 +1306,7 @@ export function KanbanBoard() {
 
       <div
         data-testid="kanban-board-row"
-        className="flex gap-4 min-h-[600px] overflow-x-auto pb-4 -mx-8 px-8"
+        className="flex items-start gap-4 min-h-[600px] overflow-x-auto pb-4 -mx-8 px-8"
       >
         {view === "agents" ? (
           visibleAgentColumns.map((status) => {
@@ -1964,7 +1964,9 @@ function MonitorBox({
           and any in-flight drag survive a collapse/expand toggle. */}
       <div
         className={`${
-          gridWrap ? "grid gap-4" : `flex gap-4 ${orientation === "vertical" ? "flex-col" : ""}`
+          gridWrap
+            ? "grid gap-4"
+            : `flex items-start gap-4 ${orientation === "vertical" ? "flex-col" : ""}`
         } ${collapsed ? "hidden" : ""}`}
         style={
           gridWrap
@@ -2050,7 +2052,7 @@ function UngroupedBox({
       {/* Stays mounted (never conditionally rendered) while collapsed, only
           visually hidden - matches MonitorBox so a card's own local state and
           any in-flight drag survive a collapse/expand toggle. */}
-      <div className={`flex gap-4 ${collapsed ? "hidden" : ""}`} draggable={false}>
+      <div className={`flex items-start gap-4 ${collapsed ? "hidden" : ""}`} draggable={false}>
         {children}
         {count === 0 && (
           <div className="flex-1 min-w-[10rem] min-h-[80px] rounded-lg border border-dashed border-border/50 flex items-center justify-center text-[11px] leading-snug text-gray-600 text-center px-3">

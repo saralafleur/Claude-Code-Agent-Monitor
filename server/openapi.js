@@ -612,6 +612,23 @@ function createOpenApiSpec() {
                 cache_write_tokens: { type: "integer", minimum: 0 },
               },
             },
+            context_series: {
+              type: "array",
+              description:
+                "Per-turn ACTIVE context-size snapshots, oldest first — distinct from the lifetime cumulative `tokens` above. Each point is input+cache_read+cache_creation tokens for that one turn, approximating what was actually sent to the model on that call. Plotted over time this produces a sawtooth: climbing during normal work, dropping sharply at each /compact or /clear.",
+              items: {
+                type: "object",
+                required: ["ts", "tokens"],
+                properties: {
+                  ts: {
+                    type: "string",
+                    format: "date-time",
+                    description: "Transcript timestamp of the turn.",
+                  },
+                  tokens: { type: "integer", minimum: 0 },
+                },
+              },
+            },
           },
         },
         SessionUpdateRequest: {

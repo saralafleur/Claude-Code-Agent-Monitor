@@ -1,5 +1,5 @@
 /**
- * @file TranscriptCache class for efficient extraction of token usage and compaction data from JSONL transcript files, with stat-based caching and incremental reads to handle append-only growth without re-reading the entire file. Also extracts API error entries and turn duration system messages for enhanced analytics.
+ * @file TranscriptCache class for efficient extraction of token usage and compaction data from JSONL transcript files, with stat-based caching and incremental reads to handle append-only growth without re-reading the entire file. Also extracts API error entries, turn duration system messages, and a per-turn "current context size" snapshot (lastUsage) for enhanced analytics.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -169,6 +169,7 @@ class TranscriptCache {
             thinkingBlockCount: merged.thinkingBlockCount || 0,
             usageExtras: hasUsageExtras ? merged.usageExtras : null,
             latestModel: merged.latestModel || null,
+            lastUsage: merged.lastUsage || null,
             customTitle: merged.customTitle || null,
             aiTitle: merged.aiTitle || null,
             firstUserMessage: merged.firstUserMessage || null,
@@ -184,6 +185,7 @@ class TranscriptCache {
             !result.thinkingBlockCount &&
             !result.usageExtras &&
             !result.latestModel &&
+            !result.lastUsage &&
             !result.customTitle &&
             !result.aiTitle &&
             !result.firstUserMessage &&
@@ -368,6 +370,13 @@ class TranscriptCache {
       // the user's *current* model — used downstream to keep session.model in
       // sync when the user invokes /model mid-session.
       latestModel: null,
+      // Snapshot (overwrite, not accumulate) of the most recent turn's usage —
+      // unlike tokensByModel (a running sum used for cost), this is a single
+      // point-in-time reading used to derive the ACTIVE context size, i.e.
+      // what's actually sitting in the model's context window right now.
+      // uuid dedups the DB write; contextTokens = input + cacheRead + cacheWrite
+      // for that one turn (the same shape Claude Code's own context meter uses).
+      lastUsage: null,
       // Track the latest human-readable session title. Two sources, both
       // append-only metadata lines: `custom-title` (explicit /rename, claude
       // -n, picker Ctrl+R) and `ai-title` (auto-generated / plan-accept).
@@ -510,7 +519,17 @@ class TranscriptCache {
     if (!state.tokensByModel[key]) {
       state.tokensByModel[key] = emptyBucket(model, speed, geo, tier);
     }
-    accumulateBucket(state.tokensByModel[key], extractUsageFields(msg.usage));
+    const fields = extractUsageFields(msg.usage);
+    accumulateBucket(state.tokensByModel[key], fields);
+
+    // Overwrite (not accumulate) — append-only file, so the last one seen is
+    // the current context snapshot.
+    state.lastUsage = {
+      uuid: entry.uuid || null,
+      timestamp: entry.timestamp || null,
+      model,
+      contextTokens: fields.input + fields.cacheRead + fields.cacheWrite,
+    };
 
     if (msg.usage.service_tier) state.usageExtras.service_tiers.add(msg.usage.service_tier);
     if (msg.usage.speed) state.usageExtras.speeds.add(msg.usage.speed);
@@ -573,6 +592,7 @@ class TranscriptCache {
       thinkingBlockCount: state.thinkingBlockCount,
       usageExtras: serializedExtras,
       latestModel: state.latestModel,
+      lastUsage: state.lastUsage,
       customTitle: state.customTitle,
       aiTitle: state.aiTitle,
       firstUserMessage: state.firstUserMessage,
@@ -677,6 +697,9 @@ class TranscriptCache {
     const latestModel =
       (incremental && incremental.latestModel) || cached.result?.latestModel || null;
 
+    // Same append-only "newest wins" logic for the context snapshot.
+    const lastUsage = (incremental && incremental.lastUsage) || cached.result?.lastUsage || null;
+
     // Same append-only logic for the session titles: the newest title line in
     // the incremental chunk wins, else keep what was cached.
     const customTitle =
@@ -704,6 +727,7 @@ class TranscriptCache {
       thinkingBlockCount,
       usageExtras,
       latestModel,
+      lastUsage,
       customTitle,
       aiTitle,
       firstUserMessage,

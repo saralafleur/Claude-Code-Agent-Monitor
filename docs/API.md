@@ -355,9 +355,16 @@ curl http://localhost:4820/api/sessions/sess_abc123/stats
     "output_tokens": 760304,
     "cache_read_tokens": 337641891,
     "cache_write_tokens": 5126047
-  }
+  },
+  "context_series": [
+    { "ts": "2026-04-26T18:59:03.000Z", "tokens": 4821 },
+    { "ts": "2026-04-26T19:02:11.000Z", "tokens": 118400 },
+    { "ts": "2026-04-26T19:05:47.000Z", "tokens": 6120 }
+  ]
 }
 ```
+
+`tokens` is a lifetime cumulative total across the whole session (used for cost). `context_series` is different: one point per transcript turn, oldest first, each the ACTIVE context size for that single turn (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens`) — not summed. Plotted over time it's a sawtooth that climbs during normal work and drops sharply at each `/compact` or `/clear`, which is what the Session Overview page's context-over-time chart renders. Empty until the session has at least one transcript-bearing hook event.
 
 **Error Responses:**
 

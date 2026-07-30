@@ -208,6 +208,29 @@ db.exec(`
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
   );
 
+  -- Per-turn context-size snapshots. Unlike token_usage (a cumulative lifetime
+  -- total used for cost), each row here is a single point-in-time reading of
+  -- the ACTIVE context window on one assistant turn — input_tokens +
+  -- cache_read_tokens + cache_creation_tokens for that turn, which approximates
+  -- what was actually sent to the model on that call. Plotted over time this
+  -- produces a sawtooth: climbing during normal work, dropping sharply at each
+  -- /compact or /clear — the signal for "is this session's context bloated."
+  -- One row per hook event carrying a transcript_path; deduped by
+  -- transcript_uuid so re-ingesting the same turn is a no-op.
+  CREATE TABLE IF NOT EXISTS context_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    transcript_uuid TEXT NOT NULL,
+    transcript_ts TEXT NOT NULL,
+    context_tokens INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (session_id, transcript_uuid),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_context_snapshots_session ON context_snapshots(session_id, transcript_ts);
+
   CREATE TABLE IF NOT EXISTS model_pricing (
     model_pattern TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
@@ -1743,6 +1766,20 @@ const stmts = {
       COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens
     FROM token_usage
     WHERE session_id = ?
+  `),
+
+  // Per-turn context-size series for the "context over time" chart. Deduped by
+  // transcript_uuid at write time, so re-ingesting the same turn is a no-op.
+  insertContextSnapshot: db.prepare(`
+    INSERT OR IGNORE INTO context_snapshots
+      (session_id, transcript_uuid, transcript_ts, context_tokens, model)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  sessionContextSeries: db.prepare(`
+    SELECT transcript_ts as ts, context_tokens as tokens
+    FROM context_snapshots
+    WHERE session_id = ?
+    ORDER BY transcript_ts ASC
   `),
 
   // ── Alerting engine ───────────────────────────────────────────────────────
