@@ -128,53 +128,73 @@ describe("generateWindowSummary → focus_summary_access_log", () => {
 });
 
 describe("GET /api/settings/cache/timeline", () => {
-  it("zero-fills days with no activity and aggregates days with rows", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+  it("returns raw entries within the requested [from, to) range, oldest first", async () => {
+    const now = new Date();
+    const hitAt = new Date(now.getTime() - 60_000).toISOString();
+    const missAt = now.toISOString();
     seedLogRow({
       cacheKey: JSON.stringify({ project_id: "p1", from: 1, to: 2 }),
-      day: today,
+      day: hitAt.slice(0, 10),
       outcome: "hit",
       projectId: "p1",
       model: "claude-sonnet-5",
       bulletCount: 3,
-      accessedAt: new Date().toISOString(),
+      accessedAt: hitAt,
     });
     seedLogRow({
       cacheKey: JSON.stringify({ day: 123, scope: { unassigned: true } }),
       level: "day",
-      day: today,
+      day: missAt.slice(0, 10),
       outcome: "miss",
       unassigned: 1,
       model: "claude-opus-5",
       bulletCount: 4,
-      accessedAt: new Date().toISOString(),
+      accessedAt: missAt,
     });
 
-    const res = await fetch("/api/settings/cache/timeline?days=7");
+    const from = new Date(now.getTime() - 3600_000).toISOString();
+    const to = new Date(now.getTime() + 3600_000).toISOString();
+    const res = await fetch(
+      `/api/settings/cache/timeline?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+    );
     assert.equal(res.status, 200);
-    assert.equal(res.body.days.length, 7);
-    const todayRow = res.body.days[res.body.days.length - 1];
-    assert.equal(todayRow.date, today);
-    assert.ok(todayRow.hits >= 1);
-    assert.ok(todayRow.misses >= 1);
-    assert.equal(todayRow.total, todayRow.hits + todayRow.misses);
+    assert.equal(res.body.truncated, false);
+    const outcomes = res.body.entries.map((e) => e.outcome);
+    assert.ok(outcomes.includes("hit"));
+    assert.ok(outcomes.includes("miss"));
+    // oldest first
+    for (let i = 1; i < res.body.entries.length; i++) {
+      assert.ok(res.body.entries[i - 1].accessed_at <= res.body.entries[i].accessed_at);
+    }
 
-    // an empty day earlier in the range is zero-filled, not omitted
-    const earliest = res.body.days[0];
-    assert.equal(typeof earliest.hits, "number");
-    assert.equal(typeof earliest.misses, "number");
+    // a range that excludes both seeded rows comes back empty
+    const empty = await fetch(
+      `/api/settings/cache/timeline?from=${encodeURIComponent("2020-01-01T00:00:00.000Z")}&to=${encodeURIComponent("2020-01-02T00:00:00.000Z")}`
+    );
+    assert.deepEqual(empty.body.entries, []);
   });
 
-  it("clamps days to [1, 90]", async () => {
-    const tooMany = await fetch("/api/settings/cache/timeline?days=9999");
-    assert.equal(tooMany.body.days.length, 90);
-    const tooFew = await fetch("/api/settings/cache/timeline?days=0");
-    assert.equal(tooFew.body.days.length, 1);
+  it("400s on a missing or malformed range", async () => {
+    const missing = await fetch("/api/settings/cache/timeline");
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.error.code, "INVALID_RANGE");
+
+    const malformed = await fetch(
+      "/api/settings/cache/timeline?from=not-a-date&to=also-not-a-date"
+    );
+    assert.equal(malformed.status, 400);
+
+    const inverted = await fetch(
+      "/api/settings/cache/timeline?from=2026-01-02T00:00:00.000Z&to=2026-01-01T00:00:00.000Z"
+    );
+    assert.equal(inverted.status, 400);
   });
 });
 
 describe("GET /api/settings/cache/day", () => {
   const day = "2026-02-14";
+  const from = `${day}T00:00:00.000Z`;
+  const to = "2026-02-15T00:00:00.000Z";
 
   before(() => {
     stmts.insertSession.run(
@@ -207,17 +227,21 @@ describe("GET /api/settings/cache/day", () => {
     });
   });
 
-  it("400s on a missing or malformed date", async () => {
+  it("400s on a missing or malformed range", async () => {
     const missing = await fetch("/api/settings/cache/day");
     assert.equal(missing.status, 400);
-    assert.equal(missing.body.error.code, "INVALID_DATE");
+    assert.equal(missing.body.error.code, "INVALID_RANGE");
 
-    const malformed = await fetch("/api/settings/cache/day?date=02-14-2026");
+    const malformed = await fetch(
+      "/api/settings/cache/day?from=not-a-real-date&to=also-not-a-real-date"
+    );
     assert.equal(malformed.status, 400);
   });
 
   it("returns a summary and entries with scope labels resolved", async () => {
-    const res = await fetch(`/api/settings/cache/day?date=${day}`);
+    const res = await fetch(
+      `/api/settings/cache/day?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+    );
     assert.equal(res.status, 200);
     assert.equal(res.body.hits, 1);
     assert.equal(res.body.misses, 1);
@@ -234,25 +258,28 @@ describe("GET /api/settings/cache/day", () => {
   });
 
   it("filters by outcome, model, and level", async () => {
-    const hits = await fetch(`/api/settings/cache/day?date=${day}&outcome=hit`);
+    const qs = (extra) => `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${extra}`;
+    const hits = await fetch(`/api/settings/cache/day?${qs("&outcome=hit")}`);
     assert.equal(hits.body.entries.length, 1);
     assert.equal(hits.body.entries[0].outcome, "hit");
 
     const byModel = await fetch(
-      `/api/settings/cache/day?date=${day}&model=${encodeURIComponent("claude-opus-5")}`
+      `/api/settings/cache/day?${qs(`&model=${encodeURIComponent("claude-opus-5")}`)}`
     );
     assert.equal(byModel.body.entries.length, 1);
     assert.equal(byModel.body.entries[0].model, "claude-opus-5");
-    // summary totals are for the whole day, unaffected by the entry filters
+    // summary totals are for the whole range, unaffected by the entry filters
     assert.equal(byModel.body.total, 2);
 
-    const byLevel = await fetch(`/api/settings/cache/day?date=${day}&level=day`);
+    const byLevel = await fetch(`/api/settings/cache/day?${qs("&level=day")}`);
     assert.equal(byLevel.body.entries.length, 1);
     assert.equal(byLevel.body.entries[0].level, "day");
   });
 
-  it("returns an empty (not missing) shape for a day with no activity", async () => {
-    const res = await fetch("/api/settings/cache/day?date=2020-01-01");
+  it("returns an empty (not missing) shape for a range with no activity", async () => {
+    const res = await fetch(
+      "/api/settings/cache/day?from=2020-01-01T00:00:00.000Z&to=2020-01-02T00:00:00.000Z"
+    );
     assert.equal(res.status, 200);
     assert.equal(res.body.hits, 0);
     assert.equal(res.body.misses, 0);

@@ -392,7 +392,7 @@ import type {
   DashboardEvent,
   FocusSummaryCacheStats,
   FocusSummaryDayResponse,
-  FocusSummaryTimelineDay,
+  FocusSummaryTimelineResponse,
   ModelPricing,
   Project,
   Session,
@@ -1131,39 +1131,46 @@ export const api = {
         purged_focus_summary_log: number;
       }>("/settings/cleanup", { method: "POST", body: JSON.stringify(params) }),
     /**
-     * GET /api/settings/cache/timeline - day-bucketed focus-summary-cache
-     * hit/miss counts for the Focus Summaries section's timeline chart.
+     * GET /api/settings/cache/timeline - raw focus-summary-cache hit/miss
+     * timestamps within `[from, to)`, for the Focus Summaries section's
+     * timeline chart. The server does no day-bucketing — CacheSection.tsx
+     * buckets these into the VIEWER'S local calendar days (not UTC), since
+     * only the browser knows what "today" means to this viewer.
      *
-     * Always returns exactly `days` entries, oldest first, zero-filled for
-     * days with no recorded activity — the client never has to fill gaps.
-     * Days are UTC calendar days, matching every other timestamp this app
-     * stores.
-     *
-     * @param days How many trailing days to include (server clamps to 1-90; default 30).
-     * @returns `{ days }` — one `{ date, hits, misses, total }` row per day.
+     * @param from ISO instant, inclusive lower bound (e.g. the client's local
+     *   midnight N days ago, as a UTC instant).
+     * @param to ISO instant, exclusive upper bound.
+     * @returns `{ entries, truncated }` — raw `{ accessed_at, outcome }` rows,
+     *   oldest first; `truncated` is true when the range hit the server's row cap.
      */
-    cacheTimeline: (days = 30) =>
-      request<{ days: FocusSummaryTimelineDay[] }>(`/settings/cache/timeline?days=${days}`),
+    cacheTimeline: (from: string, to: string) =>
+      request<FocusSummaryTimelineResponse>(
+        `/settings/cache/timeline?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+      ),
     /**
-     * GET /api/settings/cache/day - summary + entry list for a single UTC
-     * calendar day's focus-summary-cache activity, for the Focus Summaries
-     * section's drill-down table.
+     * GET /api/settings/cache/day - summary + entry list for one calendar
+     * day's focus-summary-cache activity, for the Focus Summaries section's
+     * drill-down table. "Day" is whatever `[from, to)` instant range the
+     * caller passes — CacheSection.tsx computes the viewer's local
+     * midnight-to-midnight range, not a UTC calendar day.
      *
-     * `hits`/`misses`/`total`/`models` describe the whole day regardless of
+     * `hits`/`misses`/`total`/`models` describe the whole range regardless of
      * the `outcome`/`model`/`level` filters; `entries` is filtered. Capped
      * at 500 rows server-side — `truncated` is true when a busier day was
      * cut off.
      *
-     * @param date UTC calendar day, `YYYY-MM-DD`.
+     * @param from ISO instant, inclusive lower bound.
+     * @param to ISO instant, exclusive upper bound.
      * @param filters Optional `outcome` ('hit' | 'miss'), `model` name, and/or
      *   `level` ('window' | 'day') to narrow `entries`.
      * @returns Day summary plus the (possibly filtered) entry list.
      */
     cacheDay: (
-      date: string,
+      from: string,
+      to: string,
       filters: { outcome?: "hit" | "miss"; model?: string; level?: "window" | "day" } = {}
     ) => {
-      const qs = new URLSearchParams({ date });
+      const qs = new URLSearchParams({ from, to });
       if (filters.outcome) qs.set("outcome", filters.outcome);
       if (filters.model) qs.set("model", filters.model);
       if (filters.level) qs.set("level", filters.level);

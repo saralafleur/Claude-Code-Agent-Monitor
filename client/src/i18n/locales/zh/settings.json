@@ -208,7 +208,7 @@
     "columnAccessed": "最近访问",
     "noActivityDay": "该日没有记录到缓存活动。",
     "noMatchFilters": "没有条目匹配当前筛选条件。",
-    "utcNote": "日期按 UTC 计算。"
+    "utcNote": "日期按您设备的本地日历日计算。"
   },
   "danger": {
     "title": "危险操作",

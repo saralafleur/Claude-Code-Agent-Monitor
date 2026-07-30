@@ -706,8 +706,8 @@ Because this dashboard exists to watch multiple sessions run concurrently, `buil
 | `GET`  | `/api/settings/export`         | Export all data (sessions, agents, events, token_usage, workflows, dashboard_runs, alert_rules, model_pricing) as one versioned JSON attachment |
 | `POST` | `/api/settings/import`         | Restore a bundle from `/export`. Multipart `file`, or JSON `{ path }` (server reads it). Idempotent + non-destructive: sessions already present are skipped whole |
 | `POST` | `/api/settings/cleanup`        | Abandon stale sessions and purge old data (also purges `focus_summary_access_log` rows older than `purge_days`, reported as `purged_focus_summary_log`) |
-| `GET`  | `/api/settings/cache/timeline` | Day-bucketed hit/miss counts for the focus-window-summary cache (`?days=`, clamped 1-90, zero-filled), backing the Settings → Focus Summaries timeline chart |
-| `GET`  | `/api/settings/cache/day`      | Summary + entry list for one UTC day of focus-summary-cache activity (`?date=&outcome=&model=&level=`), backing the Focus Summaries drill-down table. Entries are `focus_summary_access_log` rows joined to their session/project for a `scope_label`; capped at 500 with a `truncated` flag |
+| `GET`  | `/api/settings/cache/timeline` | Raw hit/miss timestamps for the focus-window-summary cache within `[from, to)` (`?from=&to=`, ISO instants; capped, with a `truncated` flag). No day-bucketing server-side — the client buckets into its own local calendar days for the Settings → Focus Summaries timeline chart |
+| `GET`  | `/api/settings/cache/day`      | Summary + entry list for focus-summary-cache activity within `[from, to)` (`?from=&to=&outcome=&model=&level=`) — the caller passes its own local midnight-to-midnight range, backing the Focus Summaries drill-down table. Entries are `focus_summary_access_log` rows joined to their session/project for a `scope_label`; capped at 500 with a `truncated` flag |
 
 ### Claude Config Explorer (`/api/cc-config`)
 

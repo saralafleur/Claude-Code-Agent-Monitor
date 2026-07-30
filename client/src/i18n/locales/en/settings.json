@@ -208,7 +208,7 @@
     "columnAccessed": "Last accessed",
     "noActivityDay": "No cache activity recorded for this day.",
     "noMatchFilters": "No entries match the current filters.",
-    "utcNote": "Days are UTC calendar days."
+    "utcNote": "Days are your device's local calendar days."
   },
   "danger": {
     "title": "Danger Zone",

@@ -10,8 +10,12 @@
  * Backs `GET /api/settings/info`'s `focus_summary_cache` (passed in as
  * `stats`, already polled by Settings.tsx) plus the
  * `GET /api/settings/cache/timeline` and `GET /api/settings/cache/day`
- * routes via {@link api.settings}. Timeline days are UTC calendar days,
- * matching every other timestamp this app stores.
+ * routes via {@link api.settings}. The server stores everything in UTC and
+ * does no day-bucketing of its own — it just returns raw entries within an
+ * exact `[from, to)` instant range. This component computes that range from
+ * the VIEWER'S own local midnight boundaries and buckets entries into local
+ * calendar days, so a hit at 9pm local time lands in "today" here even when
+ * it's already tomorrow in UTC.
  *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
@@ -32,19 +36,43 @@ interface Props {
   stats: FocusSummaryCacheStats | null;
 }
 
-/** `dateStr` is a UTC calendar day (`YYYY-MM-DD`) — format it pinned to UTC
- *  so the label always matches the bucket, regardless of viewer timezone. */
+/** `YYYY-MM-DD` for `d`'s LOCAL calendar day (never UTC). */
+function localDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Local midnight for `d`'s calendar day. */
+function localMidnight(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+/** Parses a `localDayKey` string back into a local-midnight Date. Never
+ *  routes through UTC — that would shift the date under a non-UTC viewer. */
+function parseLocalDayKey(dateStr: string): Date {
+  const parts = dateStr.split("-").map(Number);
+  const y = parts[0] ?? 1970;
+  const m = parts[1] ?? 1;
+  const d = parts[2] ?? 1;
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+/** `dateStr` is a LOCAL calendar day (`YYYY-MM-DD`) — parsed and formatted
+ *  entirely in local time so the label always matches the bucket. */
 function formatDayLabel(dateStr: string, locale: string): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  return d.toLocaleDateString(locale, {
+  return parseLocalDayKey(dateStr).toLocaleDateString(locale, {
     weekday: "short",
     month: "short",
     day: "numeric",
-    timeZone: "UTC",
   });
 }
 
 const MAX_BAR_PX = 84;
+const TIMELINE_DAYS = 30;
 
 export function CacheSection({ stats }: Props) {
   const { t } = useTranslation("settings");
@@ -62,11 +90,41 @@ export function CacheSection({ stats }: Props) {
   const [modelFilter, setModelFilter] = useState("all");
 
   const loadTimeline = useCallback(() => {
+    // [from, to) covering the last TIMELINE_DAYS LOCAL calendar days,
+    // computed from the viewer's own clock — not the server's.
+    const todayMidnight = localMidnight(new Date());
+    const to = new Date(todayMidnight);
+    to.setDate(to.getDate() + 1);
+    const from = new Date(todayMidnight);
+    from.setDate(from.getDate() - (TIMELINE_DAYS - 1));
+
+    // Every local day in the range, oldest first, so zero-activity days are
+    // never silently omitted.
+    const dayKeys: string[] = [];
+    const cursor = new Date(from);
+    for (let i = 0; i < TIMELINE_DAYS; i++) {
+      dayKeys.push(localDayKey(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
     api.settings
-      .cacheTimeline(30)
+      .cacheTimeline(from.toISOString(), to.toISOString())
       .then((res) => {
-        setTimeline(res.days);
-        setSelectedDate((prev) => prev ?? res.days[res.days.length - 1]?.date ?? null);
+        const buckets = new Map<string, { hits: number; misses: number }>();
+        for (const key of dayKeys) buckets.set(key, { hits: 0, misses: 0 });
+        for (const entry of res.entries) {
+          const key = localDayKey(new Date(entry.accessed_at));
+          const bucket = buckets.get(key);
+          if (!bucket) continue; // outside the requested range (shouldn't happen)
+          if (entry.outcome === "hit") bucket.hits += 1;
+          else bucket.misses += 1;
+        }
+        const days: FocusSummaryTimelineDay[] = dayKeys.map((date) => {
+          const b = buckets.get(date)!;
+          return { date, hits: b.hits, misses: b.misses, total: b.hits + b.misses };
+        });
+        setTimeline(days);
+        setSelectedDate((prev) => prev ?? days[days.length - 1]?.date ?? null);
       })
       .catch(() => {});
   }, []);
@@ -81,8 +139,12 @@ export function CacheSection({ stats }: Props) {
     if (!selectedDate) return;
     let cancelled = false;
     setDayLoading(true);
+    // The selected day's own local midnight-to-midnight range.
+    const from = parseLocalDayKey(selectedDate);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 1);
     api.settings
-      .cacheDay(selectedDate, {
+      .cacheDay(from.toISOString(), to.toISOString(), {
         outcome: outcomeFilter === "all" ? undefined : outcomeFilter,
         model: modelFilter === "all" ? undefined : modelFilter,
         level: levelFilter === "all" ? undefined : levelFilter,

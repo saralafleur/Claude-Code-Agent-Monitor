@@ -208,7 +208,7 @@
     "columnAccessed": "마지막 접근",
     "noActivityDay": "이 날짜에는 캐시 활동 기록이 없습니다.",
     "noMatchFilters": "현재 필터와 일치하는 항목이 없습니다.",
-    "utcNote": "날짜는 UTC 기준입니다."
+    "utcNote": "날짜는 기기의 로컬 캘린더 날짜를 기준으로 합니다."
   },
   "danger": {
     "title": "위험 구역",

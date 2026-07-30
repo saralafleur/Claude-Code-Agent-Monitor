@@ -187,34 +187,42 @@ router.post("/clear-data", (_req, res) => {
   res.json({ ok: true, cleared: counts });
 });
 
-// GET /api/settings/cache/timeline?days=30 — day-bucketed hit/miss counts
-// for the focus-window-summary cache (server/lib/focus-summary.js), oldest
-// first, zero-filled so the client never has to fill gaps. Days are UTC
-// calendar days, matching every other timestamp this schema stores.
+// GET /api/settings/cache/timeline?from=<ISO>&to=<ISO> — raw hit/miss
+// timestamps for the focus-window-summary cache (server/lib/focus-summary.js)
+// within an exact instant range. Day bucketing is NOT done here: which
+// calendar day a hit/miss belongs to depends on the viewer's local timezone,
+// which only the browser knows — the client buckets these raw entries into
+// its own local calendar days (see CacheSection.tsx). `from`/`to` are
+// expected to be that client-computed local-day range's UTC instant bounds.
+// Capped at MAX_TIMELINE_ROWS rows (oldest kept, `truncated` flag set) as a
+// safety net — a legitimate 90-day window at this app's scale is nowhere
+// near the cap.
+const MAX_TIMELINE_ROWS = 20000;
 router.get("/cache/timeline", (req, res) => {
-  const parsedDays = parseInt(req.query.days, 10);
-  const days = Math.min(90, Math.max(1, Number.isFinite(parsedDays) ? parsedDays : 30));
+  const { from, to } = req.query;
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (!from || !to || Number.isNaN(fromMs) || Number.isNaN(toMs) || fromMs >= toMs) {
+    return res.status(400).json({
+      error: {
+        code: "INVALID_RANGE",
+        message: "from and to are required as valid ISO instants with from < to",
+      },
+    });
+  }
   const rows = db
     .prepare(
-      `SELECT access_day AS day,
-              SUM(CASE WHEN outcome = 'hit' THEN 1 ELSE 0 END) AS hits,
-              SUM(CASE WHEN outcome = 'miss' THEN 1 ELSE 0 END) AS misses
-       FROM focus_summary_access_log
-       WHERE access_day >= date('now', ?)
-       GROUP BY access_day`
+      `SELECT accessed_at, outcome FROM focus_summary_access_log
+       WHERE accessed_at >= ? AND accessed_at < ?
+       ORDER BY accessed_at ASC LIMIT ?`
     )
-    .all(`-${days - 1} days`);
-  const byDay = new Map(rows.map((r) => [r.day, r]));
-
-  const out = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const iso = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-    const r = byDay.get(iso);
-    const hits = r ? r.hits : 0;
-    const misses = r ? r.misses : 0;
-    out.push({ date: iso, hits, misses, total: hits + misses });
-  }
-  res.json({ days: out });
+    .all(new Date(fromMs).toISOString(), new Date(toMs).toISOString(), MAX_TIMELINE_ROWS + 1);
+  const truncated = rows.length > MAX_TIMELINE_ROWS;
+  if (truncated) rows.length = MAX_TIMELINE_ROWS;
+  res.json({
+    entries: rows.map((r) => ({ accessed_at: r.accessed_at, outcome: r.outcome })),
+    truncated,
+  });
 });
 
 // Resolves a logged access row's scope columns to a human-readable label:
@@ -229,18 +237,28 @@ function scopeLabel(row) {
   return "All projects";
 }
 
-// GET /api/settings/cache/day?date=YYYY-MM-DD&outcome=hit|miss&model=Name&level=window|day —
-// summary + entry list for a single UTC calendar day of focus-summary cache
-// activity, joined to sessions/projects for a human-readable label. Capped
-// at 500 rows (truncated flag tells the client, rather than silently
-// dropping the rest of a very busy day).
+// GET /api/settings/cache/day?from=<ISO>&to=<ISO>&outcome=hit|miss&model=Name&level=window|day —
+// summary + entry list for one calendar day of focus-summary-cache activity,
+// where "one day" is whatever exact [from, to) instant range the caller asks
+// for — the client sends its own local midnight-to-midnight range (see
+// CacheSection.tsx), so this route has no timezone opinion of its own. Joined
+// to sessions/projects for a human-readable label. Capped at 500 rows
+// (truncated flag tells the client, rather than silently dropping the rest
+// of a very busy day).
 router.get("/cache/day", (req, res) => {
-  const date = req.query.date;
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return res
-      .status(400)
-      .json({ error: { code: "INVALID_DATE", message: "date is required as YYYY-MM-DD" } });
+  const { from, to } = req.query;
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (!from || !to || Number.isNaN(fromMs) || Number.isNaN(toMs) || fromMs >= toMs) {
+    return res.status(400).json({
+      error: {
+        code: "INVALID_RANGE",
+        message: "from and to are required as valid ISO instants with from < to",
+      },
+    });
   }
+  const fromIso = new Date(fromMs).toISOString();
+  const toIso = new Date(toMs).toISOString();
   const outcome =
     req.query.outcome === "hit" || req.query.outcome === "miss" ? req.query.outcome : null;
   const level = req.query.level === "window" || req.query.level === "day" ? req.query.level : null;
@@ -252,9 +270,9 @@ router.get("/cache/day", (req, res) => {
       `SELECT
          SUM(CASE WHEN outcome = 'hit' THEN 1 ELSE 0 END) AS hits,
          SUM(CASE WHEN outcome = 'miss' THEN 1 ELSE 0 END) AS misses
-       FROM focus_summary_access_log WHERE access_day = ?`
+       FROM focus_summary_access_log WHERE accessed_at >= ? AND accessed_at < ?`
     )
-    .get(date);
+    .get(fromIso, toIso);
 
   let sql = `
     SELECT l.cache_key, l.level, l.outcome, l.project_id, l.session_id, l.unassigned,
@@ -263,8 +281,8 @@ router.get("/cache/day", (req, res) => {
     FROM focus_summary_access_log l
     LEFT JOIN projects p ON p.id = l.project_id
     LEFT JOIN sessions s ON s.id = l.session_id
-    WHERE l.access_day = ?`;
-  const params = [date];
+    WHERE l.accessed_at >= ? AND l.accessed_at < ?`;
+  const params = [fromIso, toIso];
   if (outcome) {
     sql += " AND l.outcome = ?";
     params.push(outcome);
@@ -284,13 +302,12 @@ router.get("/cache/day", (req, res) => {
 
   const models = db
     .prepare(
-      "SELECT DISTINCT model FROM focus_summary_access_log WHERE access_day = ? AND model IS NOT NULL ORDER BY model"
+      "SELECT DISTINCT model FROM focus_summary_access_log WHERE accessed_at >= ? AND accessed_at < ? AND model IS NOT NULL ORDER BY model"
     )
-    .all(date)
+    .all(fromIso, toIso)
     .map((r) => r.model);
 
   res.json({
-    date,
     hits: summary.hits || 0,
     misses: summary.misses || 0,
     total: (summary.hits || 0) + (summary.misses || 0),

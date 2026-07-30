@@ -1184,32 +1184,31 @@ function createOpenApiSpec() {
         },
         FocusSummaryCacheTimelineResponse: {
           type: "object",
-          required: ["days"],
+          required: ["entries", "truncated"],
           properties: {
-            days: {
+            entries: {
               type: "array",
+              description:
+                "Raw hit/miss timestamps in the requested range, oldest first. No day-bucketing — the client groups these into its own local calendar days.",
               items: {
                 type: "object",
-                required: ["date", "hits", "misses", "total"],
+                required: ["accessed_at", "outcome"],
                 properties: {
-                  date: {
-                    type: "string",
-                    format: "date",
-                    description: "UTC calendar day, YYYY-MM-DD",
-                  },
-                  hits: { type: "integer" },
-                  misses: { type: "integer" },
-                  total: { type: "integer" },
+                  accessed_at: { type: "string", format: "date-time" },
+                  outcome: { type: "string", enum: ["hit", "miss"] },
                 },
               },
+            },
+            truncated: {
+              type: "boolean",
+              description: "True when the range held more than the server's row cap",
             },
           },
         },
         FocusSummaryCacheDayResponse: {
           type: "object",
-          required: ["date", "hits", "misses", "total", "models", "truncated", "entries"],
+          required: ["hits", "misses", "total", "models", "truncated", "entries"],
           properties: {
-            date: { type: "string", format: "date" },
             hits: { type: "integer" },
             misses: { type: "integer" },
             total: { type: "integer" },
@@ -1217,7 +1216,7 @@ function createOpenApiSpec() {
             truncated: {
               type: "boolean",
               description:
-                "True when the day had more than 500 matching rows and the list was cut off",
+                "True when the range had more than 500 matching rows and the list was cut off",
             },
             entries: {
               type: "array",
@@ -2252,23 +2251,39 @@ function createOpenApiSpec() {
       "/api/settings/cache/timeline": {
         get: {
           tags: ["Settings"],
-          summary: "Day-bucketed hit/miss counts for the focus-window-summary cache",
+          summary:
+            "Raw hit/miss timestamps for the focus-window-summary cache within an instant range. Day-bucketing (into the viewer's local calendar day) happens client-side.",
           operationId: "getFocusSummaryCacheTimeline",
           parameters: [
             {
-              name: "days",
+              name: "from",
               in: "query",
-              required: false,
-              schema: { type: "integer", minimum: 1, maximum: 90, default: 30 },
-              description: "Trailing days to include, clamped to [1, 90]",
+              required: true,
+              schema: { type: "string", format: "date-time" },
+              description: "Inclusive lower bound, ISO instant",
+            },
+            {
+              name: "to",
+              in: "query",
+              required: true,
+              schema: { type: "string", format: "date-time" },
+              description: "Exclusive upper bound, ISO instant",
             },
           ],
           responses: {
             200: {
-              description: "Zero-filled, oldest-first day timeline",
+              description: "Raw entries in the requested range, oldest first",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/FocusSummaryCacheTimelineResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Missing or malformed range",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/MessageErrorResponse" },
                 },
               },
             },
@@ -2278,15 +2293,23 @@ function createOpenApiSpec() {
       "/api/settings/cache/day": {
         get: {
           tags: ["Settings"],
-          summary: "Focus-summary-cache activity for a single UTC calendar day",
+          summary:
+            "Focus-summary-cache activity within an exact instant range (the caller's own local calendar day, not a UTC day)",
           operationId: "getFocusSummaryCacheDay",
           parameters: [
             {
-              name: "date",
+              name: "from",
               in: "query",
               required: true,
-              schema: { type: "string", format: "date" },
-              description: "UTC calendar day, YYYY-MM-DD",
+              schema: { type: "string", format: "date-time" },
+              description: "Inclusive lower bound, ISO instant",
+            },
+            {
+              name: "to",
+              in: "query",
+              required: true,
+              schema: { type: "string", format: "date-time" },
+              description: "Exclusive upper bound, ISO instant",
             },
             {
               name: "outcome",
@@ -2309,7 +2332,7 @@ function createOpenApiSpec() {
           ],
           responses: {
             200: {
-              description: "Day summary plus the (possibly filtered) entry list",
+              description: "Range summary plus the (possibly filtered) entry list",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/FocusSummaryCacheDayResponse" },
@@ -2317,7 +2340,7 @@ function createOpenApiSpec() {
               },
             },
             400: {
-              description: "Missing or malformed date",
+              description: "Missing or malformed range",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/MessageErrorResponse" },

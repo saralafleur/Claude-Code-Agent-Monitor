@@ -208,7 +208,7 @@
     "columnAccessed": "Truy cập gần nhất",
     "noActivityDay": "Không có hoạt động bộ nhớ đệm nào được ghi nhận trong ngày này.",
     "noMatchFilters": "Không có mục nào khớp với bộ lọc hiện tại.",
-    "utcNote": "Ngày được tính theo giờ UTC."
+    "utcNote": "Ngày được tính theo ngày lịch cục bộ trên thiết bị của bạn."
   },
   "danger": {
     "title": "Vùng nguy hiểm",

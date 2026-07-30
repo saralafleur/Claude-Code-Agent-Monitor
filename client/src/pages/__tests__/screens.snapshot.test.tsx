@@ -307,9 +307,8 @@ vi.mock("../../lib/api", async (importOriginal) => {
           purged_agents: 0,
           purged_focus_summary_log: 0,
         }),
-        cacheTimeline: r({ days: [] }),
+        cacheTimeline: r({ entries: [], truncated: false }),
         cacheDay: r({
-          date: "2026-06-10",
           hits: 0,
           misses: 0,
           total: 0,

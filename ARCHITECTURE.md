@@ -1029,7 +1029,7 @@ erDiagram
         INTEGER unassigned "Scope flag, 0 or 1"
         TEXT model "LLM model, or NULL"
         INTEGER bullet_count "Bullets in the resolved summary, or NULL"
-        TEXT access_day "UTC calendar day, for timeline bucketing"
+        TEXT access_day "UTC calendar day, reference only - queries use accessed_at range"
         TEXT accessed_at "ISO 8601 stamp of the resolution"
     }
 ```

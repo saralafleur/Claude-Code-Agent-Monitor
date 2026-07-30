@@ -1064,6 +1064,12 @@ db.prepare("INSERT OR IGNORE INTO dashboard_layout (id) VALUES (1)").run();
 // existing Data section's purge_days (see POST /api/settings/cleanup)
 // rather than an unbounded log; the focus_summaries cache itself is left
 // alone by that purge — a finished day's summary is meant to be kept.
+// `access_day` (a UTC calendar day, written for historical/debugging
+// purposes) is NOT what the timeline/drill-down routes query by — day
+// bucketing depends on the *viewer's* local timezone, which only the browser
+// knows, so `GET /api/settings/cache/timeline` and `GET /api/settings/cache/day`
+// filter by an exact `accessed_at` instant range the client computes from its
+// own local midnight boundaries (see CacheSection.tsx).
 db.exec(`
   CREATE TABLE IF NOT EXISTS focus_summary_access_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1080,6 +1086,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_focus_summary_access_log_day ON focus_summary_access_log(access_day);
   CREATE INDEX IF NOT EXISTS idx_focus_summary_access_log_key ON focus_summary_access_log(cache_key);
+  CREATE INDEX IF NOT EXISTS idx_focus_summary_access_log_accessed_at ON focus_summary_access_log(accessed_at);
 `);
 
 // Migrate webhook_targets for first-class providers. Earlier installs created

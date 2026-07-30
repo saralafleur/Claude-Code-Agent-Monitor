@@ -1226,10 +1226,30 @@ export interface FocusSummaryCacheStats {
   totalBullets: number;
 }
 
-/** One day of `GET /api/settings/cache/timeline` — a UTC calendar day's
- *  focus-summary-cache hit/miss counts, zero-filled when nothing happened. */
+/** One raw entry of `GET /api/settings/cache/timeline` — a single logged
+ *  cache resolution's timestamp and outcome, within the requested `[from, to)`
+ *  instant range. The server does no day-bucketing; {@link FocusSummaryTimelineDay}
+ *  (computed client-side, in the viewer's local calendar day) is built from
+ *  these by CacheSection.tsx. */
+export interface FocusSummaryTimelineEntry {
+  accessed_at: string;
+  outcome: "hit" | "miss";
+}
+
+/** `GET /api/settings/cache/timeline` response — raw entries in the
+ *  requested instant range, oldest first. `truncated` is true when the range
+ *  held more than the server's row cap. */
+export interface FocusSummaryTimelineResponse {
+  entries: FocusSummaryTimelineEntry[];
+  truncated: boolean;
+}
+
+/** One day of the Focus Summaries timeline chart — a calendar day's
+ *  focus-summary-cache hit/miss counts, zero-filled when nothing happened.
+ *  Computed client-side (CacheSection.tsx) from {@link FocusSummaryTimelineEntry}
+ *  rows, bucketed into the VIEWER'S local calendar day — not UTC. */
 export interface FocusSummaryTimelineDay {
-  /** `YYYY-MM-DD`, UTC. */
+  /** `YYYY-MM-DD`, in the viewer's local timezone. */
   date: string;
   hits: number;
   misses: number;
@@ -1253,9 +1273,11 @@ export interface FocusSummaryDayEntry {
 }
 
 /** `GET /api/settings/cache/day` response — the day's totals are for the
- *  whole day regardless of filters; `entries` reflects the requested filters. */
+ *  whole requested `[from, to)` range regardless of filters; `entries`
+ *  reflects the requested filters. "Day" is whatever local-day instant range
+ *  the caller asked for; the response doesn't echo a date label back since
+ *  the caller (CacheSection.tsx) already knows it. */
 export interface FocusSummaryDayResponse {
-  date: string;
   hits: number;
   misses: number;
   total: number;

@@ -219,7 +219,7 @@ erDiagram
         integer unassigned "Scope flag, 0 or 1"
         text model "LLM model, or NULL"
         integer bullet_count "Bullets in the resolved summary, or NULL"
-        text access_day "UTC calendar day, for timeline bucketing"
+        text access_day "UTC calendar day, reference only - queries use accessed_at range"
         text accessed_at "ISO8601 stamp of the resolution"
     }
 ```
@@ -788,7 +788,7 @@ CREATE TABLE focus_summaries (
 
 ### focus_summary_access_log
 
-Access-history audit trail for the `focus_summaries` cache above, one row per hit-or-miss resolution (`server/lib/focus-summary.js`'s `recordAccess`, called from `generateDirectSummary`/`generateHierarchicalSummary`/`generateWindowSummary`). `focus_summaries` itself only holds the *current* row per `cache_key`, with no history — this table is what backs the Settings → Focus Summaries section's day timeline (`GET /api/settings/cache/timeline`) and per-day drill-down (`GET /api/settings/cache/day`). `level` distinguishes a whole requested window (project/session/unassigned scope + from/to) from a per-day building block inside the hierarchical rollup path — both are independently-cacheable decisions worth logging. No FK, like `alert_events`/`webhook_deliveries` — an audit trail independent of the sessions/projects it describes. Retention follows the Data section's `purge_days` (`POST /api/settings/cleanup`); `POST /api/settings/clear-data` wipes it entirely. Neither purge touches `focus_summaries` itself — a finished cached summary is meant to be kept.
+Access-history audit trail for the `focus_summaries` cache above, one row per hit-or-miss resolution (`server/lib/focus-summary.js`'s `recordAccess`, called from `generateDirectSummary`/`generateHierarchicalSummary`/`generateWindowSummary`). `focus_summaries` itself only holds the *current* row per `cache_key`, with no history — this table is what backs the Settings → Focus Summaries section's day timeline (`GET /api/settings/cache/timeline`) and per-day drill-down (`GET /api/settings/cache/day`). Both routes filter by an exact `accessed_at` instant range (`?from=&to=`) that the client computes from its own local midnight boundaries and bucket client-side into the viewer's local calendar day — `access_day` is written for reference but is not what those routes query by, since day bucketing depends on the viewer's timezone, which only the browser knows. `level` distinguishes a whole requested window (project/session/unassigned scope + from/to) from a per-day building block inside the hierarchical rollup path — both are independently-cacheable decisions worth logging. No FK, like `alert_events`/`webhook_deliveries` — an audit trail independent of the sessions/projects it describes. Retention follows the Data section's `purge_days` (`POST /api/settings/cleanup`); `POST /api/settings/clear-data` wipes it entirely. Neither purge touches `focus_summaries` itself — a finished cached summary is meant to be kept.
 
 ```sql
 CREATE TABLE focus_summary_access_log (
@@ -819,7 +819,7 @@ CREATE TABLE focus_summary_access_log (
 | `unassigned` | INTEGER | NO | 1 when scoped to the "Unassigned" bucket, else 0 |
 | `model` | TEXT | YES | The model that produced (or previously produced, on a hit) the cached bullets |
 | `bullet_count` | INTEGER | YES | Bullets in the resolved summary, or NULL if generation failed before writing |
-| `access_day` | TEXT | NO | UTC calendar day of `accessed_at`, precomputed for the timeline's `GROUP BY` |
+| `access_day` | TEXT | NO | UTC calendar day of `accessed_at`, written for reference; the timeline/drill-down routes query `accessed_at` by an explicit `[from, to)` instant range instead, since day-bucketing depends on the viewer's local timezone |
 | `accessed_at` | TEXT | NO | ISO 8601 stamp of the resolution |
 
 **Indexes:**

@@ -11119,12 +11119,16 @@ exports[`screen snapshots > Settings 1`] = `
               </svg>
               Entries touched today
             </p>
-            <span
-              aria-busy="true"
-              aria-label="Loading"
-              class="inline-block bg-surface-3/70 animate-pulse rounded-md h-12 w-full"
-              role="status"
-            />
+            <p
+              class="text-2xl font-semibold text-gray-100 tabular-nums"
+            >
+              0
+            </p>
+            <p
+              class="text-[11px] text-gray-500"
+            >
+              ▲ 0 vs. yesterday (0)
+            </p>
           </div>
           <div
             class="card p-4 space-y-2"
@@ -11184,7 +11188,7 @@ exports[`screen snapshots > Settings 1`] = `
               <p
                 class="text-xs font-semibold text-gray-300"
               >
-                Last 0 days
+                Last 30 days
               </p>
               <p
                 class="text-[11px] text-gray-500 mt-0.5"
@@ -11238,8 +11242,469 @@ exports[`screen snapshots > Settings 1`] = `
           >
             <div
               class="flex items-end gap-1 pb-5"
-              style="height: 104px; min-width: 0;"
-            />
+              style="height: 104px; min-width: 420px;"
+            >
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+                <span
+                  class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[9px] whitespace-nowrap text-gray-600"
+                >
+                  Tue
+                </span>
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-transparent group-hover:border-border-light"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+              </div>
+              <div
+                class="relative flex-1 h-full flex flex-col justify-end items-stretch cursor-pointer group min-w-[8px]"
+              >
+                <div
+                  class="absolute -inset-x-0.5 rounded-md border transition-colors border-accent bg-accent/[0.06]"
+                  style="top: -3px; bottom: -18px;"
+                />
+                <div
+                  class="bg-emerald-400 rounded-t-[3px]"
+                  style="height: 1px;"
+                />
+                <div
+                  class="h-[2px] rounded-full bg-surface-4"
+                />
+                <span
+                  class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[9px] whitespace-nowrap text-accent-hover font-semibold"
+                >
+                  Today
+                </span>
+              </div>
+            </div>
           </div>
         </div>
         <div
@@ -11251,8 +11716,39 @@ exports[`screen snapshots > Settings 1`] = `
             <p
               class="text-sm font-semibold text-gray-100"
             >
-              —
+              Today
             </p>
+            <div
+              class="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap"
+            >
+              <span>
+                <b
+                  class="text-gray-300 font-semibold"
+                >
+                  0
+                </b>
+                 
+                outcome
+              </span>
+              <span>
+                <b
+                  class="text-gray-300 font-semibold"
+                >
+                  0
+                </b>
+                 
+                hits
+              </span>
+              <span>
+                <b
+                  class="text-gray-300 font-semibold"
+                >
+                  0
+                </b>
+                 
+                misses
+              </span>
+            </div>
           </div>
           <div
             class="flex items-center gap-2 flex-wrap mb-3"
@@ -11319,6 +11815,11 @@ exports[`screen snapshots > Settings 1`] = `
             <div
               class="flex-1"
             />
+            <span
+              class="text-[11px] text-gray-500"
+            >
+              0 of 0 shown
+            </span>
           </div>
           <div
             class="overflow-x-auto rounded-lg border border-border"
@@ -11377,7 +11878,7 @@ exports[`screen snapshots > Settings 1`] = `
           <p
             class="text-[11px] text-gray-600 mt-3"
           >
-            Days are UTC calendar days.
+            Days are your device's local calendar days.
           </p>
         </div>
       </div>
