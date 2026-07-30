@@ -521,6 +521,10 @@ const CONTEXT_DROP_RATIO = 0.4;
  *  ticks and gridlines - first/last anchor the span, the rest subdivide it. */
 const CONTEXT_TICK_FRACTIONS = [0, 1 / 3, 2 / 3, 1];
 
+/** Evenly spaced fractions of `maxTokens` for the vertical (token count)
+ *  axis ticks and gridlines - 0 at the baseline, 1 at the chart's top. */
+const CONTEXT_Y_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
+
 /**
  * Sawtooth line chart of the session's ACTIVE context size per turn (not the
  * lifetime cumulative total shown in the token-flow strip below). Renders
@@ -561,11 +565,15 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
     // positions rather than reuse point indices.
     const sameDay = new Date(first.ts).toDateString() === new Date(last.ts).toDateString();
     const ticks = CONTEXT_TICK_FRACTIONS.map((f) => ({ x: f * 100, ts: first.ts + f * span }));
-    return { coords, drops, linePath, areaPath, warnY, latest: lastCoord, ticks, sameDay };
+    const yTicks = CONTEXT_Y_TICK_FRACTIONS.map((f) => ({
+      y: 100 - f * 100,
+      tokens: f * maxTokens,
+    }));
+    return { coords, drops, linePath, areaPath, warnY, latest: lastCoord, ticks, yTicks, sameDay };
   }, [series]);
 
   if (!chart) return null;
-  const { coords, drops, linePath, areaPath, warnY, latest, ticks, sameDay } = chart;
+  const { coords, drops, linePath, areaPath, warnY, latest, ticks, yTicks, sameDay } = chart;
   const isHigh = latest.tokens >= CONTEXT_WARN_TOKENS;
   const hovered = hoverIndex !== null ? coords[hoverIndex] : null;
 
@@ -597,116 +605,159 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
           {isHigh ? " · consider /compact or /clear" : ""}
         </span>
       </div>
-      <div className="relative h-24">
-        <svg
-          ref={svgRef}
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          className="w-full h-full"
-          onMouseMove={handleMove}
-          onMouseLeave={() => setHoverIndex(null)}
-        >
-          {/* Time-axis gridlines - faint, purely a visual reference for the
-           *  tick labels below; not part of the data. */}
-          {ticks.map((t) => (
-            <line
-              key={t.x}
-              x1={t.x}
-              x2={t.x}
-              y1={0}
-              y2={100}
-              className="stroke-gray-500/10"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
-          <line
-            x1={0}
-            x2={100}
-            y1={warnY}
-            y2={warnY}
-            className="stroke-amber-500/40"
-            strokeWidth={1}
-            strokeDasharray="2,2"
-            vectorEffect="non-scaling-stroke"
-          />
-          <path d={areaPath} className="fill-indigo-500/10" stroke="none" />
-          <path
-            d={linePath}
-            fill="none"
-            className="stroke-indigo-500"
-            strokeWidth={1.5}
-            vectorEffect="non-scaling-stroke"
-          />
-          {hovered && (
-            <line
-              x1={hovered.x}
-              x2={hovered.x}
-              y1={0}
-              y2={100}
-              className="stroke-gray-500/40"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-        </svg>
-        <span className="absolute top-0.5 right-1 text-[9px] text-amber-400/70 font-mono pointer-events-none">
-          200K
-        </span>
-        {/* Drop markers and the hover dot are plain positioned HTML, not SVG
-         *  circles - the chart stretches non-uniformly (preserveAspectRatio
-         *  "none"), which would render SVG circles as ellipses. */}
-        {drops.map((d) => (
-          <span
-            key={d.ts}
-            className="absolute w-1.5 h-1.5 rounded-full bg-surface-1 border border-amber-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-            style={{ left: `${d.x}%`, top: `${d.y}%` }}
-            title="Context compacted/cleared here"
-          />
-        ))}
-        {hovered && (
-          <>
+      <div className="flex gap-1.5">
+        {/* Token-axis (vertical scale) labels - a plain HTML column, not SVG
+         *  text, so they stay a fixed size and don't get stretched by the
+         *  chart's non-uniform SVG scaling. Height matches the chart's h-24
+         *  so each label's `top` lines up with its gridline's `y`. */}
+        <div className="relative w-8 h-24 flex-shrink-0">
+          {yTicks.map((t) => (
             <span
-              className="absolute w-2 h-2 rounded-full bg-indigo-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-2 ring-indigo-400/30"
-              style={{ left: `${hovered.x}%`, top: `${hovered.y}%` }}
-            />
-            <div
-              className="absolute -top-1 rounded-lg border border-border-light bg-[#0a0a12] px-2.5 py-1.5 text-[11px] text-gray-300 shadow-2xl pointer-events-none whitespace-nowrap"
+              key={t.y}
+              className="absolute right-0 text-[9px] text-gray-500 font-mono whitespace-nowrap"
               style={{
-                left: `${hovered.x}%`,
-                transform: `translate(${
-                  hovered.x > 85 ? "-100%" : hovered.x < 15 ? "0%" : "-50%"
-                }, -100%)`,
+                top: `${t.y}%`,
+                transform:
+                  t.y === 0
+                    ? "translateY(-100%)"
+                    : t.y === 100
+                      ? "translateY(0%)"
+                      : "translateY(-50%)",
               }}
             >
-              <p className="font-semibold text-gray-100">{fmt(hovered.tokens)} tokens</p>
-              <p className="text-gray-500">{formatDateTime(new Date(hovered.ts).toISOString())}</p>
-            </div>
-          </>
-        )}
-      </div>
-      {/* Time axis - labels are plain HTML (not SVG text) so they don't get
-       *  horizontally stretched by the chart's non-uniform SVG scaling. */}
-      <div className="relative h-3.5 mt-1">
-        {ticks.map((t, i) => (
-          <span
-            key={t.x}
-            className="absolute text-[9px] text-gray-500 font-mono whitespace-nowrap"
-            style={{
-              left: `${t.x}%`,
-              transform:
-                i === 0
-                  ? "translateX(0%)"
-                  : i === ticks.length - 1
-                    ? "translateX(-100%)"
-                    : "translateX(-50%)",
-            }}
-          >
-            {sameDay
-              ? formatTime(new Date(t.ts).toISOString())
-              : formatDateTime(new Date(t.ts).toISOString())}
-          </span>
-        ))}
+              {fmt(t.tokens)}
+            </span>
+          ))}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="relative h-24">
+            <svg
+              ref={svgRef}
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="w-full h-full"
+              onMouseMove={handleMove}
+              onMouseLeave={() => setHoverIndex(null)}
+            >
+              {/* Time-axis gridlines - faint, purely a visual reference for the
+               *  tick labels below; not part of the data. */}
+              {ticks.map((t) => (
+                <line
+                  key={t.x}
+                  x1={t.x}
+                  x2={t.x}
+                  y1={0}
+                  y2={100}
+                  className="stroke-gray-500/10"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              {/* Token-axis gridlines - faint horizontal reference lines for the
+               *  vertical scale labels in the column to the left. */}
+              {yTicks.map((t) => (
+                <line
+                  key={t.y}
+                  x1={0}
+                  x2={100}
+                  y1={t.y}
+                  y2={t.y}
+                  className="stroke-gray-500/10"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              <line
+                x1={0}
+                x2={100}
+                y1={warnY}
+                y2={warnY}
+                className="stroke-amber-500/40"
+                strokeWidth={1}
+                strokeDasharray="2,2"
+                vectorEffect="non-scaling-stroke"
+              />
+              <path d={areaPath} className="fill-indigo-500/10" stroke="none" />
+              <path
+                d={linePath}
+                fill="none"
+                className="stroke-indigo-500"
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+              {hovered && (
+                <line
+                  x1={hovered.x}
+                  x2={hovered.x}
+                  y1={0}
+                  y2={100}
+                  className="stroke-gray-500/40"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+            </svg>
+            <span className="absolute top-0.5 right-1 text-[9px] text-amber-400/70 font-mono pointer-events-none">
+              200K
+            </span>
+            {/* Drop markers and the hover dot are plain positioned HTML, not SVG
+             *  circles - the chart stretches non-uniformly (preserveAspectRatio
+             *  "none"), which would render SVG circles as ellipses. */}
+            {drops.map((d) => (
+              <span
+                key={d.ts}
+                className="absolute w-1.5 h-1.5 rounded-full bg-surface-1 border border-amber-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                style={{ left: `${d.x}%`, top: `${d.y}%` }}
+                title="Context compacted/cleared here"
+              />
+            ))}
+            {hovered && (
+              <>
+                <span
+                  className="absolute w-2 h-2 rounded-full bg-indigo-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-2 ring-indigo-400/30"
+                  style={{ left: `${hovered.x}%`, top: `${hovered.y}%` }}
+                />
+                <div
+                  className="absolute -top-1 rounded-lg border border-border-light bg-[#0a0a12] px-2.5 py-1.5 text-[11px] text-gray-300 shadow-2xl pointer-events-none whitespace-nowrap"
+                  style={{
+                    left: `${hovered.x}%`,
+                    transform: `translate(${
+                      hovered.x > 85 ? "-100%" : hovered.x < 15 ? "0%" : "-50%"
+                    }, -100%)`,
+                  }}
+                >
+                  <p className="font-semibold text-gray-100">{fmt(hovered.tokens)} tokens</p>
+                  <p className="text-gray-500">
+                    {formatDateTime(new Date(hovered.ts).toISOString())}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          {/* Time axis - labels are plain HTML (not SVG text) so they don't get
+           *  horizontally stretched by the chart's non-uniform SVG scaling. */}
+          <div className="relative h-3.5 mt-1">
+            {ticks.map((t, i) => (
+              <span
+                key={t.x}
+                className="absolute text-[9px] text-gray-500 font-mono whitespace-nowrap"
+                style={{
+                  left: `${t.x}%`,
+                  transform:
+                    i === 0
+                      ? "translateX(0%)"
+                      : i === ticks.length - 1
+                        ? "translateX(-100%)"
+                        : "translateX(-50%)",
+                }}
+              >
+                {sameDay
+                  ? formatTime(new Date(t.ts).toISOString())
+                  : formatDateTime(new Date(t.ts).toISOString())}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
