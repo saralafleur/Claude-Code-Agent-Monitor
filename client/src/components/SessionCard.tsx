@@ -4,13 +4,15 @@
  * Mirrors AgentCard's information hierarchy (icon · title · meta line) but
  * surfaces session-relevant fields: model, agent count, cost, last activity.
  * Clicking the card navigates to the session detail page. While a session is
- * Waiting, hovering the card lazily fetches the last thing Claude actually
- * said and shows it in a floating popup (portaled to `document.body`,
- * positioned off the card's own bounding rect) rendered through the same
- * markdown/code-block renderer used in the Conversation tab — the badge
- * alone tells you the session is blocked on you, not what it's blocked ON,
- * which is what you need to decide whether to act now. The popup never
- * resizes the card itself or reflows its neighbors.
+ * Waiting, a thin 25px hover bar appears flush against the card's bottom
+ * edge; hovering THAT bar (not the card at large — a full-card hover proved
+ * too eager/intrusive) lazily fetches the last thing Claude actually said
+ * and shows it in a floating popup (portaled to `document.body`, positioned
+ * off the bar's own bounding rect) rendered through the same markdown/
+ * code-block renderer used in the Conversation tab — the badge alone tells
+ * you the session is blocked on you, not what it's blocked ON, which is
+ * what you need to decide whether to act now. The popup never resizes the
+ * card itself or reflows its neighbors.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -248,12 +250,14 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
         .join("\n")
     : undefined;
 
-  // Last-said-by-Claude preview, fetched on demand the first time a Waiting
-  // card is hovered - not fetched up front for every card (that's one
-  // transcript read per session; only pay for it when actually looked at).
-  // Rendered as a popup anchored off `cardRef`'s rect rather than expanding
-  // the card itself - it never resizes the card or reflows its neighbors.
+  // Last-said-by-Claude preview, fetched on demand the first time the
+  // Waiting-only hover bar (below) is hovered - not fetched up front for
+  // every card (that's one transcript read per session; only pay for it
+  // when actually looked at). Rendered as a popup anchored off the bar's
+  // rect rather than expanding the card itself - it never resizes the card
+  // or reflows its neighbors.
   const cardRef = useRef<HTMLDivElement>(null);
+  const previewBarRef = useRef<HTMLDivElement>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
@@ -323,11 +327,15 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
       });
   }
 
-  function handleMouseEnter() {
+  // Only the bottom hover bar (rendered when isWaiting) opens the preview
+  // popup now - the card at large no longer does, since that read as too
+  // intrusive for a card the user was merely scanning past.
+  function handlePreviewBarMouseEnter(e: React.MouseEvent) {
+    e.stopPropagation();
     clearCloseTimer();
-    if (cardRef.current) setAnchorRect(cardRef.current.getBoundingClientRect());
+    if (previewBarRef.current) setAnchorRect(previewBarRef.current.getBoundingClientRect());
     setShowPreview(true);
-    if (isWaiting) fetchPreview();
+    fetchPreview();
   }
 
   function scheduleClose() {
@@ -377,8 +385,6 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
     <div
       ref={cardRef}
       onClick={handleClick}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={scheduleClose}
       className={`card-hover p-4 cursor-pointer animate-fade-in overflow-hidden ${
         isWaiting
           ? isPrimaryReason
@@ -402,6 +408,9 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
           </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {/* compact: cards are narrow — inline reason chip would squeeze the
+              title, so the reason stays hover-tooltip-only here. */}
+          <SessionStatusBadge status={status} reason={sessionAwaitingReason(session)} compact />
           {canFocusTerminal && (
             <button
               type="button"
@@ -413,12 +422,12 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                   : t("session.focusTerminal")
               }
               aria-label={t("session.focusTerminal")}
-              className={`p-1 rounded-md transition-colors ${
+              className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 transition-colors ${
                 terminalState === "success"
-                  ? "text-emerald-500"
+                  ? "bg-emerald-500/15 text-emerald-500"
                   : terminalState === "error"
-                    ? "text-red-500"
-                    : "text-gray-500 hover:text-accent hover:bg-surface-3"
+                    ? "bg-red-500/15 text-red-500"
+                    : "bg-accent/15 text-accent hover:bg-accent/25"
               }`}
             >
               {terminalState === "pending" ? (
@@ -432,9 +441,6 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
               )}
             </button>
           )}
-          {/* compact: cards are narrow — inline reason chip would squeeze the
-              title, so the reason stays hover-tooltip-only here. */}
-          <SessionStatusBadge status={status} reason={sessionAwaitingReason(session)} compact />
         </div>
       </div>
 
@@ -526,6 +532,23 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
           {timeAgo(session.ended_at || lastActivity)}
         </span>
       </div>
+
+      {/* Waiting-only hover bar - flush against the card's bottom edge via
+          negative margins that cancel the card's own p-4 padding, clipped to
+          the card's rounded corners by its overflow-hidden. Deliberately a
+          narrow, separate hover target (not the whole card) so scanning past
+          a Waiting card doesn't pop the last-message preview open unasked. */}
+      {isWaiting && (
+        <div
+          ref={previewBarRef}
+          onMouseEnter={handlePreviewBarMouseEnter}
+          onMouseLeave={scheduleClose}
+          className="flex items-center justify-center gap-1 h-[25px] -mx-4 -mb-4 mt-3 border-t border-border/50 text-[10px] text-gray-500 hover:text-gray-300 hover:bg-surface-3/60 transition-colors cursor-help"
+        >
+          <MessageSquare className="w-3 h-3" />
+          {t("session.lastMessage")}
+        </div>
+      )}
 
       {isWaiting &&
         showPreview &&

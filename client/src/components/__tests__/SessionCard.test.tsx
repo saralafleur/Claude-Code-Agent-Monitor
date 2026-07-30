@@ -1,9 +1,10 @@
 /**
  * @file SessionCard.test.tsx
  * @description Tests for SessionCard's hover-triggered "last message" preview:
- * only fetched (and only shown) for sessions in the Waiting state, extracts
- * the last assistant text block from the transcript tail, and covers the
- * loading/empty fallbacks plus the fetch-once-per-card behavior.
+ * only rendered as a 25px bottom bar (and only fetched/shown on hovering
+ * THAT bar, not the card at large) for sessions in the Waiting state,
+ * extracts the last assistant text block from the transcript tail, and
+ * covers the loading/empty fallbacks plus the fetch-once-per-card behavior.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -50,6 +51,15 @@ const waitingSession = makeSession({
   awaiting_reason: "stop",
 } as Partial<Session>);
 
+// The hover bar that opens the preview only renders (and is only findable)
+// for a Waiting session, and its own visible label is this same string -
+// unambiguous before the popup opens since the popup (which repeats the
+// label in its header) doesn't render until the bar has actually been
+// hovered.
+function previewBar(): HTMLElement {
+  return screen.getByText("Last message");
+}
+
 function assistantMessage(text: string): TranscriptMessage {
   return {
     type: "assistant",
@@ -73,6 +83,23 @@ describe("SessionCard - last message preview", () => {
     expect(screen.queryByText("Last message")).not.toBeInTheDocument();
   });
 
+  it("renders the hover bar for a waiting session but does not open the preview from hovering the card body", async () => {
+    renderCard(waitingSession);
+    const bar = previewBar();
+    expect(bar).toBeInTheDocument();
+
+    // Hover the card itself (not the bar) - this used to be enough to open
+    // the popup and was the whole reason it felt intrusive; now only the
+    // dedicated bar should react.
+    const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
+    fireEvent.mouseEnter(card);
+
+    expect(transcriptMock).not.toHaveBeenCalled();
+    // Only the bar's own trigger label is present - the popup (which would
+    // repeat "Last message" in its header) never opened.
+    expect(screen.getAllByText("Last message")).toHaveLength(1);
+  });
+
   it("fetches and shows the last assistant text on hover for a waiting session", async () => {
     transcriptMock.mockResolvedValue({
       messages: [assistantMessage("All done, want me to open a PR?")],
@@ -82,9 +109,8 @@ describe("SessionCard - last message preview", () => {
       first_line: 1,
     });
     renderCard(waitingSession);
-    const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
 
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseEnter(previewBar());
 
     expect(transcriptMock).toHaveBeenCalledWith("sess-1", { limit: 10 });
     await waitFor(() =>
@@ -101,14 +127,14 @@ describe("SessionCard - last message preview", () => {
       first_line: 1,
     });
     renderCard(waitingSession);
-    const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
+    const bar = previewBar();
 
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseEnter(bar);
     await screen.findByText("Ready when you are.");
 
     // Closing is debounced (~150ms) so the pointer has time to cross the gap
     // into the portaled popup itself without it vanishing mid-transit.
-    fireEvent.mouseLeave(card);
+    fireEvent.mouseLeave(bar);
     await waitFor(() => expect(screen.queryByText("Ready when you are.")).not.toBeInTheDocument());
   });
 
@@ -121,12 +147,12 @@ describe("SessionCard - last message preview", () => {
       first_line: 1,
     });
     renderCard(waitingSession);
-    const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
+    const bar = previewBar();
 
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseEnter(bar);
     await screen.findByText("Only fetch me once.");
-    fireEvent.mouseLeave(card);
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseLeave(bar);
+    fireEvent.mouseEnter(bar);
     await screen.findByText("Only fetch me once.");
 
     expect(transcriptMock).toHaveBeenCalledTimes(1);
@@ -143,7 +169,7 @@ describe("SessionCard - last message preview", () => {
     renderCard(waitingSession);
     const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
 
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseEnter(previewBar());
     const message = await screen.findByText("Portaled, not inline.");
 
     expect(card.contains(message)).toBe(false);
@@ -169,9 +195,8 @@ describe("SessionCard - last message preview", () => {
         first_line: 1,
       });
       renderCard(waitingSession);
-      const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
 
-      fireEvent.mouseEnter(card);
+      fireEvent.mouseEnter(previewBar());
       const message = await screen.findByText("Fits on a phone screen too.");
       const popup = message.closest("div.rounded-lg") as HTMLElement;
 
@@ -214,9 +239,8 @@ describe("SessionCard - last message preview", () => {
         first_line: 1,
       });
       renderCard(waitingSession);
-      const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
 
-      fireEvent.mouseEnter(card);
+      fireEvent.mouseEnter(previewBar());
       const message = await screen.findByText(longText);
       const popup = message.closest("div.rounded-lg") as HTMLElement;
 
@@ -237,13 +261,13 @@ describe("SessionCard - last message preview", () => {
       first_line: 1,
     });
     renderCard(waitingSession);
-    const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
+    const bar = previewBar();
 
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseEnter(bar);
     const message = await screen.findByText("Still here.");
     const popup = message.closest("div.rounded-lg") as HTMLElement;
 
-    fireEvent.mouseLeave(card);
+    fireEvent.mouseLeave(bar);
     fireEvent.mouseEnter(popup);
 
     // Give the (cleared) close timer a chance to have fired if it hadn't
@@ -271,9 +295,8 @@ describe("SessionCard - last message preview", () => {
       first_line: 1,
     });
     renderCard(waitingSession);
-    const card = screen.getByText("Test session").closest("div.card-hover") as HTMLElement;
 
-    fireEvent.mouseEnter(card);
+    fireEvent.mouseEnter(previewBar());
     await screen.findByText("No recent message found");
   });
 

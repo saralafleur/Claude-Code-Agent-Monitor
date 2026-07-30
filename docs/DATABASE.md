@@ -594,8 +594,7 @@ CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    priority INTEGER NOT NULL DEFAULT 0  -- guarded ALTER TABLE migration, additive
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 CREATE TABLE project_paths (
@@ -614,8 +613,7 @@ CREATE TABLE project_paths (
 | `id` | TEXT | NO | Primary key (UUID) |
 | `name` | TEXT | NO | User-assigned display name |
 | `created_at` | TEXT | NO | ISO 8601 creation timestamp |
-| `updated_at` | TEXT | NO | ISO 8601 timestamp of the last rename or priority reorder |
-| `priority` | INTEGER | NO | Dense rank set via the WIP queue page's right-hand sidecar (`PUT /api/projects/reorder`); lower value = higher priority, `0` = highest/top. Defaults to `0` for every project until explicitly reordered. Breaks ties in the WIP queue's sort order (after "awaiting input", before recency) |
+| `updated_at` | TEXT | NO | ISO 8601 timestamp of the last rename |
 
 **`project_paths` columns:**
 
@@ -626,7 +624,7 @@ CREATE TABLE project_paths (
 | `cwd` | TEXT | NO | Working directory this project claims. `UNIQUE` — a folder can only belong to one project at a time |
 | `created_at` | TEXT | NO | ISO 8601 timestamp the mapping was added |
 
-Managed through the `/api/projects/*` routes. **Broadcast carve-out:** `priority` changes (via `PUT /api/projects/reorder`) broadcast `project_updated` over the WebSocket — a deliberate, narrow exception for the WIP queue page's cross-tab live priority sync; every other project mutation (create, rename, folder add/remove, delete) remains plain CRUD, not broadcast, re-fetched by the client after each mutation like `webhook_targets`. See [docs/API.md → Projects](./API.md#projects).
+Managed through the `/api/projects/*` routes. Every project mutation (create, rename, folder add/remove, delete) is plain CRUD, not broadcast over the WebSocket — re-fetched by the client after each mutation like `webhook_targets`. See [docs/API.md → Projects](./API.md#projects).
 
 ---
 
@@ -811,7 +809,7 @@ CREATE TABLE focus_summary_access_log (
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | INTEGER | NO | Primary key, autoincrement |
-| `cache_key` | TEXT | NO | Same identity space as `focus_summaries.cache_key` (a window request or a `dayCacheKey` building block) |
+| `cache_key` | TEXT | NO | Same identity space as `focus_summaries.cache_key` (a window request or a `dayCacheKey` building block). JSON: `{...scope, from, to}` for `level='window'`, `{day, scope}` for `level='day'`. This is the *covered* time range, distinct from `accessed_at` (when the row was last resolved) — `GET /api/settings/cache/day` decodes it into `window_from`/`window_to` per entry so the UI can show both. |
 | `level` | TEXT | NO | `window` (a full requested window) or `day` (a hierarchical per-day building block) |
 | `outcome` | TEXT | NO | `hit` (served from `focus_summaries`) or `miss` (regenerated and written) |
 | `project_id` | TEXT | YES | Scope identity, mirrors the request; NULL when unscoped or session/unassigned-scoped |

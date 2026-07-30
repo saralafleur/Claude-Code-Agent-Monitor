@@ -205,6 +205,7 @@
     "columnModel": "Model",
     "columnOutcome": "Outcome",
     "columnBullets": "Bullets",
+    "columnCovers": "Covers",
     "columnAccessed": "Last accessed",
     "noActivityDay": "No cache activity recorded for this day.",
     "noMatchFilters": "No entries match the current filters.",

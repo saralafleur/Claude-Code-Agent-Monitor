@@ -5,10 +5,8 @@
  * Projects view's per-project `cwds` derivation at ~707-712) — this is the
  * "extract, don't copy" half of the `DERIVED-DUAL-VIEW` durable cure
  * (technical-plan.md §5): `KanbanBoard.tsx` is refactored to call these two
- * functions instead of keeping its own inline logic, and the WIP queue page
- * (`wipQueue.ts`, `WipSessionCard.tsx`) is the fourth independent consumer of
- * `Session`/cwd→project derivation to route through this one shared surface
- * rather than re-deriving it. No path normalization anywhere here — a
+ * functions instead of keeping its own inline logic. No path normalization
+ * anywhere here — a
  * trailing-slash cwd is a different string from its non-slashed counterpart,
  * matching the exact-string-equality behavior of the inline join this
  * replaces (see `projectLookup.test.ts`'s frozen-reference regression case).

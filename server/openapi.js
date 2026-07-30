@@ -1230,6 +1230,8 @@ function createOpenApiSpec() {
                   "outcome",
                   "bullet_count",
                   "accessed_at",
+                  "window_from",
+                  "window_to",
                 ],
                 properties: {
                   cache_key: { type: "string" },
@@ -1241,7 +1243,19 @@ function createOpenApiSpec() {
                   model: { type: "string", nullable: true },
                   outcome: { type: "string", enum: ["hit", "miss"] },
                   bullet_count: { type: "integer", nullable: true },
-                  accessed_at: { type: "string", format: "date-time" },
+                  accessed_at: {
+                    type: "string",
+                    format: "date-time",
+                    description: "When this resolution last happened, not the range it covers",
+                  },
+                  window_from: {
+                    type: "string",
+                    format: "date-time",
+                    nullable: true,
+                    description:
+                      "Start of the [window_from, window_to) instant range this cached summary covers, decoded from cache_key. Null only if cache_key didn't parse.",
+                  },
+                  window_to: { type: "string", format: "date-time", nullable: true },
                 },
               },
             },

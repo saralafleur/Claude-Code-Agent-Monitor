@@ -122,9 +122,6 @@ import projects_vi from "./locales/vi/projects.json";
 import plan_en from "./locales/en/plan.json";
 import plan_zh from "./locales/zh/plan.json";
 import plan_vi from "./locales/vi/plan.json";
-import wip_en from "./locales/en/wip.json";
-import wip_zh from "./locales/zh/wip.json";
-import wip_vi from "./locales/vi/wip.json";
 
 import common_ko from "./locales/ko/common.json";
 import nav_ko from "./locales/ko/nav.json";
@@ -143,7 +140,6 @@ import alerts_ko from "./locales/ko/alerts.json";
 import splash_ko from "./locales/ko/splash.json";
 import projects_ko from "./locales/ko/projects.json";
 import plan_ko from "./locales/ko/plan.json";
-import wip_ko from "./locales/ko/wip.json";
 
 i18n
   .use(LanguageDetector)
@@ -168,7 +164,6 @@ i18n
         splash: splash_en,
         projects: projects_en,
         plan: plan_en,
-        wip: wip_en,
       },
       zh: {
         common: common_zh,
@@ -188,7 +183,6 @@ i18n
         splash: splash_zh,
         projects: projects_zh,
         plan: plan_zh,
-        wip: wip_zh,
       },
       vi: {
         common: common_vi,
@@ -208,7 +202,6 @@ i18n
         splash: splash_vi,
         projects: projects_vi,
         plan: plan_vi,
-        wip: wip_vi,
       },
       ko: {
         common: common_ko,
@@ -228,7 +221,6 @@ i18n
         splash: splash_ko,
         projects: projects_ko,
         plan: plan_ko,
-        wip: wip_ko,
       },
     },
     supportedLngs: ["en", "zh", "vi", "ko"],
@@ -252,7 +244,6 @@ i18n
       "splash",
       "projects",
       "plan",
-      "wip",
     ],
     defaultNS: "common",
     interpolation: { escapeValue: false },

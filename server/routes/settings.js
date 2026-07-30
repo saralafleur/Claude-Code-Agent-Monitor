@@ -10,6 +10,7 @@ const os = require("os");
 const { db, stmts, DB_PATH, DEFAULT_PRICING, applyIntroPricing } = require("../db");
 const { getConnectionCount } = require("../websocket");
 const { transcriptCache } = require("./hooks");
+const { nextLocalMidnight } = require("../lib/focus-summary");
 
 const router = Router();
 
@@ -237,6 +238,31 @@ function scopeLabel(row) {
   return "All projects";
 }
 
+// Recovers the [from, to) instant range a cache row's summary actually
+// COVERS (as opposed to `accessed_at`, when it was last hit/missed) by
+// parsing the row's `cache_key`. A 'window' row's key is
+// `{...scope, from, to}` (see routes/focus-report.js); a 'day' row's key is
+// `{day, scope}` (see dayCacheKey in lib/focus-summary.js) — its end is the
+// next local midnight after `day`, computed the same DST-safe way the
+// hierarchical rollup itself chunked it. Returns null for anything that
+// doesn't parse (shouldn't happen given how these keys are always built,
+// but a malformed/legacy key must not break the whole row list).
+function parseCoverage(cacheKeyRaw, level) {
+  let parsed;
+  try {
+    parsed = JSON.parse(cacheKeyRaw);
+  } catch {
+    return null;
+  }
+  if (level === "day" && typeof parsed?.day === "number") {
+    return { from: parsed.day, to: nextLocalMidnight(parsed.day) };
+  }
+  if (typeof parsed?.from === "number" && typeof parsed?.to === "number") {
+    return { from: parsed.from, to: parsed.to };
+  }
+  return null;
+}
+
 // GET /api/settings/cache/day?from=<ISO>&to=<ISO>&outcome=hit|miss&model=Name&level=window|day —
 // summary + entry list for one calendar day of focus-summary-cache activity,
 // where "one day" is whatever exact [from, to) instant range the caller asks
@@ -313,15 +339,20 @@ router.get("/cache/day", (req, res) => {
     total: (summary.hits || 0) + (summary.misses || 0),
     models,
     truncated,
-    entries: rows.map((r) => ({
-      cache_key: r.cache_key,
-      level: r.level,
-      scope_label: scopeLabel(r),
-      model: r.model,
-      outcome: r.outcome,
-      bullet_count: r.bullet_count,
-      accessed_at: r.accessed_at,
-    })),
+    entries: rows.map((r) => {
+      const coverage = parseCoverage(r.cache_key, r.level);
+      return {
+        cache_key: r.cache_key,
+        level: r.level,
+        scope_label: scopeLabel(r),
+        model: r.model,
+        outcome: r.outcome,
+        bullet_count: r.bullet_count,
+        accessed_at: r.accessed_at,
+        window_from: coverage ? new Date(coverage.from).toISOString() : null,
+        window_to: coverage ? new Date(coverage.to).toISOString() : null,
+      };
+    }),
   });
 });
 

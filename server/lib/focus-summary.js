@@ -561,4 +561,5 @@ module.exports = {
   summaryModel,
   bulletBudget,
   localDayChunks,
+  nextLocalMidnight,
 };

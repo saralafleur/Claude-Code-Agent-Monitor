@@ -24,7 +24,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Database, Gauge, Layers, ListTree } from "lucide-react";
 import { api } from "../lib/api";
-import { fmt, formatModelName, formatTime, getCurrentLocale } from "../lib/format";
+import {
+  fmt,
+  formatModelName,
+  formatTime,
+  formatTimeRange,
+  formatDurationLong,
+  getCurrentLocale,
+} from "../lib/format";
 import { Skeleton } from "./Skeleton";
 import type {
   FocusSummaryCacheStats,
@@ -532,6 +539,9 @@ export function CacheSection({ stats }: Props) {
                   {t("cache.columnBullets")}
                 </th>
                 <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  {t("cache.columnCovers")}
+                </th>
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                   {t("cache.columnAccessed")}
                 </th>
               </tr>
@@ -539,19 +549,19 @@ export function CacheSection({ stats }: Props) {
             <tbody>
               {dayLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6">
+                  <td colSpan={7} className="px-3 py-6">
                     <Skeleton className="h-4 w-full" />
                   </td>
                 </tr>
               ) : !day || day.total === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-7 text-center text-xs text-gray-600">
+                  <td colSpan={7} className="px-3 py-7 text-center text-xs text-gray-600">
                     {t("cache.noActivityDay")}
                   </td>
                 </tr>
               ) : day.entries.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-7 text-center text-xs text-gray-600">
+                  <td colSpan={7} className="px-3 py-7 text-center text-xs text-gray-600">
                     {t("cache.noMatchFilters")}
                   </td>
                 </tr>
@@ -585,6 +595,19 @@ export function CacheSection({ stats }: Props) {
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-400 text-right tabular-nums">
                       {entry.bullet_count ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-400 tabular-nums whitespace-nowrap">
+                      {entry.window_from && entry.window_to ? (
+                        <>
+                          {formatTimeRange(entry.window_from, entry.window_to)}
+                          <span className="text-gray-600">
+                            {" — "}
+                            {formatDurationLong(entry.window_from, entry.window_to)}
+                          </span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-400 tabular-nums">
                       {formatTime(entry.accessed_at)}

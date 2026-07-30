@@ -668,12 +668,8 @@ export function KanbanBoard() {
   }, [visibleSessions]);
 
   // The shared cwd->project join (client/src/lib/projectLookup.ts) - single
-  // canonical source for "which project does this session belong to", reused
-  // as-is by the WIP queue page (see wipQueue.ts/WipSessionCard.tsx) so the
-  // two pages can never silently disagree on project resolution
-  // (DERIVED-DUAL-VIEW guardrail, technical-plan.md §5). Each project
-  // column's items are grouped through this index below, rather than a
-  // second, WIP-only join.
+  // canonical source for "which project does this session belong to". Each
+  // project column's items are grouped through this index below.
   const cwdProjectIndex = useMemo(() => buildCwdProjectIndex(projectsList), [projectsList]);
   const sessionsByProjectId = useMemo(() => {
     const map = new Map<string, Session[]>();

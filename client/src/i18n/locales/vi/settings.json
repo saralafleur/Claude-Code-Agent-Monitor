@@ -205,6 +205,7 @@
     "columnModel": "Model",
     "columnOutcome": "Kết quả",
     "columnBullets": "Số gạch đầu dòng",
+    "columnCovers": "Khoảng thời gian",
     "columnAccessed": "Truy cập gần nhất",
     "noActivityDay": "Không có hoạt động bộ nhớ đệm nào được ghi nhận trong ngày này.",
     "noMatchFilters": "Không có mục nào khớp với bộ lọc hiện tại.",

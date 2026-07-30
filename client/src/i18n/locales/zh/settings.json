@@ -205,6 +205,7 @@
     "columnModel": "模型",
     "columnOutcome": "结果",
     "columnBullets": "要点数",
+    "columnCovers": "覆盖时段",
     "columnAccessed": "最近访问",
     "noActivityDay": "该日没有记录到缓存活动。",
     "noMatchFilters": "没有条目匹配当前筛选条件。",

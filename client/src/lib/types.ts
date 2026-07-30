@@ -1269,7 +1269,13 @@ export interface FocusSummaryDayEntry {
   outcome: "hit" | "miss";
   /** Null for a hit whose bullets weren't re-read, or a miss where generation failed before writing. */
   bullet_count: number | null;
+  /** When this resolution last happened — NOT the range the summary covers; see `window_from`/`window_to` for that. */
   accessed_at: string;
+  /** The `[window_from, window_to)` instant range this row's cached summary actually
+   *  covers, decoded server-side from `cache_key`. Null only if `cache_key` didn't
+   *  parse into a recognizable window/day shape (shouldn't happen in practice). */
+  window_from: string | null;
+  window_to: string | null;
 }
 
 /** `GET /api/settings/cache/day` response — the day's totals are for the
@@ -1353,20 +1359,6 @@ export interface RemoteSourceStatusPayload {
 export interface SessionDeletedPayload {
   /** Id of the session that was deleted. */
   id: string;
-}
-
-// ───── Project priority (WIP queue page) ─────
-
-/** Payload for `project_updated` WebSocket messages: a bulk priority reorder
- *  committed via `PUT /api/projects/reorder`. Deliberately scoped to the
- *  `priority` field only - not a general "project mutations are live" change;
- *  every other project mutation (create/rename/path add-remove/delete) stays
- *  plain CRUD, not broadcast (see docs/DATABASE.md). */
-export interface ProjectPriorityUpdatedPayload {
-  /** Every project id/priority pair touched by the reorder that triggered
-   *  this broadcast (an id omitted from the underlying request keeps its
-   *  prior priority and is not included here). */
-  projects: Array<{ id: string; priority: number }>;
 }
 
 // ───── Self-update status ─────
@@ -1644,15 +1636,6 @@ export interface Project {
   created_at: string;
   /** ISO timestamp the project was last renamed. */
   updated_at: string;
-  /** Dense rank set via the WIP sidecar; lower = higher priority (0 =
-   *  highest). Defaults to 0 until explicitly reordered. Optional (rather
-   *  than required) so every pre-existing hand-typed `Project` fixture in
-   *  this codebase's test suites stays valid unedited - the real API always
-   *  returns a real number (server-side DEFAULT 0), so this is only ever
-   *  absent on a hand-built fixture; every WIP-side consumer reads it via
-   *  `project.priority ?? 0`, the same fallback already required for an
-   *  unmapped cwd. */
-  priority?: number;
 }
 
 /** Sessions whose cwd isn't mapped to any {@link Project} yet, from GET
@@ -2238,7 +2221,7 @@ export interface WSMessage {
    *  cc_config_changed → CcConfigChangedPayload; alert_triggered/alert_updated
    *  → AlertEvent; workflow_upserted → WorkflowRun; plan_updated →
    *  PlanUpdatedPayload; session_focus → SessionFocus; monitors_updated →
-   *  MonitorLayoutPayload; project_updated → ProjectPriorityUpdatedPayload. */
+   *  MonitorLayoutPayload. */
   type:
     | "session_created"
     | "session_updated"
@@ -2258,8 +2241,7 @@ export interface WSMessage {
     | "remote_source.status"
     | "plan_updated"
     | "session_focus"
-    | "monitors_updated"
-    | "project_updated";
+    | "monitors_updated";
   /** The message body, whose concrete shape is selected by `type` above. */
   data:
     | Session
@@ -2277,8 +2259,7 @@ export interface WSMessage {
     | RemoteSourceStatusPayload
     | PlanUpdatedPayload
     | SessionFocus
-    | MonitorLayoutPayload
-    | ProjectPriorityUpdatedPayload;
+    | MonitorLayoutPayload;
   /** ISO timestamp the server broadcast this message (not necessarily the
    *  same instant the underlying event occurred). */
   timestamp: string;
