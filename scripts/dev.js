@@ -125,7 +125,17 @@ async function pickPort() {
     {
       stdio: "inherit",
       shell: isWin,
-      env: { ...process.env, DASHBOARD_PORT: String(port) },
+      // server/index.js defaults NODE_ENV to "production" when unset, which
+      // makes it serve the prebuilt client/dist bundle instead of proxying
+      // to the Vite dev server -- silently masking any source change until
+      // the next `web-build`. Force development mode here (cross-platform,
+      // unlike a shell-syntax env prefix in package.json) unless the caller
+      // already set NODE_ENV explicitly.
+      env: {
+        ...process.env,
+        DASHBOARD_PORT: String(port),
+        NODE_ENV: process.env.NODE_ENV || "development",
+      },
     }
   );
 

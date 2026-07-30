@@ -38,9 +38,10 @@ zsh <skill-base-dir>/scripts/web-check.sh
 ```
 
 Reports: dependencies installed, whether `client/dist` (the production
-bundle) exists, and whether the dev server is currently running (PID +
-port). Read-only, exits 0 always. If invoked in status-only mode (bare
-`/devops`), stop after showing the table.
+bundle) exists, and whether the dev server is currently running (PID, the
+Vite frontend port, and the Express API port). Read-only, exits 0 always.
+If invoked in status-only mode (bare `/devops`), stop after showing the
+table.
 
 If `root-deps` / `client-deps` are missing, point Sara at `/devops
 web-setup` first.
@@ -64,16 +65,27 @@ npm run build
 
 ## up (alias: `up`)
 
-**Plan:** state that this starts the Express server + Vite (HMR) in the
-background, auto-picking a free port starting at 4820 if something else
-(commonly the desktop app) already holds it. Non-destructive, nothing to
-confirm — starting a local dev server has no side effect beyond binding a
-port.
+**Plan:** state that this starts two processes — Express (API + WebSocket,
+auto-picking a free port starting at 4820 if something else, commonly the
+desktop app, already holds it) and Vite (the actual HMR frontend, its own
+free port starting at 5173) — in the background. Non-destructive, nothing
+to confirm — starting a local dev server has no side effect beyond binding
+two ports.
+
+**The frontend URL is Vite's port (5173 by default), not 4820.** In
+development mode `server/index.js` registers no static/catch-all frontend
+routes at all — see `ARCHITECTURE.md`'s Development diagram and the
+Deployment Modes table in `README.md` (`Client URL: http://localhost:5173`
+for dev, `:4820` only for prod). Port 4820 in dev mode serves `/api/*` and
+`/ws` only; Vite's dev server is what actually serves the page and proxies
+`/api` + `/ws` back to 4820. Opening `http://localhost:4820/` directly in
+dev mode is expected to 404 ("Cannot GET /") — that is not a bug, don't
+try to "fix" it by pointing the user there.
 
 If the audit already shows `web-running`, report that it's already up
-(with its PID and the full URL, e.g. `http://localhost:4820`, straight
-from the audit's `web-running` row, labeled **(hot-reload)**) and stop —
-idempotent, no second instance started.
+(with its PID and the full frontend URL, e.g. `http://localhost:5173`,
+labeled **(hot-reload)**) and stop — idempotent, no second instance
+started.
 
 **Execute:**
 ```bash
@@ -88,24 +100,32 @@ Invoking `node scripts/dev.js` directly (rather than `npm run dev`) avoids
 an extra process layer between the tracked PID and the process that
 actually has the `SIGTERM`/`SIGINT` forwarding logic — `web-down` signals
 exactly the process that knows how to shut down its own children cleanly.
+`scripts/dev.js` forces `NODE_ENV=development` on the children it spawns
+(unless the caller already set it) — without that, `server/index.js`
+silently defaults to `NODE_ENV=production` and serves the stale prebuilt
+`client/dist` bundle instead of proxying to Vite, which masks any source
+change until the next `web-build`.
 
-**Verify:** re-run the shared audit — `web-running` shows a PID. Then prove
-it's actually serving, the real check:
+**Verify:** re-run the shared audit — `web-running` shows a PID and both
+the Express and Vite ports. Then prove each is actually serving:
 
 ```bash
 sleep 2
 PORT="$(grep -oE 'listen on :[0-9]+|using [0-9]+ instead' "$HOME/.claude/.ccam-web-dev.log" | tail -1 | grep -oE '[0-9]+')"
+VITE_PORT="$(grep -oE 'Local:\s+http://localhost:[0-9]+' "$HOME/.claude/.ccam-web-dev.log" | tail -1 | grep -oE '[0-9]+')"
 curl -sf "http://localhost:${PORT:-4820}/api/health"
+curl -sf "http://localhost:${VITE_PORT:-5173}/" > /dev/null
 ```
 
-Report the full frontend URL plainly in the reply, e.g.
-`http://localhost:${PORT:-4820}` — don't just say "it's up," give the
-clickable address, and label it **(hot-reload)** so it's never confused
-with the Docker production build's URL (`docker-up` reports its own URL
-labeled **(built-docker)** — see `docker-lifecycle.md`). The port may not
-be 4820 if something else (e.g. the desktop app) already holds it;
-`scripts/dev.js` logs a warning about shared-database double-counting in
-that case, surface it if present.
+Report the full **frontend** URL plainly in the reply — `http://localhost:${VITE_PORT:-5173}` —
+don't just say "it's up," give the clickable address, and label it
+**(hot-reload)** so it's never confused with the Docker production build's
+URL (`docker-up` reports its own URL labeled **(built-docker)** — see
+`docker-lifecycle.md`). Mention the Express port too (for API/WS
+debugging) but don't hand it to Sara as "the site". Neither port may be
+the default if something else (e.g. the desktop app on 4820, or another
+Vite instance on 5173) already holds it; `scripts/dev.js` logs a warning
+about shared-database double-counting in that case, surface it if present.
 
 ## down (alias: `down`)
 
