@@ -446,7 +446,11 @@ function buildSessionFocusReport(dbModule, session, windowStartMs, windowEndMs) 
     const startMs = new Date(seg.start).getTime();
     const endMs = new Date(seg.end).getTime();
     const intervals = activeIntervals(allTimestampsMs, startMs, endMs, grace);
-    sessionActiveIntervalsMs.push(...intervals);
+    // `push(...intervals)` throws RangeError: Maximum call stack size
+    // exceeded once `intervals` passes V8's spread-as-arguments limit
+    // (~65536) — a session with an unusually high event volume can produce
+    // that many. Loop-push instead so this scales with no upper bound.
+    for (const interval of intervals) sessionActiveIntervalsMs.push(interval);
     const active_ms = intervals.reduce((sum, [a, b]) => sum + (b - a), 0);
     const idle_ms = Math.max(0, endMs - startMs) - active_ms;
     return {

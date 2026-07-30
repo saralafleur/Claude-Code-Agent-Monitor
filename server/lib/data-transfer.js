@@ -43,6 +43,15 @@ const SESSION_CHILD_TABLES = ["agents", "events", "token_usage", "workflows"];
 /**
  * Build the full export bundle from the live database.
  *
+ * NOT CURRENTLY WIRED TO A ROUTE — safe as-is only because nothing on a
+ * request path calls it yet. The `.all()` calls below are fully synchronous
+ * (better-sqlite3) and unbounded; on a database with a multi-million-row
+ * `events` table this pinned the real event-loop-blocking bug fixed in
+ * `routes/settings.js`'s GET /export (see that file's `writeJsonArray`
+ * streaming helper). Before wiring this into any HTTP handler, apply the same
+ * fix — iterate + yield instead of `.all()` — or it will reproduce the exact
+ * same server-wide hang.
+ *
  * @param {import("better-sqlite3").Database} db
  * @param {{ listPricing: { all: () => any[] } }} stmts - the prepared-statement
  *   bag from server/db.js (used for the canonical model_pricing ordering).

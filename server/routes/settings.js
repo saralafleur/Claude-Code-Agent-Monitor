@@ -402,27 +402,70 @@ router.post("/reset-pricing", (_req, res) => {
   res.json({ ok: true, pricing });
 });
 
-// GET /api/settings/export — export all data as JSON
-router.get("/export", (_req, res) => {
-  const sessions = db.prepare("SELECT * FROM sessions ORDER BY started_at DESC").all();
-  const agents = db.prepare("SELECT * FROM agents ORDER BY started_at DESC").all();
-  const events = db.prepare("SELECT * FROM events ORDER BY created_at DESC").all();
-  const tokenUsage = db.prepare("SELECT * FROM token_usage").all();
-  const pricing = stmts.listPricing.all();
+// Writes `"<key>":[<row>,<row>,...]` to the response by pulling rows one at a
+// time from a better-sqlite3 iterator (Statement#iterate), rather than
+// materializing the whole table with .all() first. On a multi-million-row
+// table .all() + JSON.stringify can pin the event loop for minutes since
+// better-sqlite3 is fully synchronous — nothing else on the server (including
+// unrelated sessions' requests) can be served until it returns. Yielding to
+// the event loop every YIELD_EVERY rows keeps memory bounded to one row at a
+// time and lets other requests interleave instead of queuing behind this one.
+const EXPORT_YIELD_EVERY = 500;
+async function writeJsonArray(res, key, iterator) {
+  res.write(`"${key}":[`);
+  let first = true;
+  let count = 0;
+  for (const row of iterator) {
+    res.write((first ? "" : ",") + JSON.stringify(row));
+    first = false;
+    count++;
+    if (count % EXPORT_YIELD_EVERY === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+  res.write("]");
+}
 
+// GET /api/settings/export — export all data as JSON. Streamed (see
+// writeJsonArray) so a large database doesn't block the event loop; the
+// response shape is unchanged from a plain res.json() of the same object.
+router.get("/export", async (req, res) => {
   res.setHeader("Content-Type", "application/json");
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="agent-monitor-export-${new Date().toISOString().slice(0, 10)}.json"`
   );
-  res.json({
-    exported_at: new Date().toISOString(),
-    sessions,
-    agents,
-    events,
-    token_usage: tokenUsage,
-    model_pricing: pricing,
-  });
+
+  res.write(`{"exported_at":${JSON.stringify(new Date().toISOString())},`);
+  try {
+    await writeJsonArray(
+      res,
+      "sessions",
+      db.prepare("SELECT * FROM sessions ORDER BY started_at DESC").iterate()
+    );
+    res.write(",");
+    await writeJsonArray(
+      res,
+      "agents",
+      db.prepare("SELECT * FROM agents ORDER BY started_at DESC").iterate()
+    );
+    res.write(",");
+    await writeJsonArray(
+      res,
+      "events",
+      db.prepare("SELECT * FROM events ORDER BY created_at DESC").iterate()
+    );
+    res.write(",");
+    await writeJsonArray(res, "token_usage", db.prepare("SELECT * FROM token_usage").iterate());
+    res.write(`,"model_pricing":${JSON.stringify(stmts.listPricing.all())}}`);
+    res.end();
+  } catch (err) {
+    // Headers are already flushed by the time a mid-stream query can fail, so
+    // we can't fall back to a JSON error body — just end the connection and
+    // let the client see a truncated/invalid download.
+    req.log?.error?.("export stream failed", err);
+    res.end();
+  }
 });
 
 // GET /api/settings/claude-home — get current CLAUDE_HOME path
