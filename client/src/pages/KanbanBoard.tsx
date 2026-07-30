@@ -22,7 +22,11 @@
  * row at its ordered position. A header toggle (the gear icon) can hide
  * "internal" sessions - the headless CLI calls the dashboard's own
  * background focus classifiers spawn from an OS temp directory (see
- * lib/types.ts's isInternalSession) - across all three views at once.
+ * lib/types.ts's isInternalSession) - across all three views at once. In the
+ * Agents/Sessions views, each status column's header also carries its own
+ * orientation toggle (mirroring the Projects view's per-monitor toggle) that
+ * switches that column's cards between the default stacked list and a
+ * horizontally-scrolling row - persisted in localStorage per view+status.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -87,7 +91,9 @@ import {
   useMemo,
   useRef,
   useSyncExternalStore,
+  isValidElement,
   type DragEvent,
+  type CSSProperties,
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -183,6 +189,26 @@ const VIEW_STORAGE_KEY = "kanban-board-view";
 const HIDE_COMPLETED_STORAGE_KEY = "kanban-hide-completed";
 const HIDE_ABANDONED_STORAGE_KEY = "kanban-hide-abandoned";
 const HIDE_INTERNAL_STORAGE_KEY = "kanban-hide-internal";
+const HIDE_OLD_ERRORS_STORAGE_KEY = "kanban-hide-old-errors";
+// Per-status-column card orientation (Agents/Sessions views only) - keyed by
+// `${view}-${status}` so, e.g., Agents' and Sessions' own "waiting" columns
+// toggle independently. Mirrors the Projects view's per-monitor orientation
+// toggle (lib/monitorGroups.ts), but this one is purely local/per-browser -
+// a status column has no shared identity to hang a server-backed value off.
+const STATUS_COLUMN_ORIENTATION_STORAGE_KEY = "kanban-status-column-orientation";
+// Per-status-column "wrap count" (Agents/Sessions views only) - a second,
+// independent control next to the orientation toggle above. "*" (default)
+// means no fixed wrap - today's single unbounded row/column. "1"-"4" caps
+// how many cards land in a row (horizontal) or column (vertical) before the
+// layout wraps to a new one. Same storage model as orientation: purely
+// local/per-browser, keyed by `${view}-${status}`. Mirrors the Projects
+// view's per-monitor `MonitorGroup.wrap` field (lib/monitorGroups.ts).
+const STATUS_COLUMN_WRAP_STORAGE_KEY = "kanban-status-column-wrap";
+// Errors that have simply not been purged yet (see the Settings "Session
+// Cleanup" purge, default 90 days) can sit in the Error column indefinitely.
+// "Hide errors older than 1 week" gives a client-side way to declutter that
+// without waiting on (or forcing) a destructive purge.
+const OLD_ERROR_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 // Sentinel key for the trailing Ungrouped box's own collapsed state, stored
 // in the same `collapsedProjects` map as project columns (matches the
 // `monitor-divider-__ungrouped__` testid already used to identify this box).
@@ -254,6 +280,105 @@ function persistHideInternal(hide: boolean): void {
   }
 }
 
+function loadHideOldErrors(): boolean {
+  try {
+    return localStorage.getItem(HIDE_OLD_ERRORS_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistHideOldErrors(hide: boolean): void {
+  try {
+    localStorage.setItem(HIDE_OLD_ERRORS_STORAGE_KEY, String(hide));
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadStatusColumnOrientation(): Record<string, "horizontal" | "vertical"> {
+  try {
+    const raw = localStorage.getItem(STATUS_COLUMN_ORIENTATION_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, "horizontal" | "vertical"> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (value === "horizontal" || value === "vertical") map[key] = value;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function persistStatusColumnOrientation(map: Record<string, "horizontal" | "vertical">): void {
+  try {
+    localStorage.setItem(STATUS_COLUMN_ORIENTATION_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** "*" = no fixed wrap (default); "1"-"4" = items per row/column before
+ *  wrapping. Shared between the Agents/Sessions `Column` toggle (local-only)
+ *  and the Projects view's `MonitorBox` toggle (server-backed via
+ *  `MonitorGroup.wrap`). */
+type WrapCount = "*" | "1" | "2" | "3" | "4";
+const WRAP_CYCLE: WrapCount[] = ["*", "1", "2", "3", "4"];
+
+function cycleWrap(current: WrapCount | undefined): WrapCount {
+  const idx = WRAP_CYCLE.indexOf(current ?? "*");
+  return WRAP_CYCLE[(idx + 1) % WRAP_CYCLE.length] ?? "*";
+}
+
+/** CSS grid track sizing for a fixed wrap count - `axis: "row"` wraps
+ *  row-major (N items per row, pairing with horizontal orientation),
+ *  `axis: "column"` wraps column-major (N items per column, pairing with
+ *  vertical orientation). Returns undefined for "*", so callers fall back to
+ *  the existing flex layout untouched. */
+function wrapGridStyle(wrap: WrapCount, axis: "row" | "column"): CSSProperties | undefined {
+  if (wrap === "*") return undefined;
+  const n = Number(wrap);
+  return axis === "row"
+    ? { gridTemplateColumns: `repeat(${n}, max-content)` }
+    : { gridTemplateRows: `repeat(${n}, max-content)`, gridAutoFlow: "column" };
+}
+
+function loadStatusColumnWrap(): Record<string, WrapCount> {
+  try {
+    const raw = localStorage.getItem(STATUS_COLUMN_WRAP_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const map: Record<string, WrapCount> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (WRAP_CYCLE.includes(value as WrapCount)) map[key] = value as WrapCount;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function persistStatusColumnWrap(map: Record<string, WrapCount>): void {
+  try {
+    localStorage.setItem(STATUS_COLUMN_WRAP_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+// True when an error's timestamp is more than a week older than `nowMs`. A
+// missing/unparseable timestamp is treated as "not old" - never hide an
+// error we can't actually date.
+function isOldError(timestamp: string | null | undefined, nowMs: number): boolean {
+  if (!timestamp) return false;
+  const errorMs = new Date(timestamp).getTime();
+  if (Number.isNaN(errorMs)) return false;
+  return nowMs - errorMs > OLD_ERROR_THRESHOLD_MS;
+}
+
 export function KanbanBoard() {
   const { t } = useTranslation("kanban");
   const [view, setViewState] = useState<BoardView>(loadView);
@@ -269,6 +394,12 @@ export function KanbanBoard() {
   const [hideCompleted, setHideCompletedState] = useState<boolean>(loadHideCompleted);
   const [hideAbandoned, setHideAbandonedState] = useState<boolean>(loadHideAbandoned);
   const [hideInternal, setHideInternalState] = useState<boolean>(loadHideInternal);
+  const [hideOldErrors, setHideOldErrorsState] = useState<boolean>(loadHideOldErrors);
+  const [statusColumnOrientation, setStatusColumnOrientationState] = useState<
+    Record<string, "horizontal" | "vertical">
+  >(loadStatusColumnOrientation);
+  const [statusColumnWrap, setStatusColumnWrapState] =
+    useState<Record<string, WrapCount>>(loadStatusColumnWrap);
   // The plan popup - opened from a PlanPanel strip or a column header's
   // "view plan" icon. `sessions` is scoped to whichever column opened it, so
   // item-chip session lookups never bleed across projects.
@@ -334,10 +465,42 @@ export function KanbanBoard() {
     });
   }, []);
 
+  const toggleHideOldErrors = useCallback(() => {
+    setHideOldErrorsState((prev) => {
+      const next = !prev;
+      persistHideOldErrors(next);
+      return next;
+    });
+  }, []);
+
   const toggleHideInternal = useCallback(() => {
     setHideInternalState((prev) => {
       const next = !prev;
       persistHideInternal(next);
+      return next;
+    });
+  }, []);
+
+  // Flips one status column's card orientation (Agents/Sessions views).
+  // `key` is `${view}-${status}` so each column's toggle is independent.
+  const toggleStatusColumnOrientation = useCallback((key: string) => {
+    setStatusColumnOrientationState((prev) => {
+      const next = {
+        ...prev,
+        [key]: prev[key] === "horizontal" ? ("vertical" as const) : ("horizontal" as const),
+      };
+      persistStatusColumnOrientation(next);
+      return next;
+    });
+  }, []);
+
+  // Cycles one status column's wrap count (Agents/Sessions views) through
+  // "*" -> 1 -> 2 -> 3 -> 4 -> "*". Independent of orientation above - same
+  // `key` shape (`${view}-${status}`).
+  const cycleStatusColumnWrap = useCallback((key: string) => {
+    setStatusColumnWrapState((prev) => {
+      const next = { ...prev, [key]: cycleWrap(prev[key]) };
+      persistStatusColumnWrap(next);
       return next;
     });
   }, []);
@@ -545,12 +708,21 @@ export function KanbanBoard() {
     (a.status === "waiting" || isAgentAwaitingInput(a)) &&
     !isPrimaryAwaitingReason(a.awaiting_reason);
 
+  // Real wall-clock time, read once per render - re-renders happen often
+  // enough (refresh, websocket updates, toggling other filters) that this
+  // never needs its own interval to stay fresh.
+  const nowMs = Date.now();
+
   const groupedAgents = AGENT_COLUMNS.reduce(
     (acc, status) => {
-      acc[status] =
+      const bucket =
         status === "waiting"
           ? visibleAgents.filter(isEffectivelyWaiting)
           : visibleAgents.filter((a) => a.status === status && !isEffectivelyWaiting(a));
+      acc[status] =
+        status === "error" && hideOldErrors
+          ? bucket.filter((a) => !isOldError(a.ended_at ?? a.updated_at, nowMs))
+          : bucket;
       return acc;
     },
     {} as Record<EffectiveAgentStatus, Agent[]>
@@ -565,10 +737,14 @@ export function KanbanBoard() {
 
   const groupedSessions = SESSION_COLUMNS.reduce(
     (acc, status) => {
-      acc[status] =
+      const bucket =
         status === "waiting"
           ? visibleSessions.filter(isSessionEffectivelyWaiting)
           : visibleSessions.filter((s) => s.status === status && !isSessionEffectivelyWaiting(s));
+      acc[status] =
+        status === "error" && hideOldErrors
+          ? bucket.filter((s) => !isOldError(s.ended_at ?? s.last_activity ?? s.started_at, nowMs))
+          : bucket;
       return acc;
     },
     {} as Record<EffectiveSessionStatus, Session[]>
@@ -578,11 +754,23 @@ export function KanbanBoard() {
   // on the Agents/Sessions boards (there's nothing left to show in it).
   // Agents have no "abandoned" status (see AGENT_COLUMNS above), so
   // hideAbandoned only ever affects the Sessions board's columns.
-  const visibleAgentColumns = hideCompleted
-    ? AGENT_COLUMNS.filter((s) => s !== "completed")
-    : AGENT_COLUMNS;
+  //
+  // The "error" column is additionally dropped whenever it's empty,
+  // regardless of the hideCompleted/hideAbandoned/hideOldErrors toggles -
+  // unlike those, this isn't a user preference, it just declutters the board
+  // when there's nothing to report. It reappears the moment an agent/session
+  // lands in it (or, with hideOldErrors on, once at least one error is
+  // recent). `groupedAgents`/`groupedSessions` above already apply
+  // hideOldErrors to the "error" bucket, so this emptiness check sees the
+  // post-filter count for free.
+  const visibleAgentColumns = AGENT_COLUMNS.filter(
+    (s) => (!hideCompleted || s !== "completed") && (s !== "error" || groupedAgents[s].length > 0)
+  );
   const visibleSessionColumns = SESSION_COLUMNS.filter(
-    (s) => (!hideCompleted || s !== "completed") && (!hideAbandoned || s !== "abandoned")
+    (s) =>
+      (!hideCompleted || s !== "completed") &&
+      (!hideAbandoned || s !== "abandoned") &&
+      (s !== "error" || groupedSessions[s].length > 0)
   );
 
   // Projects view column order: drag-reorderable, persisted (shared with the
@@ -706,6 +894,14 @@ export function KanbanBoard() {
             }
           : m
       )
+    );
+  }
+
+  // Cycles one monitor's wrap count ("*" -> 1 -> 2 -> 3 -> 4 -> "*") -
+  // independent of orientation above, server-backed same as it.
+  function handleCycleMonitorWrap(id: string) {
+    monitorStore.saveMonitors(
+      monitors.map((m) => (m.id === id ? { ...m, wrap: cycleWrap(m.wrap) } : m))
     );
   }
 
@@ -871,6 +1067,22 @@ export function KanbanBoard() {
           {hideAbandoned ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           {hideAbandoned ? t("showAbandoned") : t("hideAbandoned")}
         </button>
+        {view !== "projects" && (
+          <button
+            type="button"
+            onClick={toggleHideOldErrors}
+            aria-pressed={hideOldErrors}
+            title={hideOldErrors ? t("showOldErrors") : t("hideOldErrors")}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border transition-colors duration-150 flex-shrink-0 ${
+              hideOldErrors
+                ? "bg-accent/15 text-accent border-accent/30"
+                : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
+            }`}
+          >
+            {hideOldErrors ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {hideOldErrors ? t("showOldErrors") : t("hideOldErrors")}
+          </button>
+        )}
         <button
           type="button"
           onClick={toggleHideInternal}
@@ -984,6 +1196,8 @@ export function KanbanBoard() {
         count={columns.length}
         collapsed={!!monitor.collapsed}
         orientation={monitor.orientation === "vertical" ? "vertical" : "horizontal"}
+        wrap={monitor.wrap ?? "*"}
+        onCycleWrap={() => handleCycleMonitorWrap(monitor.id)}
         dragging={draggedMonitorId === monitor.id}
         onRename={(name) => handleRenameMonitor(monitor.id, name)}
         onDelete={() => handleDeleteMonitor(monitor.id)}
@@ -1047,6 +1261,7 @@ export function KanbanBoard() {
             const config = STATUS_CONFIG[status];
             const items = groupedAgents[status];
             const limit = expanded[status] || COLUMN_PAGE_SIZE;
+            const orientationKey = `agents-${status}`;
             return (
               <Column
                 key={status}
@@ -1064,6 +1279,10 @@ export function KanbanBoard() {
                     [status]: limit + COLUMN_PAGE_SIZE,
                   }))
                 }
+                orientation={statusColumnOrientation[orientationKey] ?? "vertical"}
+                onToggleOrientation={() => toggleStatusColumnOrientation(orientationKey)}
+                wrap={statusColumnWrap[orientationKey] ?? "*"}
+                onCycleWrap={() => cycleStatusColumnWrap(orientationKey)}
               >
                 {loading && (items?.length ?? 0) === 0
                   ? Array.from({ length: 3 }).map((_, i) => (
@@ -1086,6 +1305,7 @@ export function KanbanBoard() {
             const config = SESSION_STATUS_CONFIG[status];
             const items = groupedSessions[status];
             const limit = expanded[status] || COLUMN_PAGE_SIZE;
+            const orientationKey = `sessions-${status}`;
             return (
               <Column
                 key={status}
@@ -1103,6 +1323,10 @@ export function KanbanBoard() {
                     [status]: limit + COLUMN_PAGE_SIZE,
                   }))
                 }
+                orientation={statusColumnOrientation[orientationKey] ?? "vertical"}
+                onToggleOrientation={() => toggleStatusColumnOrientation(orientationKey)}
+                wrap={statusColumnWrap[orientationKey] ?? "*"}
+                onCycleWrap={() => cycleStatusColumnWrap(orientationKey)}
               >
                 {loading && (items?.length ?? 0) === 0
                   ? Array.from({ length: 3 }).map((_, i) => (
@@ -1260,6 +1484,24 @@ interface ColumnProps {
   /** Present only for columns that support collapsing (Projects-view
    *  project columns and Unassigned); toggles `collapsed`. */
   onToggleCollapsed?: () => void;
+  /** Card layout inside this column - "vertical" (default; the long-standing
+   *  stacked list) or "horizontal" (cards laid out side by side in their own
+   *  scrolling row). Only meaningful together with `onToggleOrientation`;
+   *  Projects-view columns pass neither (that view's boxes have their own,
+   *  separate per-monitor orientation toggle - see MonitorBox). */
+  orientation?: "horizontal" | "vertical";
+  /** Present only for columns that support this (Agents/Sessions status
+   *  columns); toggles `orientation`. */
+  onToggleOrientation?: () => void;
+  /** A second, independent control alongside `orientation` - "*" (default)
+   *  is today's unbounded row/column; "1"-"4" caps how many cards land per
+   *  row (horizontal) or column (vertical) before wrapping to a new one.
+   *  Only meaningful together with `onCycleWrap`; Projects-view columns pass
+   *  neither, same as `orientation`. */
+  wrap?: WrapCount;
+  /** Present only for columns that support this (Agents/Sessions status
+   *  columns); cycles `wrap` through its 5 values. */
+  onCycleWrap?: () => void;
 }
 
 function Column({
@@ -1285,12 +1527,23 @@ function Column({
   onOpenReport,
   collapsed,
   onToggleCollapsed,
+  orientation,
+  onToggleOrientation,
+  wrap,
+  onCycleWrap,
 }: ColumnProps) {
   const { t } = useTranslation("kanban");
   const childrenArray = Array.isArray(children) ? children : children ? [children] : [];
   const hasChildren = childrenArray.length > 0;
   const columnPlans = plans ?? [];
   const hasPlans = columnPlans.length > 0;
+  const isHorizontal = orientation === "horizontal";
+  const effectiveWrap = wrap ?? "*";
+  const gridWrap = effectiveWrap !== "*";
+  // Any card list wider than a single column - the existing horizontal row,
+  // or a fixed wrap in either orientation - needs the column itself to grow
+  // to fit its content instead of staying pinned to one card's width.
+  const isWide = isHorizontal || gridWrap;
 
   return (
     <div
@@ -1316,7 +1569,7 @@ function Column({
         onColumnDragEnd?.();
       }}
       className={`bg-surface-1 rounded-xl border border-border p-3 flex flex-col flex-shrink-0 transition-opacity ${
-        collapsed ? "w-56 self-start" : "w-72"
+        collapsed ? "w-56 self-start" : isWide ? "w-max" : "w-72"
       } ${draggableColumn ? "cursor-grab active:cursor-grabbing" : ""} ${dragging ? "opacity-40" : ""}`}
     >
       <div className="flex items-center gap-2 mb-4 px-1 min-w-0">
@@ -1381,6 +1634,43 @@ function Column({
         <span className="ml-auto text-[11px] text-gray-600 bg-surface-3 px-2 py-0.5 rounded-full">
           {count}
         </span>
+        {onToggleOrientation && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleOrientation();
+            }}
+            title={t(isHorizontal ? "column.orientationHorizontal" : "column.orientationVertical")}
+            aria-pressed={isHorizontal}
+            draggable={false}
+            className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
+          >
+            {isHorizontal ? (
+              <Columns3 className="w-3.5 h-3.5" />
+            ) : (
+              <Rows3 className="w-3.5 h-3.5" />
+            )}
+          </button>
+        )}
+        {onCycleWrap && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCycleWrap();
+            }}
+            title={
+              effectiveWrap === "*"
+                ? t("column.wrapAuto")
+                : t("column.wrapCount", { count: Number(effectiveWrap) })
+            }
+            draggable={false}
+            className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0 text-[10px] font-mono font-semibold w-3.5 text-center"
+          >
+            {effectiveWrap}
+          </button>
+        )}
       </div>
 
       {/* draggable={false}: opts the scrollable session-card list (and the
@@ -1391,7 +1681,14 @@ function Column({
           (e.g. "show more") and any in-flight drag survive a collapse/
           expand toggle, mirroring MonitorBox's own collapse behavior. */}
       <div
-        className={`flex-1 space-y-2.5 overflow-y-auto ${collapsed ? "hidden" : ""}`}
+        className={`flex-1 ${
+          gridWrap
+            ? "grid gap-2.5 overflow-auto"
+            : isHorizontal
+              ? "flex flex-row gap-2.5"
+              : "space-y-2.5 overflow-y-auto"
+        } ${collapsed ? "hidden" : ""}`}
+        style={gridWrap ? wrapGridStyle(effectiveWrap, isHorizontal ? "row" : "column") : undefined}
         draggable={false}
       >
         {hasPlans && (
@@ -1408,11 +1705,22 @@ function Column({
         )}
         {hasChildren ? (
           <>
-            {children}
+            {isWide
+              ? childrenArray.map((child, i) => (
+                  <div
+                    key={isValidElement(child) ? (child.key ?? i) : i}
+                    className="w-72 flex-shrink-0"
+                  >
+                    {child}
+                  </div>
+                ))
+              : children}
             {remaining > 0 && (
               <button
                 onClick={onShowMore}
-                className="w-full py-2 text-[11px] text-gray-500 hover:text-gray-300 flex items-center justify-center gap-1 transition-colors"
+                className={`py-2 text-[11px] text-gray-500 hover:text-gray-300 flex items-center justify-center gap-1 transition-colors ${
+                  isWide ? "w-32 flex-shrink-0" : "w-full"
+                }`}
               >
                 <ChevronDown className="w-3 h-3" />
                 {t("common:showMore", { count: remaining })}
@@ -1453,10 +1761,16 @@ interface MonitorBoxProps {
    *  (side by side) or "column" (stacked). Defaults to "horizontal" when
    *  omitted, matching the long-standing layout. */
   orientation?: "horizontal" | "vertical";
+  /** A second, independent control alongside `orientation` - "*" (default)
+   *  is today's unbounded row/column of project columns; "1"-"4" caps how
+   *  many land per row (horizontal) or column (vertical) before wrapping to
+   *  a new one. */
+  wrap?: WrapCount;
   onRename: (name: string) => void;
   onDelete: () => void;
   onToggleCollapsed: () => void;
   onToggleOrientation: () => void;
+  onCycleWrap: () => void;
   onBoxDragStart: () => void;
   /** Fired while a drag is over this box - branches at the call site on
    *  whether a project column or another monitor box is being dragged. */
@@ -1486,10 +1800,12 @@ function MonitorBox({
   dragging,
   collapsed,
   orientation = "horizontal",
+  wrap,
   onRename,
   onDelete,
   onToggleCollapsed,
   onToggleOrientation,
+  onCycleWrap,
   onBoxDragStart,
   onBoxDragOver,
   onBoxDragEnd,
@@ -1497,6 +1813,8 @@ function MonitorBox({
 }: MonitorBoxProps) {
   const { t } = useTranslation("kanban");
   const [draftName, setDraftName] = useState(name);
+  const effectiveWrap = wrap ?? "*";
+  const gridWrap = effectiveWrap !== "*";
 
   useEffect(() => setDraftName(name), [name]);
 
@@ -1568,6 +1886,19 @@ function MonitorBox({
         </button>
         <button
           type="button"
+          onClick={onCycleWrap}
+          title={
+            effectiveWrap === "*"
+              ? t("monitors.wrapAuto")
+              : t("monitors.wrapCount", { count: Number(effectiveWrap) })
+          }
+          draggable={false}
+          className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0 text-[10px] font-mono font-semibold w-3.5 text-center"
+        >
+          {effectiveWrap}
+        </button>
+        <button
+          type="button"
           onClick={onDelete}
           title={t("monitors.deleteMonitor")}
           draggable={false}
@@ -1580,7 +1911,14 @@ function MonitorBox({
           visually hidden - so a card's own local state (e.g. "show more")
           and any in-flight drag survive a collapse/expand toggle. */}
       <div
-        className={`flex gap-4 ${orientation === "vertical" ? "flex-col" : ""} ${collapsed ? "hidden" : ""}`}
+        className={`${
+          gridWrap ? "grid gap-4" : `flex gap-4 ${orientation === "vertical" ? "flex-col" : ""}`
+        } ${collapsed ? "hidden" : ""}`}
+        style={
+          gridWrap
+            ? wrapGridStyle(effectiveWrap, orientation === "vertical" ? "column" : "row")
+            : undefined
+        }
         draggable={false}
       >
         {children}

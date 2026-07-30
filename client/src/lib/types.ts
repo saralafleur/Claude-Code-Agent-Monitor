@@ -714,6 +714,12 @@ export interface Session {
    * dashboard's own machine; any other value is a remote source id (see the
    * Remote Data Sources feature / `remote_sources`). Maps to `sessions.source`. */
   source?: string;
+  /** OS process id of this session's `claude` CLI, resolved server-side from
+   * a hook payload hint (see server/lib/terminal-focus.js); null/undefined
+   * when never resolved (older session, remote-sourced, or the hint never
+   * matched a live process). Powers the "jump to terminal" action - the UI
+   * only offers it when this is set. Maps to `sessions.pid`. */
+  pid?: number | null;
 }
 
 /**
@@ -1199,6 +1205,65 @@ export interface CostResult {
   feature_costs?: CostFeatureCosts;
   /** Present only when at least one model had usage but no pricing rule. */
   unpriced_models?: UnpricedModel[];
+}
+
+// ───── Focus-summary cache (Settings → Focus Summaries) ─────
+
+/** Live snapshot of the focus-window-summary cache (`focus_summaries`, see
+ *  server/lib/focus-summary.js), returned as `focus_summary_cache` on
+ *  `GET /api/settings/info`. Unlike the transcript cache this table has no
+ *  LRU cap and survives restarts — `size` is simply the current row count.
+ *  For hit/miss history over time, see {@link FocusSummaryTimelineDay} /
+ *  {@link FocusSummaryDayResponse}. */
+export interface FocusSummaryCacheStats {
+  /** Rows currently cached (one per cache key — a window or a hierarchical day). */
+  size: number;
+  /** Cumulative since the access log has existed, not "today" — see the timeline for that. */
+  hits: number;
+  misses: number;
+  hitRate: number;
+  /** Total bullets across every cached row — a proxy for "how much is cached". */
+  totalBullets: number;
+}
+
+/** One day of `GET /api/settings/cache/timeline` — a UTC calendar day's
+ *  focus-summary-cache hit/miss counts, zero-filled when nothing happened. */
+export interface FocusSummaryTimelineDay {
+  /** `YYYY-MM-DD`, UTC. */
+  date: string;
+  hits: number;
+  misses: number;
+  total: number;
+}
+
+/** One row of `GET /api/settings/cache/day`'s `entries` — a single cache
+ *  resolution (hit or miss) at either the requested-window level or a
+ *  hierarchical per-day building-block level. */
+export interface FocusSummaryDayEntry {
+  cache_key: string;
+  level: "window" | "day";
+  /** Session name, project name, "Unassigned", or "All projects" — decoded
+   *  server-side from the row's scope columns. */
+  scope_label: string;
+  model: string | null;
+  outcome: "hit" | "miss";
+  /** Null for a hit whose bullets weren't re-read, or a miss where generation failed before writing. */
+  bullet_count: number | null;
+  accessed_at: string;
+}
+
+/** `GET /api/settings/cache/day` response — the day's totals are for the
+ *  whole day regardless of filters; `entries` reflects the requested filters. */
+export interface FocusSummaryDayResponse {
+  date: string;
+  hits: number;
+  misses: number;
+  total: number;
+  /** Distinct models seen that day, for the model filter's option list. */
+  models: string[];
+  /** True when the day had more than 500 matching rows and the list was cut off. */
+  truncated: boolean;
+  entries: FocusSummaryDayEntry[];
 }
 
 // ───── Import progress ─────
@@ -2110,6 +2175,12 @@ export interface MonitorGroup {
    *  means "horizontal" - the long-standing default, so existing stored
    *  monitors from before this field existed still render as a row. */
   orientation?: "horizontal" | "vertical";
+  /** A second, independent control alongside `orientation` - caps how many
+   *  project columns land per row (horizontal) or column (vertical) before
+   *  wrapping to a new one. Absent (or "*") means no fixed wrap - the
+   *  long-standing default, so existing stored monitors from before this
+   *  field existed still render as a single unbounded row/column. */
+  wrap?: "*" | "1" | "2" | "3" | "4";
 }
 
 /** The Kanban Board's whole global monitor layout: GET/PUT /api/monitors's

@@ -15,6 +15,8 @@
   "showCompleted": "显示已完成",
   "hideAbandoned": "隐藏已废弃",
   "showAbandoned": "显示已废弃",
+  "hideOldErrors": "隐藏一周以上的错误",
+  "showOldErrors": "显示所有错误",
   "hideInternal": "隐藏内部会话（由仪表盘自身的后台专注分类器生成，并非你创建）",
   "showInternal": "显示内部会话",
   "copyLink": "复制共享链接",
@@ -42,7 +44,9 @@
     "lastMessage": "最后一条消息",
     "lastMessageLoading": "正在加载最后一条消息…",
     "lastMessageEmpty": "未找到最近的消息",
-    "expensiveModel": "正在使用高级模型(Opus/Fable)- 每个 token 成本更高"
+    "expensiveModel": "正在使用高级模型(Opus/Fable)- 每个 token 成本更高",
+    "focusTerminal": "跳转到终端",
+    "focusTerminalError": "跳转到终端失败"
   },
   "tooltip": {
     "agent": {
@@ -68,6 +72,8 @@
     "expand": "展开显示器",
     "orientationHorizontal": "切换为垂直布局",
     "orientationVertical": "切换为水平布局",
+    "wrapAuto": "自动换行",
+    "wrapCount": "每 {{count}} 个换行",
     "ungrouped": "未分组",
     "collapseUngrouped": "折叠未分组",
     "expandUngrouped": "展开未分组",
@@ -75,6 +81,10 @@
     "emptyUngroupedHint": "将项目拖到这里以将其移出显示器"
   },
   "column": {
+    "orientationHorizontal": "切换为垂直布局",
+    "orientationVertical": "切换为水平布局",
+    "wrapAuto": "自动换行",
+    "wrapCount": "每 {{count}} 个换行",
     "collapse": "折叠列",
     "expand": "展开列"
   }

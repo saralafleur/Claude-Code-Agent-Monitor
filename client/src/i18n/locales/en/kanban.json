@@ -15,6 +15,8 @@
   "showCompleted": "Show completed",
   "hideAbandoned": "Hide abandoned",
   "showAbandoned": "Show abandoned",
+  "hideOldErrors": "Hide errors older than 1 week",
+  "showOldErrors": "Show all errors",
   "hideInternal": "Hide internal sessions (spawned by this dashboard's own background focus classifiers, not by you)",
   "showInternal": "Show internal sessions",
   "copyLink": "Copy shareable link",
@@ -42,7 +44,9 @@
     "lastMessage": "Last message",
     "lastMessageLoading": "Loading last message…",
     "lastMessageEmpty": "No recent message found",
-    "expensiveModel": "Running on a premium model (Opus/Fable) - higher cost per token"
+    "expensiveModel": "Running on a premium model (Opus/Fable) - higher cost per token",
+    "focusTerminal": "Jump to terminal",
+    "focusTerminalError": "Failed to jump to terminal"
   },
   "tooltip": {
     "agent": {
@@ -68,6 +72,8 @@
     "expand": "Expand monitor",
     "orientationHorizontal": "Switch to vertical layout",
     "orientationVertical": "Switch to horizontal layout",
+    "wrapAuto": "Auto wrap",
+    "wrapCount": "Wrap after {{count}}",
     "ungrouped": "Ungrouped",
     "collapseUngrouped": "Collapse ungrouped",
     "expandUngrouped": "Expand ungrouped",
@@ -76,6 +82,10 @@
   },
   "column": {
     "collapse": "Collapse column",
-    "expand": "Expand column"
+    "expand": "Expand column",
+    "orientationHorizontal": "Switch to vertical layout",
+    "orientationVertical": "Switch to horizontal layout",
+    "wrapAuto": "Auto wrap",
+    "wrapCount": "Wrap after {{count}}"
   }
 }

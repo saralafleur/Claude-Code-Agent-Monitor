@@ -981,6 +981,20 @@ try {
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source)`);
 
+// Migrate: add `pid` to sessions — the OS process id of the `claude` CLI that
+// owns this session, resolved (not just trusted verbatim) from a hook payload
+// hint by server/routes/hooks.js's ensureSession, and used by
+// server/lib/terminal-focus.js to jump the dashboard user to the real
+// terminal tab running this session. Additive + nullable: NULL means "never
+// resolved" (older session predating this feature, a remote-sourced session,
+// or a hint that didn't match any live `claude` process) and every historical
+// row reads unchanged. No index — only ever looked up by session id.
+try {
+  db.prepare("SELECT pid FROM sessions LIMIT 1").get();
+} catch {
+  db.prepare("ALTER TABLE sessions ADD COLUMN pid INTEGER").run();
+}
+
 // Migrate: add `priority` to projects — a dense rank the WIP queue page's
 // right-hand sidecar sets via drag reorder (server/routes/projects.js's
 // PUT /reorder). Lower value = higher priority; 0 = top/highest, matching
@@ -1032,6 +1046,41 @@ db.exec(`
   );
 `);
 db.prepare("INSERT OR IGNORE INTO dashboard_layout (id) VALUES (1)").run();
+
+// Focus-summary access log: one row per focus-window-summary cache
+// resolution (hit or miss), fed from server/lib/focus-summary.js at each
+// readCachedSummary / upsertFocusSummary decision point. This is what makes
+// the Settings → Focus Summaries section's day timeline and per-day
+// drill-down real rather than a point-in-time snapshot of focus_summaries —
+// that table only holds the CURRENT row per cache_key, with no history of
+// past hits/misses. `level` distinguishes a whole requested window
+// (project/session/unassigned scope + from/to) from a per-day building
+// block inside the hierarchical rollup path (see dayCacheKey in
+// focus-summary.js) — both are real, independently-cacheable decisions.
+// `project_id`/`session_id`/`unassigned` mirror the request's scope so the
+// drill-down can label each row without re-parsing cache_key. No FK: like
+// alert_events/webhook_deliveries, this is an audit trail independent of
+// the sessions/projects it describes. Retention is user-controlled via the
+// existing Data section's purge_days (see POST /api/settings/cleanup)
+// rather than an unbounded log; the focus_summaries cache itself is left
+// alone by that purge — a finished day's summary is meant to be kept.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS focus_summary_access_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL,
+    level TEXT NOT NULL CHECK(level IN ('window','day')),
+    outcome TEXT NOT NULL CHECK(outcome IN ('hit','miss')),
+    project_id TEXT,
+    session_id TEXT,
+    unassigned INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    bullet_count INTEGER,
+    access_day TEXT NOT NULL,
+    accessed_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_focus_summary_access_log_day ON focus_summary_access_log(access_day);
+  CREATE INDEX IF NOT EXISTS idx_focus_summary_access_log_key ON focus_summary_access_log(cache_key);
+`);
 
 // Migrate webhook_targets for first-class providers. Earlier installs created
 // the table with a 4-value `type` CHECK (slack/discord/teams/generic) and no
@@ -1302,6 +1351,10 @@ const stmts = {
   setSessionTranscriptPath: db.prepare(
     "UPDATE sessions SET transcript_path = ? WHERE id = ? AND (transcript_path IS NULL OR transcript_path = '')"
   ),
+  // One-shot writer for sessions.pid, same first-seen-wins guard as
+  // transcript_path above — the pid a hook resolves at session start stays
+  // stable for the session's whole lifetime, so later hooks are no-ops here.
+  setSessionPid: db.prepare("UPDATE sessions SET pid = ? WHERE id = ? AND pid IS NULL"),
   // Tag a session with the machine it was collected from (see remote-sync.js).
   // Remote-pulled sessions are stamped after the shared importer runs over the
   // per-source staging dir; local sessions keep the 'local' default.
@@ -1991,6 +2044,14 @@ const stmts = {
        bullets = excluded.bullets,
        model = excluded.model,
        created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+  ),
+  // Focus-summary cache access log (see the focus_summary_access_log schema
+  // comment) - written by server/lib/focus-summary.js at each cache
+  // resolution, read by the Settings → Focus Summaries routes.
+  insertFocusSummaryAccess: db.prepare(
+    `INSERT INTO focus_summary_access_log
+       (cache_key, level, outcome, project_id, session_id, unassigned, model, bullet_count, access_day, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ),
 };
 

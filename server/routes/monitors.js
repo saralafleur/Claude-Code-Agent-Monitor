@@ -23,6 +23,7 @@ const { broadcast } = require("../websocket");
 const router = Router();
 
 const ORIENTATIONS = new Set(["horizontal", "vertical"]);
+const WRAP_VALUES = new Set(["*", "1", "2", "3", "4"]);
 
 class ValidationError extends Error {}
 
@@ -54,6 +55,12 @@ function validateMonitors(value) {
         throw new ValidationError(`monitors[${i}].orientation must be "horizontal" or "vertical"`);
       }
       clean.orientation = m.orientation;
+    }
+    if (m.wrap !== undefined) {
+      if (!WRAP_VALUES.has(m.wrap)) {
+        throw new ValidationError(`monitors[${i}].wrap must be one of "*", "1", "2", "3", "4"`);
+      }
+      clean.wrap = m.wrap;
     }
     return clean;
   });

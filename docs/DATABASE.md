@@ -208,6 +208,20 @@ erDiagram
         text model "LLM model that produced it, e.g. haiku"
         text created_at "ISO8601 stamp of the synthesis"
     }
+
+    focus_summary_access_log {
+        integer id PK "Autoincrement"
+        text cache_key "Same identity space as focus_summaries.cache_key"
+        text level "window or day"
+        text outcome "hit or miss"
+        text project_id "Scope, or NULL"
+        text session_id "Scope, or NULL"
+        integer unassigned "Scope flag, 0 or 1"
+        text model "LLM model, or NULL"
+        integer bullet_count "Bullets in the resolved summary, or NULL"
+        text access_day "UTC calendar day, for timeline bucketing"
+        text accessed_at "ISO8601 stamp of the resolution"
+    }
 ```
 
 ### Relationship Cardinality
@@ -562,7 +576,7 @@ CREATE TABLE dashboard_layout (
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | INTEGER | NO | Primary key, always `1` (CHECK-constrained singleton) |
-| `monitors` | TEXT | NO | JSON array of `{ id, name, collapsed?, orientation? }` — the monitor swimlanes, in display order |
+| `monitors` | TEXT | NO | JSON array of `{ id, name, collapsed?, orientation?, wrap? }` — the monitor swimlanes, in display order. `wrap` is one of `"*"`/`"1"`/`"2"`/`"3"`/`"4"` (absent/`"*"` = no fixed wrap), capping how many project columns land per row/column before wrapping, independently of `orientation` |
 | `monitor_map` | TEXT | NO | JSON object mapping a project id to the monitor id it's assigned to; a project id absent from the map is ungrouped |
 | `collapsed_projects` | TEXT | NO | JSON object mapping a project id (or `__unassigned__`) to its collapsed state |
 | `updated_at` | TEXT | NO | ISO 8601 timestamp of the last edit |
@@ -769,6 +783,51 @@ CREATE TABLE focus_summaries (
 | `bullets` | TEXT | NO | JSON array of 2–4 stakeholder-readable bullet strings |
 | `model` | TEXT | YES | The `claude -p` model that produced it (`DASHBOARD_FOCUS_SUMMARY_MODEL`, falling back to `DASHBOARD_FOCUS_INFER_MODEL`, then `haiku`) |
 | `created_at` | TEXT | NO | ISO 8601 stamp of the synthesis (cache write time) |
+
+---
+
+### focus_summary_access_log
+
+Access-history audit trail for the `focus_summaries` cache above, one row per hit-or-miss resolution (`server/lib/focus-summary.js`'s `recordAccess`, called from `generateDirectSummary`/`generateHierarchicalSummary`/`generateWindowSummary`). `focus_summaries` itself only holds the *current* row per `cache_key`, with no history — this table is what backs the Settings → Focus Summaries section's day timeline (`GET /api/settings/cache/timeline`) and per-day drill-down (`GET /api/settings/cache/day`). `level` distinguishes a whole requested window (project/session/unassigned scope + from/to) from a per-day building block inside the hierarchical rollup path — both are independently-cacheable decisions worth logging. No FK, like `alert_events`/`webhook_deliveries` — an audit trail independent of the sessions/projects it describes. Retention follows the Data section's `purge_days` (`POST /api/settings/cleanup`); `POST /api/settings/clear-data` wipes it entirely. Neither purge touches `focus_summaries` itself — a finished cached summary is meant to be kept.
+
+```sql
+CREATE TABLE focus_summary_access_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL,
+    level TEXT NOT NULL CHECK(level IN ('window','day')),
+    outcome TEXT NOT NULL CHECK(outcome IN ('hit','miss')),
+    project_id TEXT,
+    session_id TEXT,
+    unassigned INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    bullet_count INTEGER,
+    access_day TEXT NOT NULL,
+    accessed_at TEXT NOT NULL
+);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, autoincrement |
+| `cache_key` | TEXT | NO | Same identity space as `focus_summaries.cache_key` (a window request or a `dayCacheKey` building block) |
+| `level` | TEXT | NO | `window` (a full requested window) or `day` (a hierarchical per-day building block) |
+| `outcome` | TEXT | NO | `hit` (served from `focus_summaries`) or `miss` (regenerated and written) |
+| `project_id` | TEXT | YES | Scope identity, mirrors the request; NULL when unscoped or session/unassigned-scoped |
+| `session_id` | TEXT | YES | Scope identity, mirrors the request; NULL unless session-scoped |
+| `unassigned` | INTEGER | NO | 1 when scoped to the "Unassigned" bucket, else 0 |
+| `model` | TEXT | YES | The model that produced (or previously produced, on a hit) the cached bullets |
+| `bullet_count` | INTEGER | YES | Bullets in the resolved summary, or NULL if generation failed before writing |
+| `access_day` | TEXT | NO | UTC calendar day of `accessed_at`, precomputed for the timeline's `GROUP BY` |
+| `accessed_at` | TEXT | NO | ISO 8601 stamp of the resolution |
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_focus_summary_access_log_day ON focus_summary_access_log(access_day);
+CREATE INDEX idx_focus_summary_access_log_key ON focus_summary_access_log(cache_key);
+```
 
 ---
 

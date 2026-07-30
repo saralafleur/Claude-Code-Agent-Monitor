@@ -17,6 +17,10 @@ const {
   MAX_DETAIL_LEN,
 } = require("../lib/focus-commands");
 const { transcriptCache } = require("./hooks");
+// Required as a module object (not destructured) so tests can swap
+// `terminalFocus.focusTerminalForSession` and this route picks the stub up
+// at call time — same idiom hooks.js uses for `liveness.probeLiveCwds`.
+const terminalFocus = require("../lib/terminal-focus");
 const { calculateCost, attachAgentCosts } = require("./pricing");
 const { parseSources, sourceColumnClause } = require("../lib/source-filter");
 const {
@@ -488,6 +492,37 @@ router.post("/:id/focus", (req, res) => {
     return res.status(409).json({ error: { code: result.code, message: result.error } });
   }
   res.json({ focus: result.focus, deduped: !!result.deduped });
+});
+
+// Maps server/lib/terminal-focus.js's typed failure codes to HTTP status —
+// each represents a distinct, expected reason the jump couldn't happen (not
+// a server bug), so callers get a specific status to branch on instead of a
+// blanket 500.
+const TERMINAL_FOCUS_STATUS = {
+  UNSUPPORTED_PLATFORM: 501,
+  NOT_LOCAL: 409,
+  NO_PID: 409,
+  PROCESS_GONE: 410,
+  TERMINAL_NOT_FOUND: 404,
+  AUTOMATION_ERROR: 500,
+};
+
+/**
+ * POST /:id/focus-terminal — jumps the dashboard user to the Terminal.app tab
+ * running this session's `claude` process (macOS only), selecting and
+ * briefly flashing the tab so it's visually unmistakable. See
+ * server/lib/terminal-focus.js for the pid-liveness/tty-resolution/
+ * AppleScript chain; this route only maps its typed result to HTTP.
+ */
+router.post("/:id/focus-terminal", (req, res) => {
+  const session = stmts.getSession.get(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Session not found" } });
+  }
+  const result = terminalFocus.focusTerminalForSession(session);
+  if (result.ok) return res.json({ ok: true });
+  const status = TERMINAL_FOCUS_STATUS[result.code] || 500;
+  res.status(status).json({ error: { code: result.code, message: result.message } });
 });
 
 /**

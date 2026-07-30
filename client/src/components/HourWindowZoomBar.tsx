@@ -1,25 +1,32 @@
 /**
  * @file HourWindowZoomBar.tsx
  * @description Presentational half of the "hour-window zoom" control —
- * the duration-pill row (`4h`/`8h`/`12h`/`24h`), the start-time
- * stepper/typed-input/"Live" row, the quick-start preset row, and the
- * future-window warning. Moved verbatim out of `FocusCalendarView.tsx`
- * (same classNames/`t()` keys/aria-labels) so a second consumer
- * (`FocusPage.tsx`) can render the identical control without a calendar
- * grid attached — driven entirely by `useHourWindowZoom`'s return value,
- * spread in as props. `FocusCalendarView.tsx` renders this exact component
- * too; neither may re-derive or copy-paste this JSX elsewhere.
+ * the duration-pill row (`4h`/`8h`/`12h`/`24h`), the "Live" toggle, the
+ * quick-start preset row, and the future-window warning. Moved verbatim
+ * out of `FocusCalendarView.tsx` (same classNames/`t()` keys/aria-labels)
+ * so a second consumer (`FocusPage.tsx`) can render the identical control
+ * without a calendar grid attached — driven entirely by
+ * `useHourWindowZoom`'s return value, spread in as props.
+ * `FocusCalendarView.tsx` renders this exact component too; neither may
+ * re-derive or copy-paste this JSX elsewhere.
+ *
+ * Deliberately has NO free-text/fine-grained time entry (no
+ * `<input type="time">`, no prev/next block stepper) — window starts are
+ * only ever picked via the quick-start presets (aligned to
+ * `QUICK_START_STEP_HOURS`) or by following "Live". This was an explicit
+ * product decision to keep window-start selection to coarse, aligned
+ * blocks rather than arbitrary minute-level ranges.
  *
  * Every control group (`leadingRowContent`, the duration pills, the
- * start-time stepper, the "Live" toggle, and the quick-start presets) is a
- * direct child of ONE `flex flex-wrap` row, left-aligned - not four stacked
- * `<div>` rows. A single shared flex container is what lets the browser pack
- * every group onto one line when there's enough width and wrap only the
- * groups that don't fit down to their own line otherwise, rather than always
- * breaking after each group regardless of available space. The quick-start
- * group keeps its own internal `flex-wrap` too, so if even a full-width
- * viewport can't fit all of ITS buttons on one line, only that group's own
- * buttons wrap internally rather than forcing everything before it down.
+ * "Live" toggle, and the quick-start presets) is a direct child of ONE
+ * `flex flex-wrap` row, left-aligned - not stacked `<div>` rows. A single
+ * shared flex container is what lets the browser pack every group onto one
+ * line when there's enough width and wrap only the groups that don't fit
+ * down to their own line otherwise, rather than always breaking after each
+ * group regardless of available space. The quick-start group keeps its own
+ * internal `flex-wrap` too, so if even a full-width viewport can't fit all
+ * of ITS buttons on one line, only that group's own buttons wrap internally
+ * rather than forcing everything before it down.
  * The future-window warning stays a separate block below this row - it's an
  * alert banner with a full sentence, not a control, so it always gets its
  * own line regardless of available width.
@@ -45,8 +52,7 @@
 import { Fragment } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
-import { formatTime } from "../lib/format";
+import { AlertTriangle } from "lucide-react";
 import { HOUR_WINDOW_OPTIONS } from "../hooks/useHourWindowZoom";
 import type { HourWindowZoom } from "../hooks/useHourWindowZoom";
 
@@ -70,11 +76,6 @@ export function HourWindowZoomBar({
   setWindowAnchorMode,
   dayStart,
   windowStartMs,
-  windowEndMs,
-  maxWindowStartMs,
-  windowStartTimeValue,
-  stepWindowStart,
-  handleWindowStartInputChange,
   handleQuickStartClick,
   quickStartOptions,
   quickStartLabel,
@@ -90,7 +91,7 @@ export function HourWindowZoomBar({
   }
 
   // Hour-window zoom - narrows the view on ANY day (not just today); see
-  // `zoomable` and the start-time group next to it, which picks WHERE in
+  // `zoomable` and the quick-start preset group below, which picks WHERE in
   // the day that window sits.
   groups.push({
     key: "duration",
@@ -123,53 +124,6 @@ export function HourWindowZoomBar({
       </div>
     ),
   });
-
-  // Start-time control for the hour-window zoom - only meaningful once
-  // zoomed (a 24h window IS the day, no separate start to pick). The
-  // stepper pages by the window's own size; the time input jumps straight
-  // to an exact start.
-  if (zoomable) {
-    groups.push({
-      key: "stepper",
-      node: (
-        <div
-          role="group"
-          aria-label={t("report.calendar.windowStart.groupLabel")}
-          className="flex items-center gap-1"
-        >
-          <button
-            type="button"
-            onClick={() => stepWindowStart(-hourWindow)}
-            disabled={windowStartMs <= dayStart}
-            title={t("report.calendar.windowStart.prevBlock")}
-            className="p-1 rounded text-gray-400 hover:text-gray-100 hover:bg-surface-2 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-          <input
-            type="time"
-            value={windowStartTimeValue}
-            onChange={handleWindowStartInputChange}
-            aria-label={t("report.calendar.windowStart.inputLabel")}
-            className="px-1.5 py-0.5 text-[11px] font-mono rounded-md bg-surface-2 border border-border text-gray-200"
-          />
-          <span className="text-[10px] text-gray-500">–</span>
-          <span className="text-[11px] font-mono text-gray-400">
-            {formatTime(new Date(windowEndMs).toISOString())}
-          </span>
-          <button
-            type="button"
-            onClick={() => stepWindowStart(hourWindow)}
-            disabled={windowStartMs >= maxWindowStartMs}
-            title={t("report.calendar.windowStart.nextBlock")}
-            className="p-1 rounded text-gray-400 hover:text-gray-100 hover:bg-surface-2 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          >
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ),
-    });
-  }
 
   // "Live" (today only) snaps back to following the current time instead of
   // a frozen custom start.

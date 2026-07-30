@@ -9,10 +9,9 @@
  *  - `"live"` (default, today only) — follows `hourWindow` hours behind the
  *    real current time plus a fixed 2h look-ahead, re-anchoring to "now"
  *    every `ZOOM_REFRESH_MS` via a forced re-render.
- *  - `"custom"` — an explicit start time the caller picked via the stepper,
- *    the typed `<input type="time">`, or a quick-start preset. The only
- *    mode a non-today day can render in, regardless of the stored
- *    `windowAnchorMode` (see `effectiveAnchorMode`).
+ *  - `"custom"` — an explicit start time the caller picked via a
+ *    quick-start preset. The only mode a non-today day can render in,
+ *    regardless of the stored `windowAnchorMode` (see `effectiveAnchorMode`).
  *
  * `FocusCalendarView.tsx` and `FocusPage.tsx` both call this with their own
  * `selectedDate` and render `HourWindowZoomBar` with the result — see that
@@ -67,17 +66,8 @@ export interface HourWindowZoom {
   windowStartMs: number;
   windowEndMs: number;
   maxWindowStartMs: number;
-  /** "HH:MM" (24h, zero-padded) rendering of the window's own current start
-   *  time - drives the start-time `<input type="time">`'s value whether the
-   *  window is live or custom. */
-  windowStartTimeValue: string;
-  /** Pages the window backward/forward by its own `hourWindow` size, clamped
-   *  to this day's bounds - switches to "custom" anchoring since the result
-   *  is now an explicit pick, not "now". */
-  stepWindowStart: (deltaHours: number) => void;
-  handleWindowStartInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  /** Jumps straight to a quick-start preset - same "explicit pick -> custom
-   *  anchoring" behavior as the stepper/typed input. */
+  /** Jumps straight to a quick-start preset - switches to "custom" anchoring
+   *  since the result is now an explicit pick, not "now". */
   handleQuickStartClick: (offsetMs: number) => void;
   /** Every QUICK_START_STEP_HOURS-aligned start time from midnight up to the
    *  latest legal window start for the current `hourWindow` size. */
@@ -144,8 +134,8 @@ export function useHourWindowZoom(
   }, [isLiveZoom]);
 
   // The latest legal window start - exactly `hourWindow` hours before this
-  // day's own end - shared by the custom-window clamp below and the
-  // start-time stepper's own "already at the end" disabled state.
+  // day's own end - shared by the custom-window clamp below and
+  // `quickStartOptions`' own upper bound.
   const maxWindowStartMs = dayEnd - hourWindow * HOUR_MS;
   let windowStartMs: number;
   let windowEndMs: number;
@@ -160,36 +150,6 @@ export function useHourWindowZoom(
     windowStartMs = Math.min(Math.max(dayStart + customOffsetMs, dayStart), maxWindowStartMs);
     windowEndMs = windowStartMs + hourWindow * HOUR_MS;
   }
-
-  const windowStartTimeValue = useMemo(() => {
-    const totalMin = Math.round((windowStartMs - dayStart) / 60_000);
-    const hh = Math.floor(totalMin / 60)
-      .toString()
-      .padStart(2, "0");
-    const mm = (totalMin % 60).toString().padStart(2, "0");
-    return `${hh}:${mm}`;
-  }, [windowStartMs, dayStart]);
-
-  const stepWindowStart = useCallback(
-    (deltaHours: number) => {
-      const newOffset = Math.min(
-        Math.max(windowStartMs - dayStart + deltaHours * HOUR_MS, 0),
-        maxWindowStartMs - dayStart
-      );
-      setCustomOffsetMs(newOffset);
-      setWindowAnchorMode("custom");
-    },
-    [windowStartMs, dayStart, maxWindowStartMs]
-  );
-
-  const handleWindowStartInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const [hh, mm] = e.target.value.split(":");
-    const hours = Number(hh);
-    const minutes = Number(mm);
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return; // input mid-edit/cleared
-    setCustomOffsetMs(hours * HOUR_MS + minutes * 60_000);
-    setWindowAnchorMode("custom");
-  }, []);
 
   const handleQuickStartClick = useCallback((offsetMs: number) => {
     setCustomOffsetMs(offsetMs);
@@ -221,7 +181,7 @@ export function useHourWindowZoom(
   // Whether the window ACTUALLY on screen right now starts after the real
   // current time - only possible on today's own view (a past/future day's
   // "now" comparison would be meaningless) - regardless of how that start
-  // was picked (a quick-start preset, the stepper, or the typed input).
+  // was picked (a quick-start preset is the only way to pick one).
   const windowIsFuture = isToday && windowStartMs > Date.now();
 
   return {
@@ -235,9 +195,6 @@ export function useHourWindowZoom(
     windowStartMs,
     windowEndMs,
     maxWindowStartMs,
-    windowStartTimeValue,
-    stepWindowStart,
-    handleWindowStartInputChange,
     handleQuickStartClick,
     quickStartOptions,
     quickStartLabel,

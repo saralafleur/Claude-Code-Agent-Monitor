@@ -15,6 +15,7 @@ const run = require("./openapi-extra/run");
 const push = require("./openapi-extra/push");
 const misc = require("./openapi-extra/misc");
 const plans = require("./openapi-extra/plans");
+const terminalFocus = require("./openapi-extra/terminal-focus");
 // Enriched overrides of already-documented endpoints — same operationId, tags,
 // and request/response `$ref` schemas as the base, with added examples and
 // richer descriptions. Listed last so they win the merge.
@@ -48,6 +49,7 @@ module.exports = combine(
   push,
   misc,
   plans,
+  terminalFocus,
   overrideSessionsAgents,
   overrideCore,
   overridePricingAlerts,

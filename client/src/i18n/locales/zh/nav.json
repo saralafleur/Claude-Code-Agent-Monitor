@@ -67,5 +67,13 @@
     "zh": "中文",
     "vi": "VI",
     "ko": "한국어"
+  },
+  "devBuildCard": {
+    "dev": "热重载",
+    "built": "已构建",
+    "onDevHint": "您正在使用 Vite 热重载开发服务器。点击“已构建”切换到生产构建版本。",
+    "onBuiltHint": "您正在使用已构建的生产版本。点击“热重载”切换到 Vite 开发服务器。",
+    "switchToDev": "切换到热重载开发站点",
+    "switchToBuilt": "切换到已构建的生产站点"
   }
 }

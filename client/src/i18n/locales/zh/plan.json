@@ -87,10 +87,6 @@
         "fullDayTitle": "显示全天"
       },
       "windowStart": {
-        "groupLabel": "窗口开始",
-        "inputLabel": "窗口开始时间",
-        "prevBlock": "查看上一个时间段",
-        "nextBlock": "查看下一个时间段",
         "live": "实时",
         "liveTitle": "跟随当前时间，而不是固定的开始时间",
         "quickStart": {
@@ -146,7 +142,13 @@
       "aiNote": "由 AI 根据各会话活动生成 — 重要细节请在下方行中核实。",
       "aiNoteWithModel": "由 {{model}} 根据各会话活动生成的 AI 摘要 — 重要细节请在下方行中核实。",
       "generatedIn": "生成用时 {{duration}}",
-      "servedFromCache": "来自缓存"
+      "servedFromCache": "来自缓存",
+      "activeNow": "正在处理 {{what}}。",
+      "activeNowScoped": "{{project}} — 正在处理 {{what}}。",
+      "startedLabel": "开始于",
+      "lastActivityLabel": "最近活动",
+      "noFocusWhat": "未分类活动",
+      "noActiveWork": "当前没有正在进行的工作。"
     }
   }
 }

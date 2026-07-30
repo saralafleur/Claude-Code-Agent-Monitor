@@ -67,5 +67,13 @@
     "zh": "中文",
     "vi": "VI",
     "ko": "한국어"
+  },
+  "devBuildCard": {
+    "dev": "Tải lại nóng",
+    "built": "Bản dựng",
+    "onDevHint": "Bạn đang ở máy chủ phát triển Vite với tải lại nóng. Nhấn \"Bản dựng\" để chuyển sang bản dựng production.",
+    "onBuiltHint": "Bạn đang ở bản dựng production. Nhấn \"Tải lại nóng\" để chuyển sang máy chủ phát triển Vite.",
+    "switchToDev": "Chuyển sang trang phát triển tải lại nóng",
+    "switchToBuilt": "Chuyển sang trang bản dựng production"
   }
 }

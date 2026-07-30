@@ -51,6 +51,16 @@ process.stdin.on("end", () => {
     parsedData = { raw: input };
   }
 
+  // process.ppid is whatever spawned this hook script — usually the `claude`
+  // binary itself, but on some shells it's an intermediate `sh -c` wrapper
+  // one hop up. It's just a hint: the server resolves/validates it against
+  // the live process tree (see server/routes/hooks.js's ensureSession) before
+  // trusting it for anything. No extra work here — this stays a cheap,
+  // synchronous field read so the "never block Claude Code" budget holds.
+  if (typeof parsedData === "object" && parsedData !== null) {
+    parsedData.pid = process.ppid;
+  }
+
   const payload = JSON.stringify({
     hook_type: hookType,
     data: parsedData,

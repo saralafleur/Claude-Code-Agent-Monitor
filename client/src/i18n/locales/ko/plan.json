@@ -87,10 +87,6 @@
         "fullDayTitle": "하루 전체를 표시합니다"
       },
       "windowStart": {
-        "groupLabel": "구간 시작",
-        "inputLabel": "구간 시작 시간",
-        "prevBlock": "이전 구간 보기",
-        "nextBlock": "다음 구간 보기",
         "live": "실시간",
         "liveTitle": "고정된 시작 시간 대신 현재 시각을 따라갑니다",
         "quickStart": {
@@ -146,7 +142,13 @@
       "aiNote": "각 세션의 활동에서 AI가 생성한 요약입니다. 중요한 내용은 아래 행에서 확인하세요.",
       "aiNoteWithModel": "{{model}} 모델이 각 세션의 활동에서 생성한 AI 요약입니다. 중요한 내용은 아래 행에서 확인하세요.",
       "generatedIn": "{{duration}} 만에 생성됨",
-      "servedFromCache": "캐시에서 제공됨"
+      "servedFromCache": "캐시에서 제공됨",
+      "activeNow": "현재 {{what}} 작업 중.",
+      "activeNowScoped": "{{project}} — 현재 {{what}} 작업 중.",
+      "startedLabel": "시작",
+      "lastActivityLabel": "마지막 활동",
+      "noFocusWhat": "미분류 활동",
+      "noActiveWork": "현재 진행 중인 작업이 없습니다."
     }
   }
 }

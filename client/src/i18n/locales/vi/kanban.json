@@ -15,6 +15,8 @@
   "showCompleted": "Hiện đã hoàn tất",
   "hideAbandoned": "Ẩn bị bỏ dở",
   "showAbandoned": "Hiện bị bỏ dở",
+  "hideOldErrors": "Ẩn lỗi cũ hơn 1 tuần",
+  "showOldErrors": "Hiện tất cả lỗi",
   "hideInternal": "Ẩn phiên nội bộ (do bộ phân loại tiêu điểm nền của chính bảng điều khiển tạo ra, không phải do bạn)",
   "showInternal": "Hiện phiên nội bộ",
   "copyLink": "Sao chép liên kết chia sẻ",
@@ -42,7 +44,9 @@
     "lastMessage": "Tin nhắn cuối",
     "lastMessageLoading": "Đang tải tin nhắn cuối…",
     "lastMessageEmpty": "Không tìm thấy tin nhắn gần đây",
-    "expensiveModel": "Đang chạy mô hình cao cấp (Opus/Fable) - chi phí mỗi token cao hơn"
+    "expensiveModel": "Đang chạy mô hình cao cấp (Opus/Fable) - chi phí mỗi token cao hơn",
+    "focusTerminal": "Chuyển đến terminal",
+    "focusTerminalError": "Không thể chuyển đến terminal"
   },
   "tooltip": {
     "agent": {
@@ -68,6 +72,8 @@
     "expand": "Mở rộng màn hình",
     "orientationHorizontal": "Chuyển sang bố cục dọc",
     "orientationVertical": "Chuyển sang bố cục ngang",
+    "wrapAuto": "Tự động xuống dòng",
+    "wrapCount": "Xuống dòng sau mỗi {{count}}",
     "ungrouped": "Chưa phân nhóm",
     "collapseUngrouped": "Thu gọn mục chưa phân nhóm",
     "expandUngrouped": "Mở rộng mục chưa phân nhóm",
@@ -75,6 +81,10 @@
     "emptyUngroupedHint": "Thả dự án vào đây để gỡ khỏi màn hình"
   },
   "column": {
+    "orientationHorizontal": "Chuyển sang bố cục dọc",
+    "orientationVertical": "Chuyển sang bố cục ngang",
+    "wrapAuto": "Tự động xuống dòng",
+    "wrapCount": "Xuống dòng sau mỗi {{count}}",
     "collapse": "Thu gọn cột",
     "expand": "Mở rộng cột"
   }

@@ -1167,6 +1167,85 @@ function createOpenApiSpec() {
                 paths: { type: "array", items: { type: "string" } },
               },
             },
+            focus_summary_cache: {
+              type: "object",
+              description:
+                'Live snapshot of the focus-window-summary cache (focus_summaries) — the cache behind the Focus page\'s "What happened in this window" block. Unlike transcript_cache this has no LRU cap and survives restarts.',
+              required: ["size", "hits", "misses", "hitRate", "totalBullets"],
+              properties: {
+                size: { type: "integer", description: "Rows currently cached" },
+                hits: { type: "integer" },
+                misses: { type: "integer" },
+                hitRate: { type: "number" },
+                totalBullets: { type: "integer" },
+              },
+            },
+          },
+        },
+        FocusSummaryCacheTimelineResponse: {
+          type: "object",
+          required: ["days"],
+          properties: {
+            days: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["date", "hits", "misses", "total"],
+                properties: {
+                  date: {
+                    type: "string",
+                    format: "date",
+                    description: "UTC calendar day, YYYY-MM-DD",
+                  },
+                  hits: { type: "integer" },
+                  misses: { type: "integer" },
+                  total: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        FocusSummaryCacheDayResponse: {
+          type: "object",
+          required: ["date", "hits", "misses", "total", "models", "truncated", "entries"],
+          properties: {
+            date: { type: "string", format: "date" },
+            hits: { type: "integer" },
+            misses: { type: "integer" },
+            total: { type: "integer" },
+            models: { type: "array", items: { type: "string" } },
+            truncated: {
+              type: "boolean",
+              description:
+                "True when the day had more than 500 matching rows and the list was cut off",
+            },
+            entries: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "cache_key",
+                  "level",
+                  "scope_label",
+                  "model",
+                  "outcome",
+                  "bullet_count",
+                  "accessed_at",
+                ],
+                properties: {
+                  cache_key: { type: "string" },
+                  level: { type: "string", enum: ["window", "day"] },
+                  scope_label: {
+                    type: "string",
+                    description: 'Session name, project name, "Unassigned", or "All projects"',
+                  },
+                  model: { type: "string", nullable: true },
+                  outcome: { type: "string", enum: ["hit", "miss"] },
+                  bullet_count: { type: "integer", nullable: true },
+                  accessed_at: { type: "string", format: "date-time" },
+                },
+              },
+            },
           },
         },
         ClearDataResponse: {
@@ -1360,6 +1439,11 @@ function createOpenApiSpec() {
             purged_sessions: { type: "integer" },
             purged_events: { type: "integer" },
             purged_agents: { type: "integer" },
+            purged_focus_summary_log: {
+              type: "integer",
+              description:
+                "focus_summary_access_log rows purged (the cache itself, focus_summaries, is untouched)",
+            },
           },
         },
       },
@@ -2159,6 +2243,84 @@ function createOpenApiSpec() {
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/SettingsInfoResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/settings/cache/timeline": {
+        get: {
+          tags: ["Settings"],
+          summary: "Day-bucketed hit/miss counts for the focus-window-summary cache",
+          operationId: "getFocusSummaryCacheTimeline",
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 90, default: 30 },
+              description: "Trailing days to include, clamped to [1, 90]",
+            },
+          ],
+          responses: {
+            200: {
+              description: "Zero-filled, oldest-first day timeline",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FocusSummaryCacheTimelineResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/settings/cache/day": {
+        get: {
+          tags: ["Settings"],
+          summary: "Focus-summary-cache activity for a single UTC calendar day",
+          operationId: "getFocusSummaryCacheDay",
+          parameters: [
+            {
+              name: "date",
+              in: "query",
+              required: true,
+              schema: { type: "string", format: "date" },
+              description: "UTC calendar day, YYYY-MM-DD",
+            },
+            {
+              name: "outcome",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["hit", "miss"] },
+            },
+            {
+              name: "model",
+              in: "query",
+              required: false,
+              schema: { type: "string" },
+            },
+            {
+              name: "level",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["window", "day"] },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Day summary plus the (possibly filtered) entry list",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FocusSummaryCacheDayResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Missing or malformed date",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/MessageErrorResponse" },
                 },
               },
             },

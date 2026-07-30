@@ -89,7 +89,9 @@ describe("GET /api/monitors", () => {
 describe("PUT /api/monitors", () => {
   it("persists a full layout and a follow-up GET reflects it", async () => {
     const layout = {
-      monitors: [{ id: "m1", name: "Left Screen", collapsed: false, orientation: "horizontal" }],
+      monitors: [
+        { id: "m1", name: "Left Screen", collapsed: false, orientation: "horizontal", wrap: "2" },
+      ],
       monitorMap: { "proj-1": "m1" },
       collapsedProjects: { "proj-2": true },
     };
@@ -123,6 +125,7 @@ describe("PUT /api/monitors", () => {
       "a monitor with a bad orientation",
       { monitors: [{ id: "m1", name: "x", orientation: "up" }] },
     ],
+    ["a monitor with a bad wrap", { monitors: [{ id: "m1", name: "x", wrap: "5" }] }],
     ["monitorMap not an object", { monitorMap: ["m1"] }],
     ["monitorMap value not a string", { monitorMap: { "proj-1": 1 } }],
     ["collapsedProjects not an object", { collapsedProjects: ["proj-1"] }],

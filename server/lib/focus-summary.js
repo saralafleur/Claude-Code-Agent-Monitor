@@ -42,6 +42,14 @@
  * still-running day regenerates whenever new activity actually changed the
  * input — not on every page view.
  *
+ * Every cache resolution (hit or miss) at a "real" decision point — the
+ * direct-path window request, each hierarchical per-day building block, and
+ * the hierarchical window's own fast-path/rollup checks — is also persisted
+ * to `focus_summary_access_log` via {@link recordAccess}, for the Settings →
+ * Focus Summaries section's day timeline and per-day drill-down. This is
+ * separate from `focus_summaries` itself, which only holds the CURRENT row
+ * per cache key with no history. Logging never throws back into generation.
+ *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -230,6 +238,34 @@ function parseWindowSummaryOutput(stdout, maxBullets = MAX_BULLETS) {
   }
 }
 
+/**
+ * Persists one focus-summary cache resolution (hit or miss) to
+ * `focus_summary_access_log`. Called explicitly at each real decision point
+ * rather than from inside {@link readCachedSummary}, so the internal per-day
+ * peeks {@link generateHierarchicalSummary} does while building its
+ * zero-LLM-fast-path digest don't each count as a logged access. Never
+ * allowed to throw back into summary generation.
+ */
+function recordAccess(dbModule, { cacheKey, level, outcome, scope, model, bulletCount }) {
+  try {
+    const now = new Date().toISOString();
+    dbModule.stmts.insertFocusSummaryAccess.run(
+      cacheKey,
+      level,
+      outcome,
+      scope?.project_id ?? null,
+      scope?.session_id ?? null,
+      scope?.unassigned ? 1 : 0,
+      model ?? null,
+      bulletCount ?? null,
+      now.slice(0, 10),
+      now
+    );
+  } catch {
+    /* ignore - logging failure must never break summary generation */
+  }
+}
+
 /** Reads a valid cached summary row for `cacheKey` gated on `digest`, or
  *  null. Shared by both paths; never spawns anything. */
 function readCachedSummary(dbModule, cacheKey, digest) {
@@ -259,13 +295,35 @@ async function llmAvailable() {
  * window's raw session facts. Used verbatim for short windows AND for each
  * calendar day inside a hierarchical rollup — a day generated as a rollup
  * building block is byte-identical to one the picker requests directly.
+ *
+ * @param logMeta Optional `{ level: 'window'|'day', scope }` — when present,
+ *   the hit/miss resolution is recorded to `focus_summary_access_log` (see
+ *   {@link recordAccess}). Omitted by callers (e.g. tests) that don't care
+ *   about the access history.
  */
-async function generateDirectSummary(dbModule, cacheKey, report, maxBullets = MAX_BULLETS) {
+async function generateDirectSummary(
+  dbModule,
+  cacheKey,
+  report,
+  maxBullets = MAX_BULLETS,
+  logMeta = null
+) {
   if ((report.sessions || []).length === 0) return null;
 
   const digest = computeInputDigest(report);
   const cached = readCachedSummary(dbModule, cacheKey, digest);
-  if (cached) return cached;
+  if (cached) {
+    if (logMeta) {
+      recordAccess(dbModule, {
+        cacheKey,
+        outcome: "hit",
+        model: cached.model,
+        bulletCount: cached.bullets.length,
+        ...logMeta,
+      });
+    }
+    return cached;
+  }
 
   if (!(await llmAvailable())) return null;
 
@@ -277,6 +335,15 @@ async function generateDirectSummary(dbModule, cacheKey, report, maxBullets = MA
 
   dbModule.stmts.upsertFocusSummary.run(cacheKey, digest, JSON.stringify(bullets), model);
   const row = dbModule.stmts.getFocusSummary.get(cacheKey);
+  if (logMeta) {
+    recordAccess(dbModule, {
+      cacheKey,
+      outcome: "miss",
+      model,
+      bulletCount: bullets.length,
+      ...logMeta,
+    });
+  }
   return {
     bullets,
     generated_at: row ? row.created_at : new Date().toISOString(),
@@ -381,7 +448,17 @@ async function generateHierarchicalSummary(dbModule, cacheKey, opts) {
   }));
   const preDigest = crypto.createHash("sha1").update(JSON.stringify(preParts)).digest("hex");
   const preCached = readCachedSummary(dbModule, cacheKey, preDigest);
-  if (preCached) return preCached;
+  if (preCached) {
+    recordAccess(dbModule, {
+      cacheKey,
+      level: "window",
+      outcome: "hit",
+      scope: opts.scope,
+      model: preCached.model,
+      bulletCount: preCached.bullets.length,
+    });
+    return preCached;
+  }
 
   if (!(await llmAvailable())) return null;
 
@@ -390,7 +467,10 @@ async function generateHierarchicalSummary(dbModule, cacheKey, opts) {
   const dayEntries = [];
   const digestParts = [];
   for (const c of chunks) {
-    const day = await generateDirectSummary(dbModule, c.key, c.report, MAX_BULLETS);
+    const day = await generateDirectSummary(dbModule, c.key, c.report, MAX_BULLETS, {
+      level: "day",
+      scope: opts.scope,
+    });
     const label = localDayLabel(c.startMs);
     if (day) {
       dayEntries.push({ label, lines: day.bullets });
@@ -403,7 +483,17 @@ async function generateHierarchicalSummary(dbModule, cacheKey, opts) {
 
   const digest = crypto.createHash("sha1").update(JSON.stringify(digestParts)).digest("hex");
   const cached = readCachedSummary(dbModule, cacheKey, digest);
-  if (cached) return cached;
+  if (cached) {
+    recordAccess(dbModule, {
+      cacheKey,
+      level: "window",
+      outcome: "hit",
+      scope: opts.scope,
+      model: cached.model,
+      bulletCount: cached.bullets.length,
+    });
+    return cached;
+  }
 
   // Reduce: one rollup spawn over the day summaries.
   const maxBullets = bulletBudget(chunks.length);
@@ -415,6 +505,14 @@ async function generateHierarchicalSummary(dbModule, cacheKey, opts) {
 
   dbModule.stmts.upsertFocusSummary.run(cacheKey, digest, JSON.stringify(bullets), model);
   const row = dbModule.stmts.getFocusSummary.get(cacheKey);
+  recordAccess(dbModule, {
+    cacheKey,
+    level: "window",
+    outcome: "miss",
+    scope: opts.scope,
+    model,
+    bulletCount: bullets.length,
+  });
   return {
     bullets,
     generated_at: row ? row.created_at : new Date().toISOString(),
@@ -448,7 +546,10 @@ async function generateWindowSummary(dbModule, cacheKey, report, opts = undefine
       return generateHierarchicalSummary(dbModule, cacheKey, opts);
     }
   }
-  return generateDirectSummary(dbModule, cacheKey, report, MAX_BULLETS);
+  return generateDirectSummary(dbModule, cacheKey, report, MAX_BULLETS, {
+    level: "window",
+    scope: opts?.scope ?? null,
+  });
 }
 
 module.exports = {

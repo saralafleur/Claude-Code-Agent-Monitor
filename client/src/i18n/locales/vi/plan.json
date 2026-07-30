@@ -87,10 +87,6 @@
         "fullDayTitle": "Hiển thị cả ngày"
       },
       "windowStart": {
-        "groupLabel": "Bắt đầu khung xem",
-        "inputLabel": "Giờ bắt đầu khung xem",
-        "prevBlock": "Xem khung trước đó",
-        "nextBlock": "Xem khung tiếp theo",
         "live": "Trực tiếp",
         "liveTitle": "Theo dõi thời gian hiện tại thay vì một giờ bắt đầu cố định",
         "quickStart": {
@@ -146,7 +142,13 @@
       "aiNote": "Do AI tạo từ hoạt động của từng phiên — hãy kiểm tra chi tiết quan trọng ở các hàng bên dưới.",
       "aiNoteWithModel": "Do AI ({{model}}) tạo từ hoạt động của từng phiên — hãy kiểm tra chi tiết quan trọng ở các hàng bên dưới.",
       "generatedIn": "Tạo trong {{duration}}",
-      "servedFromCache": "Lấy từ bộ nhớ đệm"
+      "servedFromCache": "Lấy từ bộ nhớ đệm",
+      "activeNow": "Đang làm {{what}}.",
+      "activeNowScoped": "{{project}} — đang làm {{what}}.",
+      "startedLabel": "Bắt đầu lúc",
+      "lastActivityLabel": "Hoạt động gần nhất",
+      "noFocusWhat": "hoạt động chưa phân loại",
+      "noActiveWork": "Hiện không có công việc nào đang được thực hiện."
     }
   }
 }

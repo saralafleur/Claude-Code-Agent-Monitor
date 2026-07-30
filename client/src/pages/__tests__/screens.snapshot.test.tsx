@@ -128,6 +128,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
       cpus: 1,
     },
     transcript_cache: { size: 0, maxSize: 100, hits: 0, misses: 0, keys: [] },
+    focus_summary_cache: { size: 0, hits: 0, misses: 0, hitRate: 0, totalBullets: 0 },
   };
   // Empty-fixture-shaped GET /api/focus-report response (build task 13's new
   // api.focusReport, not yet added to lib/api.ts as of this test's authoring)
@@ -304,6 +305,17 @@ vi.mock("../../lib/api", async (importOriginal) => {
           purged_sessions: 0,
           purged_events: 0,
           purged_agents: 0,
+          purged_focus_summary_log: 0,
+        }),
+        cacheTimeline: r({ days: [] }),
+        cacheDay: r({
+          date: "2026-06-10",
+          hits: 0,
+          misses: 0,
+          total: 0,
+          models: [],
+          truncated: false,
+          entries: [],
         }),
       },
       import: {

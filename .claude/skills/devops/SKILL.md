@@ -1,22 +1,27 @@
 ---
 name: devops
-argument-hint: "[desktop-setup|setup | desktop-build | desktop-remove | web-setup | web-build|build | web-up|up | web-down|down | status]"
+argument-hint: "[desktop-setup|setup | desktop-build | desktop-remove | web-setup | web-build|build | web-up|up | web-down|down | docker-up|docker | docker-down | status]"
 description: >
   Claude Code Agent Monitor's DevOps toolbox — commands for the desktop
-  Electron app AND the native web-app dev stack (Express + Vite). Use when
-  Sara types "/devops", or asks to set up, build, deploy, refresh, run, or
-  remove either. Desktop commands: `desktop-setup` (alias `setup`) — audits
-  and installs everything needed to build the desktop app locally;
-  `desktop-build` — builds a fresh arm64 DMG and installs/replaces the app
-  in /Applications; `desktop-remove` — quits and deletes the installed app,
-  optionally purging its data. Web-app commands (the fast iteration loop —
-  Vite HMR, no packaging): `web-setup` — installs root+client deps only;
-  `web-build` (alias `build`) — runs the production client build;
-  `web-up` (alias `up`) — starts the dev server in the background;
-  `web-down` (alias `down`) — stops it. Bare `build`/`up`/`down` default to
-  the web app, not desktop. `status` — read-only report of the current
-  state of everything the devops skill manages. Invoking with no command
-  lists available commands and runs the status report.
+  Electron app, the native web-app dev stack (Express + Vite), and the
+  Docker-based production stack. Use when Sara types "/devops", or asks to
+  set up, build, deploy, refresh, run, or remove any of these. Desktop
+  commands: `desktop-setup` (alias `setup`) — audits and installs
+  everything needed to build the desktop app locally; `desktop-build` —
+  builds a fresh arm64 DMG and installs/replaces the app in /Applications;
+  `desktop-remove` — quits and deletes the installed app, optionally
+  purging its data. Web-app commands (the fast iteration loop — Vite HMR,
+  no packaging): `web-setup` — installs root+client deps only; `web-build`
+  (alias `build`) — runs the production client build; `web-up` (alias
+  `up`) — starts the dev server in the background; `web-down` (alias
+  `down`) — stops it. Docker commands (the containerized production
+  build): `docker-up` (alias `docker`) — builds and starts the
+  `agent-monitor` container from the root docker-compose.yml, verifying
+  the response really comes from the container; `docker-down` — stops and
+  removes it. Bare `build`/`up`/`down` default to the web app, not desktop.
+  `status` — read-only report of the current state of everything the
+  devops skill manages. Invoking with no command lists available commands
+  and runs the status report.
 ---
 
 # DevOps Skill — Claude Code Agent Monitor
@@ -64,15 +69,18 @@ Typical gates here: `/devops desktop-build` before overwriting the app
 currently installed in `/Applications`; `/devops desktop-remove` before
 deleting it; a second, separate gate in `desktop-remove` asking whether to
 also purge app data. The web-app commands (`web-build`/`web-up`/`web-down`)
-do NOT gate — they touch no installed app and no user data, only a local
-dev-server process that's cheap to restart. Mark each gate in the
+and the Docker commands (`docker-up`/`docker-down`) do NOT gate — none of
+them touch an installed app or user data, only a local dev-server process
+or container that's cheap to restart/rebuild. Mark each gate in the
 procedure docs with `🟧🟧🟧 HUMAN GATE REQUIRED 🟧🟧🟧` above the decision.
 
 ## Command routing
 
 Parse the argument after `/devops`. **Bare `build`/`up`/`down` default to
 the web app, not desktop** — say `desktop-build` explicitly to reach that
-one; there's no `up`/`down` shorthand for it anymore.
+one; there's no `up`/`down` shorthand for it anymore. The Docker commands
+have their own `docker-up`/`docker` / `docker-down` names — they don't
+overload bare `up`/`down`.
 
 | Argument | Command |
 |---|---|
@@ -83,6 +91,8 @@ one; there's no `up`/`down` shorthand for it anymore.
 | `web-build`, `build` | Run the production client build (`npm run build`) — follow `references/web-lifecycle.md` |
 | `web-up`, `up` | Start the web-app dev server (Express + Vite HMR) in the background — follow `references/web-lifecycle.md` |
 | `web-down`, `down` | Stop the backgrounded web-app dev server — follow `references/web-lifecycle.md` |
+| `docker-up`, `docker` | Build and start the containerized production build (`docker compose up -d --build`) — follow `references/docker-lifecycle.md` |
+| `docker-down` | Stop and remove the container (`docker compose down`) — follow `references/docker-lifecycle.md` |
 | `status` | Report current state of everything this skill manages — follow `references/status.md` |
 | *(none)* | List commands, then run the `status` command |
 
@@ -138,6 +148,26 @@ server and Vite). None of the three gate — they touch no installed app and
 no user data. Full procedure in `references/web-lifecycle.md`; shared
 audit script at `scripts/web-check.sh`.
 
+### docker-up (alias: docker), docker-down
+
+The containerized production build — the same multi-stage root
+`Dockerfile` (`node:22-alpine`, `NODE_ENV=production`, client bundle baked
+in) a real deployment would run, via the root `docker-compose.yml`. A
+third, independent way to run the app alongside `web-up`'s Vite HMR dev
+server and the installed desktop app. `docker-up` runs
+`docker compose up -d --build`, auto-picks a free host port if the
+conventional 4820 is already held (e.g. by `web-up`), and verifies with
+more than a port check — it confirms the `agent-monitor` container is
+`Up` (`docker ps`) AND proves the response really comes from the
+container via `docker exec ... fetch(...)` against its own internal
+network namespace, since a host process can share the exact same
+published port on macOS (observed directly while building this command)
+and a plain curl can't tell them apart. `docker-down` runs
+`docker compose down`. Neither gates — no installed app, and the bind-
+mounted `~/.claude/agent-dashboard` data survives either way. Full
+procedure in `references/docker-lifecycle.md`; shared audit script at
+`scripts/docker-check.sh`.
+
 ### status
 
 Read-only report of the current state of everything the devops skill
@@ -155,6 +185,7 @@ doc in `references/<command>.md`, an entry in the frontmatter
 show up in `status`. Keep the audit/plan/install/verify structure. If a
 new command shares build/install state with `desktop-build` or
 `desktop-remove`, reuse `scripts/desktop-check.sh`; if it shares state with
-`web-build`/`web-up`/`web-down`, reuse `scripts/web-check.sh` — don't add a
-new script for state something already tracks (see `references/status.md`'s
-note on shared scripts).
+`web-build`/`web-up`/`web-down`, reuse `scripts/web-check.sh`; if it shares
+state with `docker-up`/`docker-down`, reuse `scripts/docker-check.sh` —
+don't add a new script for state something already tracks (see
+`references/status.md`'s note on shared scripts).

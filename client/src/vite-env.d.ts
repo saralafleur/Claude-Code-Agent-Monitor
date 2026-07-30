@@ -14,3 +14,11 @@
  * Surfaced in Settings and the update notifier without a runtime fetch.
  */
 declare const __APP_VERSION__: string;
+
+/**
+ * The `DASHBOARD_PORT` this build's API/WebSocket proxy targets (see
+ * `vite.config.ts`) - the backend origin, whether serving the Vite dev
+ * client or the built `dist/` bundle. Used by `DevBuildSiteCard` to link
+ * from the dev server to the built site.
+ */
+declare const __DASHBOARD_PORT__: number;

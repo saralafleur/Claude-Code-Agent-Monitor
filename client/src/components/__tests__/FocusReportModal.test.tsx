@@ -129,7 +129,7 @@ describe("FocusReportModal", () => {
   beforeEach(() => {
     focusReportMock.mockReset();
     // The Concurrency tile's primary-ratio choice persists across mounts by
-    // design - reset it so each test starts from the "open" default.
+    // design - reset it so each test starts from the "active" default.
     localStorage.removeItem(CONCURRENCY_PRIMARY_KEY);
   });
 
@@ -176,6 +176,9 @@ describe("FocusReportModal", () => {
   });
 
   it("shows the concurrency ratio and the real wall-clock span (not the per-segment sum)", async () => {
+    // Not testing the primary/active-vs-open toggle here, so pin it to
+    // "open" - the ratio this report actually carries.
+    localStorage.setItem(CONCURRENCY_PRIMARY_KEY, "open");
     focusReportMock.mockResolvedValue(
       makeReport({
         wall_clock_ms: 25 * 60_000, // sessions overlapped: less than totals.wall_ms (50m)
@@ -191,6 +194,9 @@ describe("FocusReportModal", () => {
   });
 
   it("shows the while-active concurrency sub-line when the report carries active_concurrency_ratio, and omits it when absent", async () => {
+    // Pin to "open" primary - this test is about the sub-line text with
+    // open as primary, not the default toggle choice.
+    localStorage.setItem(CONCURRENCY_PRIMARY_KEY, "open");
     focusReportMock.mockResolvedValue(
       makeReport({
         wall_clock_ms: 50 * 60_000,
@@ -227,29 +233,29 @@ describe("FocusReportModal", () => {
     const { unmount } = renderModal();
     await screen.findByText("Per-session breakdown");
 
-    // Default: open-session ratio is primary - shown over ITS total (the
-    // 50m open-session wall clock) - with the active ratio as the sub-line.
+    // Default: active ratio is primary - shown over ITS total (the 15m
+    // active wall clock) - with the open-session ratio as the sub-line.
     const tile = () => screen.getByText("Concurrency").closest("div")!.parentElement as HTMLElement;
-    expect(within(tile()).getByText("0.60x")).toBeInTheDocument();
-    expect(within(tile()).getByText("of 50m 0s open-session time")).toBeInTheDocument();
-    expect(within(tile()).getByText("2.00x while active")).toBeInTheDocument();
-
-    // Toggle: the two swap places - the primary's total swaps with them (now
-    // the 15m active wall clock) - the tooltip describes the active ratio,
-    // and the choice lands in localStorage.
-    fireEvent.click(screen.getByLabelText("Swap primary concurrency ratio"));
     expect(within(tile()).getByText("2.00x")).toBeInTheDocument();
     expect(within(tile()).getByText("of 15m 0s active time")).toBeInTheDocument();
     expect(within(tile()).getByText("0.60x across open sessions")).toBeInTheDocument();
-    expect(tile().getAttribute("title")).toMatch(/active wall-clock/);
-    expect(localStorage.getItem(CONCURRENCY_PRIMARY_KEY)).toBe("active");
+
+    // Toggle: the two swap places - the primary's total swaps with them (now
+    // the 50m open-session wall clock) - the tooltip describes the
+    // open-session ratio, and the choice lands in localStorage.
+    fireEvent.click(screen.getByLabelText("Swap primary concurrency ratio"));
+    expect(within(tile()).getByText("0.60x")).toBeInTheDocument();
+    expect(within(tile()).getByText("of 50m 0s open-session time")).toBeInTheDocument();
+    expect(within(tile()).getByText("2.00x while active")).toBeInTheDocument();
+    expect(tile().getAttribute("title")).not.toMatch(/active wall-clock/);
+    expect(localStorage.getItem(CONCURRENCY_PRIMARY_KEY)).toBe("open");
     unmount();
 
     // A fresh mount (same as a page refresh) restores the inverted choice.
     renderModal();
     await screen.findByText("Per-session breakdown");
-    expect(within(tile()).getByText("2.00x")).toBeInTheDocument();
-    expect(within(tile()).getByText("0.60x across open sessions")).toBeInTheDocument();
+    expect(within(tile()).getByText("0.60x")).toBeInTheDocument();
+    expect(within(tile()).getByText("2.00x while active")).toBeInTheDocument();
   });
 
   it("falls back to a dash when there's no wall-clock time for a concurrency ratio", async () => {

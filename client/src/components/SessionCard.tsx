@@ -68,7 +68,18 @@ import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { FolderOpen, Bot, Clock, Coins, Cpu, MessageSquare } from "lucide-react";
+import {
+  FolderOpen,
+  Bot,
+  Clock,
+  Coins,
+  Cpu,
+  MessageSquare,
+  Terminal,
+  Loader2,
+  Check,
+  X,
+} from "lucide-react";
 import { SessionStatusBadge } from "./StatusBadge";
 import { FOCUS_KIND_ICONS } from "./PlanModal";
 import { MarkdownContent } from "./conversation/MarkdownContent";
@@ -280,6 +291,38 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
     else navigate(`/sessions/${session.id}`);
   }
 
+  // "Jump to terminal" — offered only for a local, active session with a
+  // resolved pid (see Session.pid's doc comment in lib/types.ts for why an
+  // older/remote/never-resolved session won't have one). Feedback lives on
+  // the button itself (pending spinner → check/x, auto-reverting) rather
+  // than a toast, since this codebase has no toast primitive - see
+  // client/src/pages/Run.tsx for the same local-state convention.
+  const canFocusTerminal =
+    (session.source === "local" || !session.source) && isActive && !!session.pid;
+  const [terminalState, setTerminalState] = useState<"idle" | "pending" | "success" | "error">(
+    "idle"
+  );
+  const [terminalError, setTerminalError] = useState<string | null>(null);
+  const terminalResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleFocusTerminal(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (terminalState === "pending") return;
+    if (terminalResetTimerRef.current) clearTimeout(terminalResetTimerRef.current);
+    setTerminalState("pending");
+    setTerminalError(null);
+    api.sessions
+      .focusTerminal(session.id)
+      .then(() => setTerminalState("success"))
+      .catch((err: unknown) => {
+        setTerminalError(err instanceof Error ? err.message : t("session.focusTerminalError"));
+        setTerminalState("error");
+      })
+      .finally(() => {
+        terminalResetTimerRef.current = setTimeout(() => setTerminalState("idle"), 2000);
+      });
+  }
+
   function handleMouseEnter() {
     clearCloseTimer();
     if (cardRef.current) setAnchorRect(cardRef.current.getBoundingClientRect());
@@ -358,9 +401,41 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
             </p>
           </div>
         </div>
-        {/* compact: cards are narrow — inline reason chip would squeeze the
-            title, so the reason stays hover-tooltip-only here. */}
-        <SessionStatusBadge status={status} reason={sessionAwaitingReason(session)} compact />
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {canFocusTerminal && (
+            <button
+              type="button"
+              onClick={handleFocusTerminal}
+              disabled={terminalState === "pending"}
+              title={
+                terminalState === "error"
+                  ? (terminalError ?? undefined)
+                  : t("session.focusTerminal")
+              }
+              aria-label={t("session.focusTerminal")}
+              className={`p-1 rounded-md transition-colors ${
+                terminalState === "success"
+                  ? "text-emerald-500"
+                  : terminalState === "error"
+                    ? "text-red-500"
+                    : "text-gray-500 hover:text-accent hover:bg-surface-3"
+              }`}
+            >
+              {terminalState === "pending" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : terminalState === "success" ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : terminalState === "error" ? (
+                <X className="w-3.5 h-3.5" />
+              ) : (
+                <Terminal className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+          {/* compact: cards are narrow — inline reason chip would squeeze the
+              title, so the reason stays hover-tooltip-only here. */}
+          <SessionStatusBadge status={status} reason={sessionAwaitingReason(session)} compact />
+        </div>
       </div>
 
       {session.cwd && (

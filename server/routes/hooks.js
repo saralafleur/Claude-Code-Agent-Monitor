@@ -17,6 +17,7 @@ const { ingestPlanForCwd } = require("../lib/plan-ingest");
 // Required as a module object (not destructured) so tests can swap
 // `liveness.probeLiveCwds` and the watchdog picks the stub up at call time.
 const liveness = require("../lib/session-liveness");
+const { resolveSessionPid } = require("../lib/terminal-focus");
 
 const router = Router();
 
@@ -205,6 +206,19 @@ function ensureSession(sessionId, data) {
   // make better-sqlite3 throw inside the surrounding processEvent transaction.
   if (typeof data.transcript_path === "string" && data.transcript_path) {
     stmts.setSessionTranscriptPath.run(data.transcript_path, sessionId);
+  }
+
+  // First-seen pid hint → resolved against the live process tree and written
+  // to session row (see scripts/hook-handler.js for the hint's origin and
+  // server/lib/terminal-focus.js for why it needs resolving rather than
+  // trusting verbatim: the hint can be an intermediate shell wrapper rather
+  // than the `claude` process itself). Idempotent via the SQL guard, so
+  // later hooks for the same session are no-ops, and a hint that resolves to
+  // nothing (foreign hint, process already gone, unsupported platform)
+  // simply leaves pid NULL rather than throwing.
+  if (typeof data.pid === "number" && Number.isInteger(data.pid) && data.pid > 0) {
+    const resolvedPid = resolveSessionPid(data.pid);
+    if (resolvedPid) stmts.setSessionPid.run(resolvedPid, sessionId);
   }
   return session;
 }

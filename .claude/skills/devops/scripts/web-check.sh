@@ -41,7 +41,7 @@ fi
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
   pid="$(cat "$PID_FILE")"
   port="$(grep -oE 'listen on :[0-9]+|using [0-9]+ instead' "$LOG_FILE" 2>/dev/null | tail -1 | grep -oE '[0-9]+')"
-  line "web-running" "info" "running, PID $pid${port:+, port $port}"
+  line "web-running" "info" "running, PID $pid, http://localhost:${port:-4820}"
 else
   line "web-running" "info" "not running"
 fi

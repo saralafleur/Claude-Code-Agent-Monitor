@@ -109,6 +109,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Cloud,
+  Gauge,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -120,7 +121,8 @@ import { ImportHistory } from "../components/ImportHistory";
 import { RemoteSources } from "../components/RemoteSources";
 import { Skeleton } from "../components/Skeleton";
 import { AlertsNotifications } from "../components/AlertsNotifications";
-import type { ModelPricing, WSMessage } from "../lib/types";
+import { CacheSection } from "../components/CacheSection";
+import type { FocusSummaryCacheStats, ModelPricing, WSMessage } from "../lib/types";
 
 // In-page navigation for the (dense) Settings screen. Each entry maps to a
 // `<section id>` rendered below; the TOC scroll-spies the active one.
@@ -144,6 +146,12 @@ const SETTINGS_SECTIONS: {
   { id: "notifications", labelKey: "notifications.title", Icon: Bell },
   { id: "alerts", labelKey: "alertsHub.title", Icon: BellRing },
   { id: "data", labelKey: "data.title", Icon: Database },
+  {
+    id: "focus-summaries",
+    labelKey: "focusSummaries.title",
+    fallback: "Focus Summaries",
+    Icon: Gauge,
+  },
   { id: "about", labelKey: "about.title", Icon: Server },
 ];
 
@@ -225,6 +233,7 @@ interface SystemInfo {
   db: { path: string; size: number; counts: Record<string, number> };
   hooks: { installed: boolean; path: string; hooks: Record<string, boolean> };
   server: { uptime: number; node_version: string; platform: string; ws_connections: number };
+  focus_summary_cache: FocusSummaryCacheStats;
 }
 
 function formatTimestamp(iso: string): string {
@@ -1768,6 +1777,21 @@ export function Settings() {
             {actionBanner(["clear"])}
           </div>
         </div>
+      </section>
+
+      {/* ─── FOCUS SUMMARIES ─── */}
+      <section id="focus-summaries" className="scroll-mt-24">
+        <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2 mb-1">
+          <Gauge className="w-4 h-4 text-gray-500" />
+          {t("focusSummaries.title", "Focus Summaries")}
+        </h3>
+        <p className="text-xs text-gray-500 mb-4">
+          {t(
+            "focusSummaries.description",
+            "How the Focus page's \"What happened in this window\" cache is hitting, and what's in it."
+          )}
+        </p>
+        <CacheSection stats={sysInfo?.focus_summary_cache ?? null} />
       </section>
 
       {/* ─── ABOUT ─── */}

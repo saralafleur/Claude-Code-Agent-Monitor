@@ -47,6 +47,10 @@ export default defineConfig({
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    // The backend origin this build talks to - same value the proxy above
+    // targets. Lets the running UI point at "the built site" from the dev
+    // server (see DevBuildSiteCard) without guessing a port.
+    __DASHBOARD_PORT__: JSON.stringify(DASHBOARD_PORT),
   },
   server: {
     port: 5173,

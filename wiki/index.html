@@ -993,6 +993,13 @@
                     the standalone Unassigned column) has its own chevron too, shrinking that one column down to
                     a slim header-only bar right where it sits, independent of whichever box it's in.
                   </p>
+                  <p>
+                    Every Agents/Sessions status column gets its own layout toggle too — the
+                    same icon next to its count badge — switching just that column's cards
+                    between the default vertical stack and a horizontally-scrolling row.
+                    Unlike the monitor toggle above, this one is saved per-browser only, and
+                    each status column's setting is independent of the others.
+                  </p>
                 </div>
                 <div class="feature-card">
                   <div class="feature-icon ic-amber">📂</div>
@@ -7208,7 +7215,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=63" defer></script>
+    <script src="i18n-content.js?v=64" defer></script>
     <script src="script.js?v=33" defer></script>
     <script>
       (function () {

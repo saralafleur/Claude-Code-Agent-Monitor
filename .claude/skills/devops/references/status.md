@@ -11,7 +11,9 @@ skill manages in right now?" Never installs, fixes, or changes anything.
    `desktop-check.sh` is shared by `desktop-build` and `desktop-remove` —
    report those two together under one section. `web-check.sh` is shared
    by `web-build`, `web-up`, and `web-down` — report those three together
-   under one section. Neither shared script's commands get repeated tables.
+   under one section. `docker-check.sh` is shared by `docker-up` and
+   `docker-down` — report those two together under one section. No shared
+   script's commands get repeated tables.
 
 2. **Run** — execute each audit script (they are all read-only and exit 0):
 
@@ -20,6 +22,7 @@ skill manages in right now?" Never installs, fixes, or changes anything.
    zsh <skill-base-dir>/scripts/desktop-check.sh
    zsh <skill-base-dir>/scripts/web-setup-check.sh
    zsh <skill-base-dir>/scripts/web-check.sh
+   zsh <skill-base-dir>/scripts/docker-check.sh
    ```
 
 3. **Report** — for each command show:
@@ -35,7 +38,12 @@ skill manages in right now?" Never installs, fixes, or changes anything.
    desktop app is currently running (`app-running` row) and whether its
    data/logs exist on disk (relevant if Sara later runs `desktop-remove`);
    whether the web dev server is currently running and on what port
-   (`web-running` row).
+   (`web-running` row); whether the `agent-monitor` Docker container is
+   currently running and on what port (`docker-running` row). When
+   surfacing a URL from either row, label it — `web-running` is
+   **(hot-reload)**, `docker-running` is **(built-docker)** — so the two
+   are never ambiguous when both are live at once (see `web-lifecycle.md`
+   / `docker-lifecycle.md`).
 
 ## Report format
 
@@ -48,6 +56,7 @@ skill manages in right now?" Never installs, fixes, or changes anything.
 | desktop-build / desktop-remove | ✅ ready | — |
 | web-setup | ✅ ready | — |
 | web-build / web-up / web-down | ✅ ready | — |
+| docker-up / docker-down | ✅ ready | — |
 
 <details per command: audit table or non-ok rows>
 ```

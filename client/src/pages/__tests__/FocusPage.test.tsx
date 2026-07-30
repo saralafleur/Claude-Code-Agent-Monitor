@@ -10,7 +10,20 @@
  * hour-window zoom (`HourWindowZoomBar`/`useHourWindowZoom`, shared with
  * `FocusCalendarView`) — defaults to unzoomed (24h) so this page's existing
  * full-period default is unchanged, and scopes BOTH the stat tiles and the
- * activity card together once narrowed, never just one.
+ * activity card together once narrowed, never just one; and the summary
+ * block's live "currently active status", rendered LEADING (ahead of the
+ * historical AI bullets) (`resolveActiveFocuses`) — stubs
+ * `../../lib/focusStore`'s `useFocusMap` directly (the real store's
+ * `GET /api/focus` hydrate has no mock here) to assert: an open session's
+ * declared item/detour renders even with no AI summary at all (keeping the
+ * block visible on its own), a detour on top of the stack wins over the
+ * item, the project-name prefix follows `showProjectLabel` exactly like the
+ * activity card's own rows, an open session with NO live declaration falls
+ * back to the report's own latest segment (its kind chip and label) rather
+ * than being hidden, an open session with no focus at all (the report's
+ * `"none"` sentinel) surfaces as unclassified activity rather than
+ * vanishing, and a summary with zero currently-open sessions still says so
+ * explicitly.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -18,13 +31,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { FocusPage } from "../FocusPage";
-import type { FocusReport, Project } from "../../lib/types";
+import { formatTime } from "../../lib/format";
+import type { FocusReport, Project, SessionFocus } from "../../lib/types";
 
 const projectsListMock = vi.fn();
 const sessionsListMock = vi.fn();
 const focusReportMock = vi.fn();
 const focusReportSummaryMock = vi.fn();
 const focusReportSummaryConfigMock = vi.fn();
+const useFocusMapMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -35,6 +50,29 @@ vi.mock("../../lib/api", () => ({
     focusReportSummaryConfig: (...args: unknown[]) => focusReportSummaryConfigMock(...args),
   },
 }));
+
+// Real focusStore hydrates from api.plans.focusAll (unmocked here) - stub the
+// hook directly instead so the "currently active" tests below control the
+// live focus map deterministically without wiring up that whole store.
+vi.mock("../../lib/focusStore", () => ({
+  useFocusMap: () => useFocusMapMock(),
+}));
+
+function makeFocus(overrides: Partial<SessionFocus> = {}): SessionFocus {
+  return {
+    session_id: "sess-live",
+    cwd: "/repo-game",
+    item_number: null,
+    item_text: null,
+    note: null,
+    detour_stack: [],
+    since: null,
+    drift: null,
+    drift_reason: null,
+    updated_at: "2026-07-27T09:00:00.000Z",
+    ...overrides,
+  };
+}
 
 const PROJECT_GAME: Project = {
   id: "proj-game",
@@ -123,6 +161,127 @@ function makeNonEmptyReport(): FocusReport {
   });
 }
 
+/** `makeNonEmptyReport()` plus one still-OPEN session (`ended_at: null`,
+ *  `session_id: "sess-live"`) - the shape `resolveActiveFocuses` looks for.
+ *  Its one segment doubles as the resolver's fallback source when the live
+ *  `focusStore` map has no entry for it (see
+ *  `makeReportWithUndeclaredLiveSession` for the no-focus-at-all variant). */
+function makeReportWithLiveSession(): FocusReport {
+  const base = makeNonEmptyReport();
+  return {
+    ...base,
+    sessions: [
+      ...base.sessions,
+      {
+        session_id: "sess-live",
+        name: "Worker Two",
+        cwd: "/repo-game",
+        ended_at: null,
+        segments: [
+          {
+            kind: "item",
+            item_number: 3,
+            label: "Ship active status",
+            start: "2026-07-27T09:00:00.000Z",
+            end: "2026-07-27T09:30:00.000Z",
+            wall_ms: 30 * 60_000,
+            active_ms: 30 * 60_000,
+            idle_ms: 0,
+            inferred: false,
+            inferred_reason: null,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** Variant of `makeReportWithLiveSession()` whose live session's only segment
+ *  is the `"none"` sentinel - the shape a genuinely running session takes
+ *  when it hasn't called `ccam focus` AND hasn't been background-classified
+ *  yet (e.g. a subagent-driven session doing real detour/off-plan work with
+ *  no declaration at all), per `FocusReportSessionEntry`'s own guarantee that
+ *  every session gets at least one segment. */
+function makeReportWithUndeclaredLiveSession(): FocusReport {
+  const base = makeReportWithLiveSession();
+  return {
+    ...base,
+    sessions: base.sessions.map((s) =>
+      s.session_id === "sess-live"
+        ? {
+            ...s,
+            segments: [
+              {
+                kind: "none",
+                item_number: null,
+                label: null,
+                start: "2026-07-27T09:00:00.000Z",
+                end: "2026-07-27T09:30:00.000Z",
+                wall_ms: 30 * 60_000,
+                active_ms: 30 * 60_000,
+                idle_ms: 0,
+                inferred: false,
+                inferred_reason: null,
+              },
+            ],
+          }
+        : s
+    ),
+  };
+}
+
+/** Variant of `makeReportWithLiveSession()` whose live session's segment
+ *  carries `chunks` where the LAST one has gone quiet (`active: false`) -
+ *  the shape a session takes when it started work, then stopped reporting
+ *  real hook activity partway through the still-open segment. Exercises
+ *  `lastActiveTimestamp` actually walking back to the last active chunk
+ *  rather than reading the segment's own `start` or "now". */
+function makeReportWithStaleActivity(): FocusReport {
+  const base = makeReportWithLiveSession();
+  return {
+    ...base,
+    sessions: base.sessions.map((s) =>
+      s.session_id === "sess-live"
+        ? {
+            ...s,
+            segments: [
+              {
+                ...s.segments[0],
+                kind: "item",
+                item_number: 3,
+                label: "Ship active status",
+                start: "2026-07-27T09:00:00.000Z",
+                end: "2026-07-27T09:30:00.000Z",
+                wall_ms: 30 * 60_000,
+                active_ms: 20 * 60_000,
+                idle_ms: 10 * 60_000,
+                inferred: false,
+                inferred_reason: null,
+                chunks: [
+                  {
+                    start: "2026-07-27T09:00:00.000Z",
+                    end: "2026-07-27T09:10:00.000Z",
+                    active: true,
+                  },
+                  {
+                    start: "2026-07-27T09:10:00.000Z",
+                    end: "2026-07-27T09:20:00.000Z",
+                    active: true,
+                  },
+                  {
+                    start: "2026-07-27T09:20:00.000Z",
+                    end: "2026-07-27T09:30:00.000Z",
+                    active: false,
+                  },
+                ],
+              },
+            ],
+          }
+        : s
+    ),
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -150,6 +309,8 @@ beforeEach(() => {
     offset: 0,
   });
   focusReportMock.mockResolvedValue(makeNonEmptyReport());
+  useFocusMapMock.mockReset();
+  useFocusMapMock.mockReturnValue(new Map());
 });
 
 describe("FocusPage", () => {
@@ -328,6 +489,198 @@ describe("FocusPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "Game" }));
       await waitFor(() => expect(focusReportMock).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(screen.queryByTestId("focus-window-summary")).toBeNull());
+    });
+  });
+
+  describe("currently active status", () => {
+    it("shows a live bullet naming the declared item, even with no AI summary, and keeps the block visible", async () => {
+      focusReportMock.mockResolvedValue(makeReportWithLiveSession());
+      useFocusMapMock.mockReturnValue(
+        new Map([
+          [
+            "sess-live",
+            makeFocus({
+              session_id: "sess-live",
+              cwd: "/repo-game",
+              item_number: 3,
+              item_text: "Ship active status",
+              since: "2026-07-27T09:00:00.000Z",
+              updated_at: "2026-07-27T09:15:00.000Z",
+            }),
+          ],
+        ])
+      );
+      renderPage(); // default mock: { summary: null } - block would otherwise hide
+      await waitFor(() => expect(screen.getByTestId("focus-window-summary")).toBeTruthy());
+      const active = screen.getByTestId("focus-summary-active");
+      expect(active.textContent).toContain("Item 3");
+      expect(active.textContent).toContain("Ship active status");
+      // All-projects scope (the default) prefixes with the resolved project name.
+      expect(active.textContent).toContain("Game");
+    });
+
+    it("shows the open detour's title over the item, and drops the project prefix once scoped to one project", async () => {
+      focusReportMock.mockResolvedValue(makeReportWithLiveSession());
+      useFocusMapMock.mockReturnValue(
+        new Map([
+          [
+            "sess-live",
+            makeFocus({
+              session_id: "sess-live",
+              cwd: "/repo-game",
+              item_number: 3,
+              item_text: "Ship active status",
+              detour_stack: [
+                {
+                  description: "Investigating a flaky test",
+                  pushed_at: "2026-07-27T09:20:00.000Z",
+                  prior_item: 3,
+                  title: "Flaky test triage",
+                },
+              ],
+            }),
+          ],
+        ])
+      );
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByTestId("focus-summary-active").textContent).toContain(
+          "Flaky test triage"
+        )
+      );
+      expect(screen.getByTestId("focus-summary-active").textContent).not.toContain("Item 3");
+
+      fireEvent.click(screen.getByRole("button", { name: "Game" }));
+      await waitFor(() => expect(focusReportMock).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(screen.getByTestId("focus-summary-active").textContent).not.toContain("Game")
+      );
+    });
+
+    it("renders the active status ahead of the historical summary bullets, with a dash-indented, colored time sub-line", async () => {
+      focusReportMock.mockResolvedValue(makeReportWithLiveSession());
+      useFocusMapMock.mockReturnValue(
+        new Map([
+          [
+            "sess-live",
+            makeFocus({
+              session_id: "sess-live",
+              cwd: "/repo-game",
+              item_number: 3,
+              item_text: "Ship active status",
+              since: "2026-07-27T09:00:00.000Z",
+              updated_at: "2026-07-27T09:15:00.000Z",
+            }),
+          ],
+        ])
+      );
+      focusReportSummaryMock.mockResolvedValue({
+        summary: {
+          groups: [
+            {
+              project_id: "proj-game",
+              project_name: "Game",
+              wall_clock_ms: 3_600_000,
+              bullets: ["Historical bullet."],
+              generated_at: "2026-07-28T12:00:00.000Z",
+              cached: true,
+              model: "haiku",
+            },
+          ],
+        },
+      });
+      renderPage();
+      await waitFor(() => expect(screen.getByText("Historical bullet.")).toBeTruthy());
+
+      const active = screen.getByTestId("focus-summary-active");
+      // Active status renders BEFORE the historical bullets, not after.
+      expect(
+        active.compareDocumentPosition(screen.getByText("Historical bullet.")) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+
+      // The first sub-line is dash-indented and names wall-clock vs real
+      // active agent time; the second names when it started and when
+      // activity was last confirmed. All four time values render as
+      // distinct colored spans.
+      expect(active.textContent).toContain("— Wall clock");
+      expect(active.textContent).toContain("Total agent time");
+      expect(active.textContent).toContain("Started");
+      expect(active.textContent).toContain("Last activity");
+      const highlighted = active.querySelectorAll(".text-accent");
+      expect(highlighted.length).toBe(4);
+    });
+
+    it("says nothing is being worked on when the summary is present but no open session has a declared focus", async () => {
+      focusReportSummaryMock.mockResolvedValue({
+        summary: {
+          groups: [
+            {
+              project_id: "proj-game",
+              project_name: "Game",
+              wall_clock_ms: 3_600_000,
+              bullets: ["Fresh bullets."],
+              generated_at: "2026-07-28T12:00:00.000Z",
+              cached: false,
+              model: "sonnet",
+            },
+          ],
+        },
+      });
+      renderPage(); // default report has no ended_at:null session, default focus map is empty
+      await waitFor(() => expect(screen.getByText("Fresh bullets.")).toBeTruthy());
+      expect(screen.getByTestId("focus-summary-active").textContent).toBe(
+        "Nothing is currently being worked on."
+      );
+    });
+
+    it("falls back to the report's own segment (with its kind chip) when an open session hasn't declared a live focus", async () => {
+      focusReportMock.mockResolvedValue(makeReportWithLiveSession());
+      useFocusMapMock.mockReturnValue(new Map()); // "sess-live" has no live focusStore entry
+      renderPage();
+      await waitFor(() => expect(screen.getByText("Quality Pass")).toBeTruthy());
+      const active = screen.getByTestId("focus-summary-active");
+      // The report's own "item" segment (item 3, "Ship active status") fills
+      // in for the missing live declaration - never silently hidden.
+      expect(active.textContent).toContain("Item 3");
+      expect(active.textContent).toContain("Ship active status");
+      expect(active.textContent).toContain("Item"); // the kind chip
+      // Wall clock/active time and started/last-activity all come from the
+      // report's own segment (30m active_ms; no chunks on this fixture, so
+      // "last activity" falls back to the segment's own start).
+      expect(active.textContent).toContain("Total agent time");
+      expect(active.textContent).toContain("30m 0s");
+      expect(active.textContent).toContain("Started");
+      expect(active.textContent).toContain("Last activity");
+    });
+
+    it("surfaces a running session with no focus declared at all as unclassified activity, not silently hidden", async () => {
+      focusReportMock.mockResolvedValue(makeReportWithUndeclaredLiveSession());
+      useFocusMapMock.mockReturnValue(new Map()); // "sess-live" has no live focusStore entry
+      renderPage();
+      await waitFor(() => expect(screen.getByText("Quality Pass")).toBeTruthy());
+      const active = screen.getByTestId("focus-summary-active");
+      expect(active.textContent).toContain("unclassified activity");
+      expect(active.textContent).toContain("No focus"); // the "none"-kind chip
+      expect(active.textContent).toContain("Started");
+      expect(active.textContent).toContain("Last activity");
+      expect(active.textContent).not.toContain("updated");
+    });
+
+    it("reads 'last activity' off the segment's last ACTIVE chunk, not its start or its still-open end, once activity has gone quiet mid-segment", async () => {
+      focusReportMock.mockResolvedValue(makeReportWithStaleActivity());
+      useFocusMapMock.mockReturnValue(new Map()); // "sess-live" has no live focusStore entry
+      renderPage();
+      await waitFor(() => expect(screen.getByText("Quality Pass")).toBeTruthy());
+      const active = screen.getByTestId("focus-summary-active");
+      // Started = the segment's own start (09:00); last activity = the last
+      // active chunk's end (09:20) - NOT the segment's still-open end (09:30,
+      // where the last, inactive chunk actually closes).
+      expect(active.textContent).toContain(formatTime("2026-07-27T09:00:00.000Z"));
+      expect(active.textContent).toContain(formatTime("2026-07-27T09:20:00.000Z"));
+      expect(active.textContent).not.toContain(formatTime("2026-07-27T09:30:00.000Z"));
+      // The real, idle-discounted active_ms (20m), not the raw 30m wall span.
+      expect(active.textContent).toContain("20m 0s");
     });
   });
 

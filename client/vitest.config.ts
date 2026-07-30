@@ -29,6 +29,9 @@ export default defineConfig({
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    // Mirror vite.config.ts's DASHBOARD_PORT injection (default 4820) so
+    // DevBuildSiteCard's build-time global resolves under test too.
+    __DASHBOARD_PORT__: JSON.stringify(4820),
   },
   test: {
     environment: "jsdom",

@@ -390,6 +390,9 @@ import type {
   Analytics,
   CostResult,
   DashboardEvent,
+  FocusSummaryCacheStats,
+  FocusSummaryDayResponse,
+  FocusSummaryTimelineDay,
   ModelPricing,
   Project,
   Session,
@@ -707,6 +710,20 @@ export const api = {
     remove: (id: string) =>
       request<{ ok: true }>(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
     /**
+     * POST /api/sessions/:id/focus-terminal - jump to the Terminal.app tab
+     * running this session's `claude` process (macOS only), selecting and
+     * briefly flashing the tab. Rejects (see server/lib/terminal-focus.js's
+     * typed codes, surfaced via `Error.message`) when the platform isn't
+     * macOS, the session has no recorded pid, its process is no longer
+     * running, or the matching tab can't be found/automated.
+     * @param id The session id.
+     * @returns `{ ok: true }`.
+     */
+    focusTerminal: (id: string) =>
+      request<{ ok: true }>(`/sessions/${encodeURIComponent(id)}/focus-terminal`, {
+        method: "POST",
+      }),
+    /**
      * GET /api/sessions/:id/stats - per-session rollups for the detail page.
      *
      * Aggregate metrics scoped to a single session (token/tool/cost rollups and
@@ -970,6 +987,7 @@ export const api = {
           misses: number;
           keys: string[];
         };
+        focus_summary_cache: FocusSummaryCacheStats;
       }>("/settings/info"),
     /** Get/set the `~/.claude` root the server reads config from. Lets an
      *  operator point the dashboard at a non-default Claude Code home (e.g. a
@@ -1110,7 +1128,47 @@ export const api = {
         purged_sessions: number;
         purged_events: number;
         purged_agents: number;
+        purged_focus_summary_log: number;
       }>("/settings/cleanup", { method: "POST", body: JSON.stringify(params) }),
+    /**
+     * GET /api/settings/cache/timeline - day-bucketed focus-summary-cache
+     * hit/miss counts for the Focus Summaries section's timeline chart.
+     *
+     * Always returns exactly `days` entries, oldest first, zero-filled for
+     * days with no recorded activity — the client never has to fill gaps.
+     * Days are UTC calendar days, matching every other timestamp this app
+     * stores.
+     *
+     * @param days How many trailing days to include (server clamps to 1-90; default 30).
+     * @returns `{ days }` — one `{ date, hits, misses, total }` row per day.
+     */
+    cacheTimeline: (days = 30) =>
+      request<{ days: FocusSummaryTimelineDay[] }>(`/settings/cache/timeline?days=${days}`),
+    /**
+     * GET /api/settings/cache/day - summary + entry list for a single UTC
+     * calendar day's focus-summary-cache activity, for the Focus Summaries
+     * section's drill-down table.
+     *
+     * `hits`/`misses`/`total`/`models` describe the whole day regardless of
+     * the `outcome`/`model`/`level` filters; `entries` is filtered. Capped
+     * at 500 rows server-side — `truncated` is true when a busier day was
+     * cut off.
+     *
+     * @param date UTC calendar day, `YYYY-MM-DD`.
+     * @param filters Optional `outcome` ('hit' | 'miss'), `model` name, and/or
+     *   `level` ('window' | 'day') to narrow `entries`.
+     * @returns Day summary plus the (possibly filtered) entry list.
+     */
+    cacheDay: (
+      date: string,
+      filters: { outcome?: "hit" | "miss"; model?: string; level?: "window" | "day" } = {}
+    ) => {
+      const qs = new URLSearchParams({ date });
+      if (filters.outcome) qs.set("outcome", filters.outcome);
+      if (filters.model) qs.set("model", filters.model);
+      if (filters.level) qs.set("level", filters.level);
+      return request<FocusSummaryDayResponse>(`/settings/cache/day?${qs.toString()}`);
+    },
   },
 
   // ─────────────────────────────── Workflows API ──────────────────────────────

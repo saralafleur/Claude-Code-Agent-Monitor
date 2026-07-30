@@ -71,7 +71,9 @@ confirm — starting a local dev server has no side effect beyond binding a
 port.
 
 If the audit already shows `web-running`, report that it's already up
-(with its PID/port) and stop — idempotent, no second instance started.
+(with its PID and the full URL, e.g. `http://localhost:4820`, straight
+from the audit's `web-running` row, labeled **(hot-reload)**) and stop —
+idempotent, no second instance started.
 
 **Execute:**
 ```bash
@@ -96,9 +98,14 @@ PORT="$(grep -oE 'listen on :[0-9]+|using [0-9]+ instead' "$HOME/.claude/.ccam-w
 curl -sf "http://localhost:${PORT:-4820}/api/health"
 ```
 
-Report the resolved port plainly — it may not be 4820 if something else
-(e.g. the desktop app) already holds it; `scripts/dev.js` logs a warning
-about shared-database double-counting in that case, surface it if present.
+Report the full frontend URL plainly in the reply, e.g.
+`http://localhost:${PORT:-4820}` — don't just say "it's up," give the
+clickable address, and label it **(hot-reload)** so it's never confused
+with the Docker production build's URL (`docker-up` reports its own URL
+labeled **(built-docker)** — see `docker-lifecycle.md`). The port may not
+be 4820 if something else (e.g. the desktop app) already holds it;
+`scripts/dev.js` logs a warning about shared-database double-counting in
+that case, surface it if present.
 
 ## down (alias: `down`)
 

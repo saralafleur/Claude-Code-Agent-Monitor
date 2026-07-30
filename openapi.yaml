@@ -251,8 +251,11 @@ components:
             - stop
             - session_start
             - interrupted
+            - subagent
+            - shell
+            - monitor
           nullable: true
-          description: 'Why the session is awaiting input: ''notification'' (Claude asked the user something), ''stop'' (turn completed, waiting for the next prompt), ''session_start'' (new/resumed session waiting for the first prompt), or ''interrupted'' (watchdog/Esc recovery). Null when not waiting; cleared alongside awaiting_input_since.'
+          description: 'Why the session is awaiting input: ''notification'' (Claude asked the user something), ''stop'' (turn completed, waiting for the next prompt), ''session_start'' (new/resumed session waiting for the first prompt), ''interrupted'' (watchdog/Esc recovery), ''subagent'' (main''s own turn ended but a subagent fleet it spawned is still working — NOT blocked on the human), ''shell'' (main is mid a synchronous Bash call), or ''monitor'' (main is mid a Monitor tool call). Null when not waiting; cleared alongside awaiting_input_since.'
     Agent:
       type: object
       required:
@@ -320,8 +323,11 @@ components:
             - stop
             - session_start
             - interrupted
+            - subagent
+            - shell
+            - monitor
           nullable: true
-          description: 'Why this agent is awaiting input: ''notification'' (Claude asked the user something), ''stop'' (turn completed, waiting for the next prompt), ''session_start'' (new/resumed session waiting for the first prompt), or ''interrupted'' (watchdog/Esc recovery). Null when not waiting; cleared alongside awaiting_input_since.'
+          description: 'Why this agent is awaiting input: ''notification'' (Claude asked the user something), ''stop'' (turn completed, waiting for the next prompt), ''session_start'' (new/resumed session waiting for the first prompt), ''interrupted'' (watchdog/Esc recovery), ''subagent'' (main''s own turn ended but a subagent fleet it spawned is still working — NOT blocked on the human), ''shell'' (main is mid a synchronous Bash call), or ''monitor'' (main is mid a Monitor tool call). Null when not waiting; cleared alongside awaiting_input_since.'
     DashboardEvent:
       type: object
       required:
@@ -1486,6 +1492,116 @@ components:
               type: array
               items:
                 type: string
+        focus_summary_cache:
+          type: object
+          description: Live snapshot of the focus-window-summary cache (focus_summaries) — the cache behind the Focus page's "What happened in this window" block. Unlike transcript_cache this has no LRU cap and survives restarts.
+          required:
+            - size
+            - hits
+            - misses
+            - hitRate
+            - totalBullets
+          properties:
+            size:
+              type: integer
+              description: Rows currently cached
+            hits:
+              type: integer
+            misses:
+              type: integer
+            hitRate:
+              type: number
+            totalBullets:
+              type: integer
+    FocusSummaryCacheTimelineResponse:
+      type: object
+      required:
+        - days
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            required:
+              - date
+              - hits
+              - misses
+              - total
+            properties:
+              date:
+                type: string
+                format: date
+                description: UTC calendar day, YYYY-MM-DD
+              hits:
+                type: integer
+              misses:
+                type: integer
+              total:
+                type: integer
+    FocusSummaryCacheDayResponse:
+      type: object
+      required:
+        - date
+        - hits
+        - misses
+        - total
+        - models
+        - truncated
+        - entries
+      properties:
+        date:
+          type: string
+          format: date
+        hits:
+          type: integer
+        misses:
+          type: integer
+        total:
+          type: integer
+        models:
+          type: array
+          items:
+            type: string
+        truncated:
+          type: boolean
+          description: True when the day had more than 500 matching rows and the list was cut off
+        entries:
+          type: array
+          items:
+            type: object
+            required:
+              - cache_key
+              - level
+              - scope_label
+              - model
+              - outcome
+              - bullet_count
+              - accessed_at
+            properties:
+              cache_key:
+                type: string
+              level:
+                type: string
+                enum:
+                  - window
+                  - day
+              scope_label:
+                type: string
+                description: Session name, project name, "Unassigned", or "All projects"
+              model:
+                type: string
+                nullable: true
+              outcome:
+                type: string
+                enum:
+                  - hit
+                  - miss
+              bullet_count:
+                type: integer
+                nullable: true
+              accessed_at:
+                type: string
+                format: date-time
     ClearDataResponse:
       type: object
       required:
@@ -1772,6 +1888,9 @@ components:
           type: integer
         purged_agents:
           type: integer
+        purged_focus_summary_log:
+          type: integer
+          description: focus_summary_access_log rows purged (the cache itself, focus_summaries, is untouched)
     CcConfigScope:
       type: string
       enum:
@@ -4146,18 +4265,33 @@ components:
           type: string
     PlanItem:
       type: object
-      description: One numbered checkbox item. `checked` mirrors the file's checkbox (human-owned); `declared_done_*` is the agent's completion claim via `ccam focus done N` and survives re-ingest.
+      description: One checkbox item. `checked` mirrors the file's checkbox (human-owned); `declared_done_*` is the agent's completion claim via `ccam focus done N` and survives re-ingest — including across a reorder, since item_id (not item_number) is the real identity.
       properties:
         cwd:
           type: string
+        item_id:
+          type: string
+          description: The item's permanent identity (from the file's `id:` line, or synthesized for pre-id files) — never changes for the life of the item, unlike item_number
         item_number:
           type: integer
-          description: The file's own item number — the stable handle focus declarations target
+          nullable: true
+          description: Flat display number, positional — recomputed from file order on every ingest. What `ccam focus set/done` are typed against, but not what's persisted underneath (see item_id). Null for a sub-item (see parent_item_id) — it has no flat number of its own, so ccam can't target it directly; use display_number to show it instead.
+        parent_item_id:
+          type: string
+          nullable: true
+          description: The parent item's item_id when this is a sub-item (a dotted 'N.M' item nested under top-level item N in the file). Null for a top-level item.
+        display_number:
+          type: string
+          description: 'Human-facing number: the flat item_number as a string for a top-level item ("3"), or "<parent''s number>.<sibling ordinal>" for a sub-item ("3.2"). Always derived, never persisted.'
         text:
           type: string
         acceptance:
           type: string
           nullable: true
+        detail:
+          type: string
+          nullable: true
+          description: Optional unbounded supporting context beyond the one-line summary (≤4000 chars)
         checked:
           type: integer
           description: 1 when the file's checkbox is [x]
@@ -5963,6 +6097,77 @@ paths:
                   paths:
                     - /Users/son/.claude/projects/-Users-son-code-foo/abc123.jsonl
                     - /Users/son/.claude/projects/-Users-son-code-bar/def456.jsonl
+  /api/settings/cache/timeline:
+    get:
+      tags:
+        - Settings
+      summary: Day-bucketed hit/miss counts for the focus-window-summary cache
+      operationId: getFocusSummaryCacheTimeline
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 30
+          description: Trailing days to include, clamped to [1, 90]
+      responses:
+        '200':
+          description: Zero-filled, oldest-first day timeline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FocusSummaryCacheTimelineResponse'
+  /api/settings/cache/day:
+    get:
+      tags:
+        - Settings
+      summary: Focus-summary-cache activity for a single UTC calendar day
+      operationId: getFocusSummaryCacheDay
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: UTC calendar day, YYYY-MM-DD
+        - name: outcome
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - hit
+              - miss
+        - name: model
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: level
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - window
+              - day
+      responses:
+        '200':
+          description: Day summary plus the (possibly filtered) entry list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FocusSummaryCacheDayResponse'
+        '400':
+          description: Missing or malformed date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageErrorResponse'
   /api/settings/clear-data:
     post:
       tags:
@@ -10269,6 +10474,61 @@ paths:
                     nullable: true
         '404':
           description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/sessions/{id}/focus-terminal:
+    post:
+      tags:
+        - Sessions
+      operationId: focusSessionTerminal
+      summary: Jump to the Terminal.app tab running this session (macOS only)
+      description: Resolves the session's recorded OS process id, verifies the `claude` process is still alive, and uses AppleScript to select and briefly flash the matching Terminal.app tab so it's visually unmistakable. Every failure mode is an expected, typed reason rather than a server bug — see the response codes below.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The matching Terminal.app tab was found, selected, and flashed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    enum:
+                      - true
+        '404':
+          description: Session not found (NOT_FOUND), or no Terminal.app tab matched the session's process (TERMINAL_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: NOT_LOCAL (session was collected from another machine) or NO_PID (no process id was ever recorded for this session)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: PROCESS_GONE — the session's claude process is no longer running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: AUTOMATION_ERROR — Terminal automation failed, commonly because macOS hasn't yet granted this app Automation access to control Terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '501':
+          description: UNSUPPORTED_PLATFORM — this feature only supports macOS (Terminal.app)
           content:
             application/json:
               schema:

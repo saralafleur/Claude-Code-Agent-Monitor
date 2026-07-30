@@ -5991,6 +5991,35 @@ exports[`screen snapshots > Kanban board 1`] = `
           Hide abandoned
         </button>
         <button
+          aria-pressed="false"
+          class="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border transition-colors duration-150 flex-shrink-0 border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
+          title="Hide errors older than 1 week"
+          type="button"
+        >
+          <svg
+            class="lucide lucide-eye w-4 h-4"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r="3"
+            />
+          </svg>
+          Hide errors older than 1 week
+        </button>
+        <button
           aria-label="Hide internal sessions (spawned by this dashboard's own background focus classifiers, not by you)"
           aria-pressed="false"
           class="inline-flex items-center justify-center w-9 h-9 rounded-lg border transition-colors duration-150 flex-shrink-0 border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
@@ -8767,6 +8796,31 @@ exports[`screen snapshots > Settings 1`] = `
           type="button"
         >
           <svg
+            class="lucide lucide-gauge w-3.5 h-3.5"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="m12 14 4-4"
+            />
+            <path
+              d="M3.34 19a10 10 0 1 1 17.32 0"
+            />
+          </svg>
+          Focus Summaries
+        </button>
+        <button
+          class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-colors flex-shrink-0 border-border text-gray-400 hover:text-gray-200 hover:bg-surface-3"
+          type="button"
+        >
+          <svg
             class="lucide lucide-server w-3.5 h-3.5"
             fill="none"
             height="24"
@@ -10890,6 +10944,441 @@ exports[`screen snapshots > Settings 1`] = `
             </svg>
             Clear All Data
           </button>
+        </div>
+      </div>
+    </section>
+    <section
+      class="scroll-mt-24"
+      id="focus-summaries"
+    >
+      <h3
+        class="text-sm font-medium text-gray-300 flex items-center gap-2 mb-1"
+      >
+        <svg
+          class="lucide lucide-gauge w-4 h-4 text-gray-500"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m12 14 4-4"
+          />
+          <path
+            d="M3.34 19a10 10 0 1 1 17.32 0"
+          />
+        </svg>
+        Focus Summaries
+      </h3>
+      <p
+        class="text-xs text-gray-500 mb-4"
+      >
+        How the Focus page's "What happened in this window" cache is hitting, and what's in it.
+      </p>
+      <div
+        class="space-y-4"
+      >
+        <div
+          class="grid grid-cols-2 lg:grid-cols-4 gap-3"
+        >
+          <div
+            class="card p-4 space-y-2"
+          >
+            <p
+              class="stat-label flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+            >
+              <svg
+                class="lucide lucide-database w-3 h-3"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <ellipse
+                  cx="12"
+                  cy="5"
+                  rx="9"
+                  ry="3"
+                />
+                <path
+                  d="M3 5V19A9 3 0 0 0 21 19V5"
+                />
+                <path
+                  d="M3 12A9 3 0 0 0 21 12"
+                />
+              </svg>
+              Cached summaries
+            </p>
+            <p
+              class="text-2xl font-semibold text-gray-100 tabular-nums"
+            >
+              0
+            </p>
+            <p
+              class="text-[11px] text-gray-500"
+            >
+              Rows currently held in the focus-summary cache
+            </p>
+          </div>
+          <div
+            class="card p-4 space-y-2"
+          >
+            <p
+              class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+            >
+              <svg
+                class="lucide lucide-gauge w-3 h-3"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="m12 14 4-4"
+                />
+                <path
+                  d="M3.34 19a10 10 0 1 1 17.32 0"
+                />
+              </svg>
+              Hit rate
+            </p>
+            <p
+              class="text-2xl font-semibold text-gray-100 tabular-nums"
+            >
+              0
+              <span
+                class="text-[13px] font-medium text-gray-500 ml-0.5"
+              >
+                %
+              </span>
+            </p>
+            <p
+              class="text-[11px] text-gray-500 flex items-center gap-1.5 flex-wrap"
+            >
+              <span
+                class="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0"
+              />
+              0
+               
+              hits
+              <span
+                class="text-gray-700"
+              >
+                ·
+              </span>
+              <span
+                class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"
+              />
+              0
+               
+              misses
+            </p>
+          </div>
+          <div
+            class="card p-4 space-y-2"
+          >
+            <p
+              class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+            >
+              <svg
+                class="lucide lucide-layers w-3 h-3"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"
+                />
+                <path
+                  d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"
+                />
+                <path
+                  d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"
+                />
+              </svg>
+              Entries touched today
+            </p>
+            <span
+              aria-busy="true"
+              aria-label="Loading"
+              class="inline-block bg-surface-3/70 animate-pulse rounded-md h-12 w-full"
+              role="status"
+            />
+          </div>
+          <div
+            class="card p-4 space-y-2"
+          >
+            <p
+              class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+            >
+              <svg
+                class="lucide lucide-list-tree w-3 h-3"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M21 12h-8"
+                />
+                <path
+                  d="M21 6H8"
+                />
+                <path
+                  d="M21 18h-8"
+                />
+                <path
+                  d="M3 6v4c0 1.1.9 2 2 2h3"
+                />
+                <path
+                  d="M3 10v6c0 1.1.9 2 2 2h3"
+                />
+              </svg>
+              Total bullets cached
+            </p>
+            <p
+              class="text-2xl font-semibold text-gray-100 tabular-nums"
+            >
+              0
+            </p>
+            <p
+              class="text-[11px] text-gray-500"
+            >
+              Across every cached window and day
+            </p>
+          </div>
+        </div>
+        <div
+          class="card p-5"
+        >
+          <div
+            class="flex items-center justify-between gap-3 flex-wrap mb-4"
+          >
+            <div>
+              <p
+                class="text-xs font-semibold text-gray-300"
+              >
+                Last 0 days
+              </p>
+              <p
+                class="text-[11px] text-gray-500 mt-0.5"
+              >
+                Click a day to inspect its entries below
+              </p>
+            </div>
+            <div
+              class="flex items-center gap-4 flex-wrap"
+            >
+              <div
+                class="flex items-center gap-3"
+              >
+                <span
+                  class="flex items-center gap-1.5 text-[11px] text-gray-400"
+                >
+                  <span
+                    class="w-2 h-2 rounded-[3px] bg-emerald-400"
+                  />
+                  Hits
+                </span>
+                <span
+                  class="flex items-center gap-1.5 text-[11px] text-gray-400"
+                >
+                  <span
+                    class="w-2 h-2 rounded-[3px] bg-amber-400"
+                  />
+                  Misses
+                </span>
+              </div>
+              <div
+                class="inline-flex p-0.5 gap-0.5 bg-surface-4 rounded-lg"
+              >
+                <button
+                  class="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors bg-surface-2 text-gray-100"
+                  type="button"
+                >
+                  By outcome
+                </button>
+                <button
+                  class="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors text-gray-400"
+                  type="button"
+                >
+                  By volume
+                </button>
+              </div>
+            </div>
+          </div>
+          <div
+            class="overflow-x-auto"
+          >
+            <div
+              class="flex items-end gap-1 pb-5"
+              style="height: 104px; min-width: 0;"
+            />
+          </div>
+        </div>
+        <div
+          class="card p-5"
+        >
+          <div
+            class="flex items-center justify-between gap-3 flex-wrap mb-3"
+          >
+            <p
+              class="text-sm font-semibold text-gray-100"
+            >
+              —
+            </p>
+          </div>
+          <div
+            class="flex items-center gap-2 flex-wrap mb-3"
+          >
+            <div
+              class="inline-flex p-0.5 gap-0.5 bg-surface-4 rounded-lg"
+            >
+              <button
+                class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors bg-surface-2 text-gray-100"
+                type="button"
+              >
+                All
+              </button>
+              <button
+                class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors text-gray-400"
+                type="button"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                />
+                Hits
+              </button>
+              <button
+                class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors text-gray-400"
+                type="button"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full bg-amber-400"
+                />
+                Misses
+              </button>
+            </div>
+            <div
+              class="inline-flex p-0.5 gap-0.5 bg-surface-4 rounded-lg"
+            >
+              <button
+                class="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors bg-surface-2 text-gray-100"
+                type="button"
+              >
+                All levels
+              </button>
+              <button
+                class="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors text-gray-400"
+                type="button"
+              >
+                Window
+              </button>
+              <button
+                class="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors text-gray-400"
+                type="button"
+              >
+                Day
+              </button>
+            </div>
+            <select
+              class="text-[11px] text-gray-300 bg-surface-4 border border-border rounded-lg px-2.5 py-1.5"
+            >
+              <option
+                value="all"
+              >
+                All models
+              </option>
+            </select>
+            <div
+              class="flex-1"
+            />
+          </div>
+          <div
+            class="overflow-x-auto rounded-lg border border-border"
+          >
+            <table
+              class="w-full min-w-[620px]"
+            >
+              <thead>
+                <tr
+                  class="bg-surface-3 border-b border-border"
+                >
+                  <th
+                    class="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                  >
+                    Scope
+                  </th>
+                  <th
+                    class="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                  >
+                    Level
+                  </th>
+                  <th
+                    class="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                  >
+                    Model
+                  </th>
+                  <th
+                    class="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                  >
+                    Outcome
+                  </th>
+                  <th
+                    class="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                  >
+                    Bullets
+                  </th>
+                  <th
+                    class="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                  >
+                    Last accessed
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td
+                    class="px-3 py-7 text-center text-xs text-gray-600"
+                    colspan="6"
+                  >
+                    No cache activity recorded for this day.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p
+            class="text-[11px] text-gray-600 mt-3"
+          >
+            Days are UTC calendar days.
+          </p>
         </div>
       </div>
     </section>

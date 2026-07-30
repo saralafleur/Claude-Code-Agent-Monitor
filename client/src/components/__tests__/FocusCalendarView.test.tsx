@@ -1188,61 +1188,6 @@ describe("FocusCalendarView", () => {
       expect(screen.getByText("Late")).toBeInTheDocument();
     });
 
-    it("pages a non-today day's zoomed window forward/backward via the start-time stepper", () => {
-      const report = makeReport([
-        {
-          session_id: "sess-yesterday-late",
-          name: "Late",
-          cwd: "/repo",
-          ended_at: yesterdayAt(11),
-          segments: [
-            {
-              kind: "item",
-              item_number: 1,
-              label: null,
-              start: yesterdayAt(10), // 10am-11am
-              end: yesterdayAt(11),
-              wall_ms: 0,
-              active_ms: 0,
-              idle_ms: 0,
-              inferred: false,
-              inferred_reason: null,
-            },
-          ],
-        },
-      ]);
-      renderCalendar(
-        report,
-        { selectedDate: new Date(yesterdayAt(12)) },
-        { expandToFullDay: false }
-      );
-      expect(screen.queryByText("Late")).not.toBeInTheDocument();
-
-      // Default window is [00:00, 04:00) - two "next block" pages (each +4h)
-      // land on [08:00, 12:00), which contains the 10am-11am segment.
-      const nextButton = screen.getByTitle("Show the next block");
-      fireEvent.click(nextButton);
-      fireEvent.click(nextButton);
-      expect(screen.getByText("Late")).toBeInTheDocument();
-    });
-
-    it("jumps the window straight to a typed start time via the start-time input", () => {
-      const report = makeReport([
-        makeSession("Afternoon", 14, 15), // 2pm-3pm
-      ]);
-      renderCalendar(report, {}, { expandToFullDay: false });
-      // Live default (today, 3pm "now") window is [11:00, 17:00) - already
-      // contains 2-3pm, so first prove typing a DIFFERENT start hides it,
-      // then typing it back reveals it - otherwise this wouldn't prove the
-      // input actually drives the window.
-      const input = screen.getByLabelText("Window start time");
-      fireEvent.change(input, { target: { value: "06:00" } });
-      expect(screen.queryByText("Afternoon")).not.toBeInTheDocument();
-
-      fireEvent.change(input, { target: { value: "13:00" } });
-      expect(screen.getByText("Afternoon")).toBeInTheDocument();
-    });
-
     it("shows a 'Live' toggle only on today's view, and it snaps a custom start back to following the current time", () => {
       const report = makeReport([
         makeSession("Mid", 12, 13), // noon-1pm - inside today's live default [11:00, 17:00)
@@ -1250,8 +1195,8 @@ describe("FocusCalendarView", () => {
       renderCalendar(report, {}, { expandToFullDay: false });
       expect(screen.getByText("Mid")).toBeInTheDocument();
 
-      const input = screen.getByLabelText("Window start time");
-      fireEvent.change(input, { target: { value: "06:00" } });
+      // Jumping to the "4 AM" quick-start preset ([04:00, 08:00)) hides it.
+      fireEvent.click(screen.getByText("4 AM"));
       expect(screen.queryByText("Mid")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByText("Live"));

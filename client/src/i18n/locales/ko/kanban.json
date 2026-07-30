@@ -15,6 +15,8 @@
   "showCompleted": "완료 표시",
   "hideAbandoned": "중단됨 숨기기",
   "showAbandoned": "중단됨 표시",
+  "hideOldErrors": "1주 이상 지난 오류 숨기기",
+  "showOldErrors": "모든 오류 표시",
   "hideInternal": "내부 세션 숨기기 (사용자가 아닌 대시보드의 백그라운드 포커스 분류기가 생성한 세션)",
   "showInternal": "내부 세션 표시",
   "copyLink": "공유 링크 복사",
@@ -42,7 +44,9 @@
     "lastMessage": "마지막 메시지",
     "lastMessageLoading": "마지막 메시지를 불러오는 중…",
     "lastMessageEmpty": "최근 메시지를 찾을 수 없습니다",
-    "expensiveModel": "프리미엄 모델(Opus/Fable) 사용 중 - 토큰당 비용이 더 높습니다"
+    "expensiveModel": "프리미엄 모델(Opus/Fable) 사용 중 - 토큰당 비용이 더 높습니다",
+    "focusTerminal": "터미널로 이동",
+    "focusTerminalError": "터미널로 이동하지 못했습니다"
   },
   "tooltip": {
     "agent": {
@@ -68,6 +72,8 @@
     "expand": "모니터 펼치기",
     "orientationHorizontal": "세로 레이아웃으로 전환",
     "orientationVertical": "가로 레이아웃으로 전환",
+    "wrapAuto": "자동 줄바꿈",
+    "wrapCount": "{{count}}개마다 줄바꿈",
     "ungrouped": "미분류",
     "collapseUngrouped": "미분류 접기",
     "expandUngrouped": "미분류 펼치기",
@@ -75,6 +81,10 @@
     "emptyUngroupedHint": "프로젝트를 여기에 놓으면 모니터에서 제거됩니다"
   },
   "column": {
+    "orientationHorizontal": "세로 레이아웃으로 전환",
+    "orientationVertical": "가로 레이아웃으로 전환",
+    "wrapAuto": "자동 줄바꿈",
+    "wrapCount": "{{count}}개마다 줄바꿈",
     "collapse": "열 접기",
     "expand": "열 펼치기"
   }

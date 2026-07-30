@@ -263,6 +263,46 @@ curl -X DELETE http://localhost:4820/api/sessions/sess_abc123
 
 ---
 
+#### Focus Terminal
+
+```http
+POST /api/sessions/:id/focus-terminal
+```
+
+macOS only. Jumps the dashboard user to the Terminal.app tab running this session's `claude` process — selecting the tab, fronting the window, and briefly flashing its background so it's visually unmistakable rather than a silent focus-steal. The session's OS process id is resolved server-side from a hook payload hint (`scripts/hook-handler.js`) the first time a session is seen (see `server/lib/terminal-focus.js`); every failure mode below is an expected, typed reason rather than a server bug.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | Session ID |
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:4820/api/sessions/sess_abc123/focus-terminal
+```
+
+**Example Response:**
+
+```json
+{ "ok": true }
+```
+
+**Error Responses:**
+
+| Status | Code | Description |
+|--------|------|-------------|
+| 404 | `NOT_FOUND` | Session not found |
+| 404 | `TERMINAL_NOT_FOUND` | No Terminal.app tab matched the session's process |
+| 409 | `NOT_LOCAL` | Session was collected from another machine (Remote Data Sources) |
+| 409 | `NO_PID` | No process id was ever recorded for this session (predates this feature, or the hint never resolved) |
+| 410 | `PROCESS_GONE` | The session's `claude` process is no longer running |
+| 500 | `AUTOMATION_ERROR` | Terminal automation failed — commonly means macOS hasn't yet granted Automation access to control Terminal (System Settings > Privacy & Security > Automation) |
+| 501 | `UNSUPPORTED_PLATFORM` | Not running on macOS |
+
+---
+
 #### Get Session Stats
 
 ```http
@@ -963,14 +1003,20 @@ The `/api/monitors` namespace persists the Kanban Board's "Projects" view **moni
 ```json
 {
   "monitors": [
-    { "id": "a1b2c3", "name": "Left Screen", "collapsed": false, "orientation": "horizontal" }
+    {
+      "id": "a1b2c3",
+      "name": "Left Screen",
+      "collapsed": false,
+      "orientation": "horizontal",
+      "wrap": "2"
+    }
   ],
   "monitorMap": { "proj-1": "a1b2c3" },
   "collapsedProjects": { "proj-2": true }
 }
 ```
 
-`monitors[].collapsed` and `monitors[].orientation` (`horizontal`/`vertical`) are optional — absent means expanded/horizontal. `monitorMap` maps a project id to the monitor it's assigned to; a project id absent from the map is ungrouped. `collapsedProjects` maps a project id (or `__unassigned__` for the Unassigned bucket) to its collapsed state.
+`monitors[].collapsed` and `monitors[].orientation` (`horizontal`/`vertical`) are optional — absent means expanded/horizontal. `monitors[].wrap` is also optional — one of `"*"`, `"1"`, `"2"`, `"3"`, `"4"`; absent (or `"*"`) means no fixed wrap, the long-standing single unbounded row/column. `"1"`-`"4"` caps how many project columns land per row (horizontal orientation) or column (vertical orientation) before the layout wraps to a new one — an independent control alongside `orientation`, not a replacement for it. `monitorMap` maps a project id to the monitor it's assigned to; a project id absent from the map is ungrouped. `collapsedProjects` maps a project id (or `__unassigned__` for the Unassigned bucket) to its collapsed state.
 
 #### Get Monitor Layout
 

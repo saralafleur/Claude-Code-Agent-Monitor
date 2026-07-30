@@ -90,6 +90,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
+import { DevBuildSiteCard } from "./DevBuildSiteCard";
 import type { UpdateStatusPayload, WSMessage } from "../lib/types";
 
 function isUpdatePayload(x: unknown): x is UpdateStatusPayload {
@@ -412,6 +413,11 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
         collapsed ? "w-[4.25rem]" : "w-60"
       }`}
     >
+      {/* Dev/built site indicator - above the brand block so it's the first
+          thing you see, since it's not always obvious which server a given
+          tab is pointed at. */}
+      {!collapsed && <DevBuildSiteCard />}
+
       {/* Brand */}
       <div className="px-3 py-4 border-b border-border flex-shrink-0">
         <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3 px-2"}`}>

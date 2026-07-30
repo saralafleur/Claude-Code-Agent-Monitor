@@ -11,13 +11,12 @@
  * swap button on the label row that inverts which is which. The tooltip
  * always describes whichever ratio is currently primary.
  *
- * The chosen primary ("open" — today's default and the pre-existing
- * behavior — or "active") persists in `localStorage` under
- * `agent-monitor-concurrency-primary` (same per-browser convention as the
- * sidebar collapse and update-dismissal keys), so the preference survives a
- * refresh. Storage reads/writes are try/catch-guarded: with storage
- * unavailable (private mode) the tile still works, it just forgets the
- * choice on reload.
+ * The chosen primary ("active" — the default — or "open") persists in
+ * `localStorage` under `agent-monitor-concurrency-primary` (same
+ * per-browser convention as the sidebar collapse and update-dismissal
+ * keys), so the preference survives a refresh. Storage reads/writes are
+ * try/catch-guarded: with storage unavailable (private mode) the tile
+ * still works, it just forgets the choice on reload.
  *
  * A `null`/absent ratio renders as "—" when primary and simply omits the
  * sub-line when secondary (e.g. a report from a server that predates
@@ -40,9 +39,9 @@ type ConcurrencyPrimary = "open" | "active";
 
 function loadPrimary(): ConcurrencyPrimary {
   try {
-    return localStorage.getItem(CONCURRENCY_PRIMARY_KEY) === "active" ? "active" : "open";
+    return localStorage.getItem(CONCURRENCY_PRIMARY_KEY) === "open" ? "open" : "active";
   } catch {
-    return "open";
+    return "active";
   }
 }
 
