@@ -113,6 +113,7 @@ import {
   BarChart3,
   Copy,
   Check,
+  MoreHorizontal,
 } from "lucide-react";
 import { api, dashboardToken } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -400,6 +401,11 @@ export function KanbanBoard() {
   >(loadStatusColumnOrientation);
   const [statusColumnWrap, setStatusColumnWrapState] =
     useState<Record<string, WrapCount>>(loadStatusColumnWrap);
+  // Visibility toggles (completed/abandoned/old errors/internal) live inside
+  // a single overflow menu rather than as four separate header buttons - see
+  // `filtersMenuRef`'s click-outside effect below.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersMenuRef = useRef<HTMLDivElement | null>(null);
   // The plan popup - opened from a PlanPanel strip or a column header's
   // "view plan" icon. `sessions` is scoped to whichever column opened it, so
   // item-chip session lookups never bleed across projects.
@@ -567,6 +573,16 @@ export function KanbanBoard() {
     setLoading(true);
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!filtersMenuRef.current) return;
+      if (!filtersMenuRef.current.contains(e.target as Node)) setFiltersOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [filtersOpen]);
 
   useEffect(() => {
     // Plan pushes carry the whole (small) plan — merge in place, no refetch,
@@ -1035,64 +1051,104 @@ export function KanbanBoard() {
             <Plus className="w-4 h-4" /> {t("monitors.addMonitor")}
           </button>
         )}
-        <button
-          type="button"
-          onClick={toggleHideCompleted}
-          aria-pressed={hideCompleted}
-          title={hideCompleted ? t("showCompleted") : t("hideCompleted")}
-          className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border transition-colors duration-150 flex-shrink-0 ${
-            hideCompleted
-              ? "bg-accent/15 text-accent border-accent/30"
-              : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
-          }`}
-        >
-          {hideCompleted ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          {hideCompleted ? t("showCompleted") : t("hideCompleted")}
-        </button>
-        <button
-          type="button"
-          onClick={toggleHideAbandoned}
-          aria-pressed={hideAbandoned}
-          title={hideAbandoned ? t("showAbandoned") : t("hideAbandoned")}
-          className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border transition-colors duration-150 flex-shrink-0 ${
-            hideAbandoned
-              ? "bg-accent/15 text-accent border-accent/30"
-              : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
-          }`}
-        >
-          {hideAbandoned ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          {hideAbandoned ? t("showAbandoned") : t("hideAbandoned")}
-        </button>
-        {view !== "projects" && (
+        <div ref={filtersMenuRef} className="relative flex-shrink-0">
           <button
             type="button"
-            onClick={toggleHideOldErrors}
-            aria-pressed={hideOldErrors}
-            title={hideOldErrors ? t("showOldErrors") : t("hideOldErrors")}
-            className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border transition-colors duration-150 flex-shrink-0 ${
-              hideOldErrors
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={filtersOpen}
+            title={t("filters")}
+            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border transition-colors duration-150 ${
+              hideCompleted || hideAbandoned || hideOldErrors || hideInternal
                 ? "bg-accent/15 text-accent border-accent/30"
                 : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
             }`}
           >
-            {hideOldErrors ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {hideOldErrors ? t("showOldErrors") : t("hideOldErrors")}
+            <MoreHorizontal className="w-4 h-4" />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={toggleHideInternal}
-          aria-pressed={hideInternal}
-          aria-label={hideInternal ? t("showInternal") : t("hideInternal")}
-          title={hideInternal ? t("showInternal") : t("hideInternal")}
-          className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border transition-colors duration-150 flex-shrink-0 ${
-            hideInternal
-              ? "bg-accent/15 text-accent border-accent/30"
-              : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4"
-          }`}
-        >
-          <Cog className="w-4 h-4" />
-        </button>
+          {filtersOpen && (
+            <div
+              role="menu"
+              className="absolute z-30 right-0 top-full mt-1 w-64 rounded-lg border border-border bg-surface-1 shadow-lg shadow-black/40 py-1"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={toggleHideCompleted}
+                aria-pressed={hideCompleted}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors duration-150 ${
+                  hideCompleted ? "text-accent bg-accent/10" : "text-gray-300 hover:bg-surface-4"
+                }`}
+              >
+                {hideCompleted ? (
+                  <EyeOff className="w-4 h-4 flex-shrink-0" />
+                ) : (
+                  <Eye className="w-4 h-4 flex-shrink-0" />
+                )}
+                <span className="truncate">
+                  {hideCompleted ? t("showCompleted") : t("hideCompleted")}
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={toggleHideAbandoned}
+                aria-pressed={hideAbandoned}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors duration-150 ${
+                  hideAbandoned ? "text-accent bg-accent/10" : "text-gray-300 hover:bg-surface-4"
+                }`}
+              >
+                {hideAbandoned ? (
+                  <EyeOff className="w-4 h-4 flex-shrink-0" />
+                ) : (
+                  <Eye className="w-4 h-4 flex-shrink-0" />
+                )}
+                <span className="truncate">
+                  {hideAbandoned ? t("showAbandoned") : t("hideAbandoned")}
+                </span>
+              </button>
+              {view !== "projects" && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={toggleHideOldErrors}
+                  aria-pressed={hideOldErrors}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors duration-150 ${
+                    hideOldErrors ? "text-accent bg-accent/10" : "text-gray-300 hover:bg-surface-4"
+                  }`}
+                >
+                  {hideOldErrors ? (
+                    <EyeOff className="w-4 h-4 flex-shrink-0" />
+                  ) : (
+                    <Eye className="w-4 h-4 flex-shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {hideOldErrors ? t("showOldErrors") : t("hideOldErrors")}
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={toggleHideInternal}
+                aria-pressed={hideInternal}
+                title={hideInternal ? t("showInternal") : t("hideInternal")}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors duration-150 ${
+                  hideInternal ? "text-accent bg-accent/10" : "text-gray-300 hover:bg-surface-4"
+                }`}
+              >
+                {hideInternal ? (
+                  <EyeOff className="w-4 h-4 flex-shrink-0" />
+                ) : (
+                  <Cog className="w-4 h-4 flex-shrink-0" />
+                )}
+                <span className="truncate">
+                  {hideInternal ? t("showInternal") : t("hideInternal")}
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
         <CopyLinkButton />
         <button onClick={load} className="btn-ghost flex-shrink-0">
           <RefreshCw className="w-4 h-4" /> {t("common:refresh")}

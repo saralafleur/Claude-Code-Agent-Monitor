@@ -128,13 +128,14 @@ describe("Kanban Board - Hide errors older than 1 week", () => {
     await screen.findByText("Old failure");
     expect(screen.getByText("Recent failure")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide errors older than 1 week" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide errors older than 1 week" }));
 
     await waitFor(() => expect(screen.queryByText("Old failure")).not.toBeInTheDocument());
     expect(screen.getByText("Recent failure")).toBeInTheDocument();
     expect(screen.getByTitle("Error")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show all errors" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all errors" }));
     await waitFor(() => expect(screen.getByText("Old failure")).toBeInTheDocument());
   });
 
@@ -150,7 +151,8 @@ describe("Kanban Board - Hide errors older than 1 week", () => {
     await screen.findByText("Old failure");
     expect(screen.getByTitle("Error")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide errors older than 1 week" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide errors older than 1 week" }));
 
     await waitFor(() => expect(screen.queryByTitle("Error")).not.toBeInTheDocument());
   });
@@ -171,7 +173,8 @@ describe("Kanban Board - Hide errors older than 1 week", () => {
     await screen.findByText("Old errored session");
     expect(screen.getByText("Recent errored session")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide errors older than 1 week" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide errors older than 1 week" }));
     await waitFor(() => expect(screen.queryByText("Old errored session")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));

@@ -11,6 +11,7 @@
   "unassignedColumnTooltip": "Sessions from folders that aren't part of a project yet.",
   "viewPlan": "View plan",
   "viewReport": "View focus-time report",
+  "filters": "Filters",
   "hideCompleted": "Hide completed",
   "showCompleted": "Show completed",
   "hideAbandoned": "Hide abandoned",

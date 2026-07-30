@@ -211,7 +211,8 @@ describe("Kanban Board - Projects view", () => {
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
     expect(screen.getByText("Not in project")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide completed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide completed" }));
 
     await waitFor(() => expect(screen.queryByText("Not in project")).not.toBeInTheDocument());
     // The whole Unassigned column is gone, not just the card inside it - its
@@ -223,7 +224,7 @@ describe("Kanban Board - Projects view", () => {
     expect(screen.getByText("In project")).toBeInTheDocument();
 
     // Toggling back off restores both.
-    fireEvent.click(screen.getByRole("button", { name: "Show completed" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show completed" }));
     await waitFor(() => expect(screen.getByText("Unassigned")).toBeInTheDocument());
     expect(screen.getByText("Not in project")).toBeInTheDocument();
   });
