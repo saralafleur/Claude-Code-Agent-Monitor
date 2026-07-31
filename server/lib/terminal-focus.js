@@ -213,9 +213,13 @@ function runOpenTerminalScript(shellCommand) {
  * Source session at all, so it calls this directly with an already-validated
  * cwd from the project's own `paths`).
  * @param {string|null|undefined} cwd
+ * @param {string|null|undefined} name Optional effort/session name. When
+ *   given, passed as `claude -n <name>` so the fresh session starts already
+ *   titled - the same custom-title channel as `/rename` and the picker's
+ *   Ctrl+R (see server/routes/sessions.js's TRANSCRIPT_RENDER_TYPES comment).
  * @returns {{ok: true} | {ok: false, code: string, message: string}}
  */
-function openTerminalForCwd(cwd) {
+function openTerminalForCwd(cwd, name) {
   if (process.platform !== "darwin") {
     return {
       ok: false,
@@ -231,7 +235,8 @@ function openTerminalForCwd(cwd) {
     };
   }
 
-  const shellCommand = `cd ${exports.shellQuote(cwd)} && claude`;
+  const nameFlag = name ? ` -n ${exports.shellQuote(name)}` : "";
+  const shellCommand = `cd ${exports.shellQuote(cwd)} && claude${nameFlag}`;
   try {
     exports.runOpenTerminalScript(shellCommand);
   } catch (err) {
@@ -254,9 +259,11 @@ function openTerminalForCwd(cwd) {
  * process to still be alive (or to have ever resolved a pid at all) — only
  * its recorded working directory.
  * @param {{cwd?: string|null, source?: string|null}} session
+ * @param {string|null|undefined} name Optional effort/session name, forwarded
+ *   to `openTerminalForCwd` - see its doc comment.
  * @returns {{ok: true} | {ok: false, code: string, message: string}}
  */
-function openTerminalForSession(session) {
+function openTerminalForSession(session, name) {
   if (process.platform !== "darwin") {
     return {
       ok: false,
@@ -278,7 +285,7 @@ function openTerminalForSession(session) {
       message: "No working directory was recorded for this session.",
     };
   }
-  return exports.openTerminalForCwd(session.cwd);
+  return exports.openTerminalForCwd(session.cwd, name);
 }
 
 // Assigned onto the existing `exports` object (never `module.exports = {...}`,

@@ -4,10 +4,14 @@
  * extra step, a multi-folder project drilling into a folder-picker screen
  * (and back out of it), calling api.projects.openTerminal with the chosen
  * project/cwd pair, the success feedback auto-closing the modal, error
- * feedback surfacing the server's message, and close behavior (Escape,
- * backdrop click, close button) — same local pending/success/error
- * conventions as SessionCard's own terminal buttons (no toast system in
- * this codebase, see client/src/pages/Run.tsx).
+ * feedback surfacing the server's message, close behavior (Escape,
+ * backdrop click, close button), the "Most used" / "All projects"
+ * sectioning that promotes the top 3 projects by session_count above the
+ * rest, and the optional effort-name field (persists across the
+ * project/folder navigation, passed through to api.projects.openTerminal
+ * only when non-blank) — same local pending/success/error conventions as
+ * SessionCard's own terminal buttons (no toast system in this codebase, see
+ * client/src/pages/Run.tsx).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -67,6 +71,55 @@ describe("OpenTerminalModal", () => {
     render(<OpenTerminalModal onClose={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByText("No projects yet")).toBeInTheDocument());
+  });
+
+  it("shows no section headers when there are 3 or fewer projects", async () => {
+    const projects = [
+      makeProject({ id: "p1", name: "Charlie", session_count: 10 }),
+      makeProject({ id: "p2", name: "Alpha", session_count: 5 }),
+      makeProject({ id: "p3", name: "Bravo", session_count: 1 }),
+    ];
+    listMock.mockResolvedValue({ projects, unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Charlie")).toBeInTheDocument());
+    expect(screen.queryByText("Most used")).not.toBeInTheDocument();
+    expect(screen.queryByText("All projects")).not.toBeInTheDocument();
+  });
+
+  it("shows no section headers when no project has any usage history", async () => {
+    const projects = [
+      makeProject({ id: "p1", name: "Charlie", session_count: 0 }),
+      makeProject({ id: "p2", name: "Alpha", session_count: 0 }),
+      makeProject({ id: "p3", name: "Bravo", session_count: 0 }),
+      makeProject({ id: "p4", name: "Delta", session_count: 0 }),
+    ];
+    listMock.mockResolvedValue({ projects, unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Charlie")).toBeInTheDocument());
+    expect(screen.queryByText("Most used")).not.toBeInTheDocument();
+  });
+
+  it("promotes the top 3 by session_count above an alphabetical rest, once there are more than 3 projects with usage", async () => {
+    const projects = [
+      makeProject({ id: "p1", name: "Delta", session_count: 2 }),
+      makeProject({ id: "p2", name: "Alpha", session_count: 9 }),
+      makeProject({ id: "p3", name: "Bravo", session_count: 7 }),
+      makeProject({ id: "p4", name: "Charlie", session_count: 8 }),
+      makeProject({ id: "p5", name: "Echo", session_count: 0 }),
+    ];
+    listMock.mockResolvedValue({ projects, unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Most used")).toBeInTheDocument());
+    expect(screen.getByText("All projects")).toBeInTheDocument();
+
+    const names = screen
+      .getAllByText(/^(Delta|Alpha|Bravo|Charlie|Echo)$/)
+      .map((el) => el.textContent);
+    // Most used: Alpha (9), Charlie (8), Bravo (7) — then alphabetical rest: Delta, Echo.
+    expect(names).toEqual(["Alpha", "Charlie", "Bravo", "Delta", "Echo"]);
   });
 
   it("disables a project with no mapped folders", async () => {
@@ -179,5 +232,59 @@ describe("OpenTerminalModal", () => {
 
     fireEvent.click(screen.getByLabelText("Close"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens with no name when the optional effort-name field is left blank", async () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    listMock.mockResolvedValue({ projects: [makeProject()], unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Agent Monitor"));
+
+    expect(openTerminalMock).toHaveBeenCalledWith("proj-1", "/repo/agent-monitor");
+  });
+
+  it("passes a typed effort name through to api.projects.openTerminal", async () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    listMock.mockResolvedValue({ projects: [makeProject()], unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText("e.g. Fix desktop freeze"), {
+      target: { value: "  Fix desktop freeze  " },
+    });
+    fireEvent.click(screen.getByText("Agent Monitor"));
+
+    expect(openTerminalMock).toHaveBeenCalledWith(
+      "proj-1",
+      "/repo/agent-monitor",
+      "Fix desktop freeze"
+    );
+  });
+
+  it("carries the typed effort name into a multi-folder project's picker step", async () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    const project = makeProject({
+      paths: [
+        { id: 1, cwd: "/repo/agent-monitor" },
+        { id: 2, cwd: "/repo/agent-monitor-docs" },
+      ],
+    });
+    listMock.mockResolvedValue({ projects: [project], unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText("e.g. Fix desktop freeze"), {
+      target: { value: "Docs pass" },
+    });
+    fireEvent.click(screen.getByText("Agent Monitor"));
+    fireEvent.click(screen.getByText("/repo/agent-monitor-docs"));
+
+    expect(openTerminalMock).toHaveBeenCalledWith(
+      "proj-1",
+      "/repo/agent-monitor-docs",
+      "Docs pass"
+    );
   });
 });

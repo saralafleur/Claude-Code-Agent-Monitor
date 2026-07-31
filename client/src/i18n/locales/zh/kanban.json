@@ -30,7 +30,11 @@
     "noFolders": "此项目未映射任何文件夹",
     "folderCount_one": "{{count}} 个文件夹",
     "folderCount_other": "{{count}} 个文件夹",
-    "error": "打开新终端失败"
+    "error": "打开新终端失败",
+    "mostUsed": "最常用",
+    "allProjects": "所有项目",
+    "nameLabel": "任务名称(可选)",
+    "namePlaceholder": "例如:修复桌面端卡死"
   },
   "copyLink": "复制共享链接",
   "linkCopied": "链接已复制！",
@@ -62,6 +66,8 @@
     "focusTerminalError": "跳转到终端失败",
     "openTerminal": "在此打开新终端",
     "openTerminalError": "打开新终端失败",
+    "openTerminalNameLabel": "任务名称(可选)",
+    "openTerminalNamePlaceholder": "例如:修复桌面端卡死",
     "tokens": {
       "in": "输入",
       "out": "输出",

@@ -30,7 +30,11 @@
     "noFolders": "Không có thư mục nào được gán cho dự án này",
     "folderCount_one": "{{count}} thư mục",
     "folderCount_other": "{{count}} thư mục",
-    "error": "Không thể mở terminal mới"
+    "error": "Không thể mở terminal mới",
+    "mostUsed": "Dùng nhiều nhất",
+    "allProjects": "Tất cả dự án",
+    "nameLabel": "Tên công việc (tùy chọn)",
+    "namePlaceholder": "vd: Sửa lỗi treo máy tính để bàn"
   },
   "copyLink": "Sao chép liên kết chia sẻ",
   "linkCopied": "Đã sao chép liên kết!",
@@ -62,6 +66,8 @@
     "focusTerminalError": "Không thể chuyển đến terminal",
     "openTerminal": "Mở terminal mới tại đây",
     "openTerminalError": "Không thể mở terminal mới",
+    "openTerminalNameLabel": "Tên công việc (tùy chọn)",
+    "openTerminalNamePlaceholder": "vd: Sửa lỗi treo máy tính để bàn",
     "tokens": {
       "in": "Vào",
       "out": "Ra",

@@ -563,14 +563,18 @@ const OPEN_TERMINAL_STATUS = {
  * (macOS only), so you can start a second session against the same project
  * without hunting down the existing tab. See server/lib/terminal-focus.js
  * for the cwd-resolution/AppleScript chain; this route only maps its typed
- * result to HTTP.
+ * result to HTTP. Body: `{ name?: string }` — an optional effort/session
+ * name, passed through as `claude -n <name>` so the fresh session starts
+ * already titled.
  */
 router.post("/:id/open-terminal", (req, res) => {
   const session = stmts.getSession.get(req.params.id);
   if (!session) {
     return res.status(404).json({ error: { code: "NOT_FOUND", message: "Session not found" } });
   }
-  const result = terminalFocus.openTerminalForSession(session);
+  const rawName = req.body?.name;
+  const name = typeof rawName === "string" && rawName.trim() ? rawName.trim() : undefined;
+  const result = terminalFocus.openTerminalForSession(session, name);
   if (result.ok) return res.json({ ok: true });
   const status = OPEN_TERMINAL_STATUS[result.code] || 500;
   res.status(status).json({ error: { code: result.code, message: result.message } });

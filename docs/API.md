@@ -320,10 +320,18 @@ macOS only. Opens a brand-new Terminal.app window in this session's recorded wor
 |-----------|------|-------------|
 | `id` | string | Session ID |
 
+**Body Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Optional. An effort/session name, trimmed server-side; blank or omitted opens untitled. Passed through as `claude -n <name>` so the fresh session starts already titled. |
+
 **Example Request:**
 
 ```bash
-curl -X POST http://localhost:4820/api/sessions/sess_abc123/open-terminal
+curl -X POST http://localhost:4820/api/sessions/sess_abc123/open-terminal \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Fix desktop freeze"}'
 ```
 
 **Example Response:**
@@ -1427,7 +1435,7 @@ Each session entry carries `ended_at` (`null` while still active/waiting) straig
 POST /api/projects/:id/open-terminal
 ```
 
-macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view): picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first.
+macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view): picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first. The top-level project list itself (`client/src/components/OpenTerminalModal.tsx`) is sorted client-side: once more than 3 projects exist and at least one has session history, a "Most used" section promotes the top 3 by `session_count` (ties broken alphabetically) above an "All projects" section holding the rest in the server's alphabetical order; with 3 or fewer projects, or none used yet, it's shown as one plain alphabetical list. The same picker also carries an optional effort-name field across the project/folder navigation, mirroring `POST /api/sessions/:id/open-terminal`'s `name` body param below.
 
 **Path Parameters:**
 
@@ -1440,13 +1448,14 @@ macOS only. Opens a brand-new Terminal.app window in one of this project's mappe
 | Field | Type | Required | Description |
 |-------|------|----------|--------------|
 | `cwd` | string | Only when the project has more than one mapped folder | Which of the project's own `paths[].cwd` to open. Ignored (the project's single folder is used) when the project has exactly one. |
+| `name` | string | No | An effort/session name, trimmed server-side; blank or omitted opens untitled. Passed through as `claude -n <name>` so the fresh session starts already titled. |
 
 **Example Request:**
 
 ```bash
 curl -X POST http://localhost:4820/api/projects/proj_abc123/open-terminal \
   -H "Content-Type: application/json" \
-  -d '{"cwd": "/Users/dev/my-repo"}'
+  -d '{"cwd": "/Users/dev/my-repo", "name": "Fix desktop freeze"}'
 ```
 
 **Example Response:**

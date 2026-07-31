@@ -30,7 +30,11 @@
     "noFolders": "No folders mapped to this project",
     "folderCount_one": "{{count}} folder",
     "folderCount_other": "{{count}} folders",
-    "error": "Failed to open a new terminal"
+    "error": "Failed to open a new terminal",
+    "mostUsed": "Most used",
+    "allProjects": "All projects",
+    "nameLabel": "Effort name (optional)",
+    "namePlaceholder": "e.g. Fix desktop freeze"
   },
   "copyLink": "Copy shareable link",
   "linkCopied": "Link copied!",
@@ -62,6 +66,8 @@
     "focusTerminalError": "Failed to jump to terminal",
     "openTerminal": "Open new terminal here",
     "openTerminalError": "Failed to open a new terminal",
+    "openTerminalNameLabel": "Effort name (optional)",
+    "openTerminalNamePlaceholder": "e.g. Fix desktop freeze",
     "tokens": {
       "in": "In",
       "out": "Out",

@@ -2,16 +2,20 @@
  * @file Tests for SessionCard's "open new terminal" button: rendered for any
  * local session with a known cwd (active or not — unlike "jump to terminal",
  * it doesn't need a resolved pid since it starts a fresh `claude` instance
- * rather than locating a running one), calls api.sessions.openTerminal on
- * click without also triggering the card's own navigate-to-detail
- * (stopPropagation), and its own local pending → success/error feedback (no
- * toast system in this codebase - see client/src/pages/Run.tsx for the same
- * local-state convention).
+ * rather than locating a running one). Clicking it opens a small anchored
+ * popover prompting for an optional effort name (passed through as
+ * `claude -n <name>` on api.sessions.openTerminal) rather than firing
+ * immediately; Enter or the popover's own "Open" button submits (with or
+ * without a name typed), Escape/outside-click cancels without opening
+ * anything. Also covers the button's own local pending → success/error
+ * feedback and that none of this triggers the card's own navigate-to-detail
+ * (no toast system in this codebase - see client/src/pages/Run.tsx for the
+ * same local-state convention).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SessionCard } from "../SessionCard";
 import type { Session } from "../../lib/types";
@@ -60,6 +64,10 @@ function getButton() {
   return screen.getByLabelText("Open new terminal here");
 }
 
+function getNameInput() {
+  return screen.getByLabelText("Effort name (optional)");
+}
+
 describe("SessionCard - open new terminal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -92,24 +100,78 @@ describe("SessionCard - open new terminal", () => {
     expect(getButton()).toBeInTheDocument();
   });
 
-  it("calls api.sessions.openTerminal on click without navigating to the detail page", () => {
-    openTerminalMock.mockResolvedValue({ ok: true });
+  it("opens a name popover on click instead of calling openTerminal immediately", () => {
     renderCard(makeSession());
 
     fireEvent.click(getButton());
 
+    expect(getNameInput()).toBeInTheDocument();
+    expect(openTerminalMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("submits with no name (Enter on an empty input) and calls openTerminal(id) alone", () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    renderCard(makeSession());
+
+    fireEvent.click(getButton());
+    fireEvent.keyDown(getNameInput(), { key: "Enter" });
+
     expect(openTerminalMock).toHaveBeenCalledWith("sess-term-1");
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("submits a typed name (Enter) and calls openTerminal(id, name), trimmed", () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    renderCard(makeSession());
+
+    fireEvent.click(getButton());
+    fireEvent.change(getNameInput(), { target: { value: "  Fix desktop freeze  " } });
+    fireEvent.keyDown(getNameInput(), { key: "Enter" });
+
+    expect(openTerminalMock).toHaveBeenCalledWith("sess-term-1", "Fix desktop freeze");
+  });
+
+  it("submits via the popover's own Open button", () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    renderCard(makeSession());
+
+    fireEvent.click(getButton());
+    fireEvent.change(getNameInput(), { target: { value: "Docs pass" } });
+    const popover = screen.getByRole("dialog");
+    fireEvent.click(within(popover).getByRole("button", { name: "Open new terminal here" }));
+
+    expect(openTerminalMock).toHaveBeenCalledWith("sess-term-1", "Docs pass");
+  });
+
+  it("closes the popover on Escape without calling openTerminal", () => {
+    renderCard(makeSession());
+
+    fireEvent.click(getButton());
+    fireEvent.keyDown(getNameInput(), { key: "Escape" });
+
+    expect(screen.queryByLabelText("Effort name (optional)")).not.toBeInTheDocument();
+    expect(openTerminalMock).not.toHaveBeenCalled();
+  });
+
+  it("closes the popover on an outside click without calling openTerminal", () => {
+    renderCard(makeSession());
+
+    fireEvent.click(getButton());
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByLabelText("Effort name (optional)")).not.toBeInTheDocument();
+    expect(openTerminalMock).not.toHaveBeenCalled();
   });
 
   it("shows success feedback after the call resolves", async () => {
     openTerminalMock.mockResolvedValue({ ok: true });
     renderCard(makeSession());
 
-    const button = getButton();
-    fireEvent.click(button);
+    fireEvent.click(getButton());
+    fireEvent.keyDown(getNameInput(), { key: "Enter" });
 
-    await waitFor(() => expect(button.querySelector("svg.lucide-check")).toBeInTheDocument());
+    await waitFor(() => expect(getButton().querySelector("svg.lucide-check")).toBeInTheDocument());
   });
 
   it("shows error feedback with the server's message as the tooltip when the call rejects", async () => {
@@ -118,23 +180,26 @@ describe("SessionCard - open new terminal", () => {
     );
     renderCard(makeSession());
 
-    const button = getButton();
-    fireEvent.click(button);
+    fireEvent.click(getButton());
+    fireEvent.keyDown(getNameInput(), { key: "Enter" });
 
     await waitFor(() =>
-      expect(button).toHaveAttribute("title", "No working directory was recorded for this session.")
+      expect(getButton()).toHaveAttribute(
+        "title",
+        "No working directory was recorded for this session."
+      )
     );
-    expect(button.querySelector("svg.lucide-x")).toBeInTheDocument();
+    expect(getButton().querySelector("svg.lucide-x")).toBeInTheDocument();
   });
 
-  it("ignores a second click while the first request is still pending", () => {
+  it("ignores a click on the button while a request is still pending", () => {
     let resolveCall: (v: { ok: true }) => void = () => {};
     openTerminalMock.mockReturnValue(new Promise((resolve) => (resolveCall = resolve)));
     renderCard(makeSession());
 
-    const button = getButton();
-    fireEvent.click(button);
-    fireEvent.click(button);
+    fireEvent.click(getButton());
+    fireEvent.keyDown(getNameInput(), { key: "Enter" });
+    fireEvent.click(getButton());
 
     expect(openTerminalMock).toHaveBeenCalledTimes(1);
     resolveCall({ ok: true });

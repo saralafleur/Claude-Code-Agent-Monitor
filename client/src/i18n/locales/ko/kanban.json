@@ -30,7 +30,11 @@
     "noFolders": "이 프로젝트에 매핑된 폴더가 없습니다",
     "folderCount_one": "폴더 {{count}}개",
     "folderCount_other": "폴더 {{count}}개",
-    "error": "새 터미널을 열지 못했습니다"
+    "error": "새 터미널을 열지 못했습니다",
+    "mostUsed": "가장 많이 사용됨",
+    "allProjects": "모든 프로젝트",
+    "nameLabel": "작업 이름 (선택 사항)",
+    "namePlaceholder": "예: 데스크톱 멈춤 현상 수정"
   },
   "copyLink": "공유 링크 복사",
   "linkCopied": "링크가 복사되었습니다!",
@@ -62,6 +66,8 @@
     "focusTerminalError": "터미널로 이동하지 못했습니다",
     "openTerminal": "여기에서 새 터미널 열기",
     "openTerminalError": "새 터미널을 열지 못했습니다",
+    "openTerminalNameLabel": "작업 이름 (선택 사항)",
+    "openTerminalNamePlaceholder": "예: 데스크톱 멈춤 현상 수정",
     "tokens": {
       "in": "입력",
       "out": "출력",

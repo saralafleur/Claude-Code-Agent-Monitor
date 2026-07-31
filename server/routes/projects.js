@@ -256,7 +256,9 @@ const OPEN_TERMINAL_STATUS = {
  * (macOS only). A project mapped to exactly one folder opens it directly; a
  * project mapped to more than one requires `cwd` in the body naming which
  * of its own `paths` to use — the client's picker only shows the folder
- * step when there's an actual choice to make.
+ * step when there's an actual choice to make. Body may also carry an
+ * optional `name` (effort/session name), passed through as `claude -n
+ * <name>` so the fresh session starts already titled.
  */
 router.post("/:id/open-terminal", (req, res) => {
   const project = stmts.getProject.get(req.params.id);
@@ -286,7 +288,9 @@ router.post("/:id/open-terminal", (req, res) => {
     cwd = requested;
   }
 
-  const result = terminalFocus.openTerminalForCwd(cwd);
+  const rawName = req.body?.name;
+  const name = typeof rawName === "string" && rawName.trim() ? rawName.trim() : undefined;
+  const result = terminalFocus.openTerminalForCwd(cwd, name);
   if (result.ok) return res.json({ ok: true });
   const status = OPEN_TERMINAL_STATUS[result.code] || 500;
   res.status(status).json({ error: { code: result.code, message: result.message } });

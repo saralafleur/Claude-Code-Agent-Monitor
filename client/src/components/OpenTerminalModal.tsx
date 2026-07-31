@@ -11,11 +11,21 @@
  * clicking one of those opens it. Mirrors SessionCard's local
  * pending/success/error feedback convention (no toast system in this
  * codebase, see client/src/pages/Run.tsx) but auto-closes shortly after a
- * successful open, since the popup's whole job is done at that point.
+ * successful open, since the popup's whole job is done at that point. When
+ * there are more than three projects with any usage history, the top-level
+ * list is split into a "Most used" section (the 3 highest `session_count`,
+ * ties broken alphabetically) followed by the rest in the server's
+ * alphabetical order — otherwise (few projects, or none used yet) it's
+ * shown as one plain alphabetical list. An optional "effort name" text
+ * field sits below the header, persists across the project/folder
+ * navigation, and (when filled in) is passed along on open as `claude -n
+ * <name>` so the fresh session starts already titled - typing one is never
+ * required, and a click on a project/folder still opens immediately with no
+ * extra step either way.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X, ChevronLeft, FolderOpen, SquareTerminal, Loader2, Check } from "lucide-react";
 import { api } from "../lib/api";
@@ -50,8 +60,27 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
   const [openState, setOpenState] = useState<OpenState>("idle");
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingCwd, setOpeningCwd] = useState<string | null>(null);
+  // Optional effort name, typed once and carried across the project/folder
+  // navigation below - whatever's in it when a project/folder is clicked is
+  // what gets passed to `openCwd`.
+  const [nameInput, setNameInput] = useState("");
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Splits into a "most used" top 3 (by session_count, ties alphabetical)
+  // plus the remainder, which stays in the server's alphabetical order.
+  // Skipped (empty topUsed) when there's nothing meaningful to promote.
+  const { topUsed, rest } = useMemo(() => {
+    if (!projects || projects.length <= 3 || !projects.some((p) => p.session_count > 0)) {
+      return { topUsed: [] as Project[], rest: projects ?? [] };
+    }
+    const byUsage = [...projects].sort(
+      (a, b) => b.session_count - a.session_count || a.name.localeCompare(b.name)
+    );
+    const top = byUsage.slice(0, 3);
+    const topIds = new Set(top.map((p) => p.id));
+    return { topUsed: top, rest: projects.filter((p) => !topIds.has(p.id)) };
+  }, [projects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,8 +120,11 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
     setOpenState("pending");
     setOpenError(null);
     setOpeningCwd(cwd);
-    api.projects
-      .openTerminal(project.id, cwd)
+    const name = nameInput.trim();
+    const call = name
+      ? api.projects.openTerminal(project.id, cwd, name)
+      : api.projects.openTerminal(project.id, cwd);
+    call
       .then(() => {
         setOpenState("success");
         closeTimerRef.current = setTimeout(onClose, AUTO_CLOSE_MS);
@@ -106,9 +138,9 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
 
   function handleProjectClick(project: Project) {
     if (openState === "pending") return;
-    const [only, ...rest] = project.paths;
+    const [only, ...otherPaths] = project.paths;
     if (!only) return;
-    if (rest.length === 0) {
+    if (otherPaths.length === 0) {
       openCwd(project, only.cwd);
     } else {
       setSelected(project);
@@ -121,6 +153,40 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
     setSelected(null);
     setOpenState("idle");
     setOpenError(null);
+  }
+
+  function renderProjectRow(project: Project) {
+    const disabled = project.paths.length === 0;
+    const onlyPath = project.paths.length === 1 ? project.paths[0] : undefined;
+    const isOpeningThis = !!openingCwd && project.paths.some((p) => p.cwd === openingCwd);
+    return (
+      <button
+        key={project.id}
+        type="button"
+        disabled={disabled || openState === "pending"}
+        onClick={() => handleProjectClick(project)}
+        title={disabled ? t("openTerminalPicker.noFolders") : undefined}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors ${
+          disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-surface-4"
+        }`}
+      >
+        <FolderOpen className="w-4 h-4 text-gray-500 flex-shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-gray-200 truncate">{project.name}</p>
+          <p className="text-[11px] text-gray-500 truncate">
+            {onlyPath
+              ? pathTail(onlyPath.cwd)
+              : t("openTerminalPicker.folderCount", { count: project.paths.length })}
+          </p>
+        </div>
+        {isOpeningThis && openState === "pending" && (
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-accent flex-shrink-0" />
+        )}
+        {isOpeningThis && openState === "success" && (
+          <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+        )}
+      </button>
+    );
   }
 
   return (
@@ -166,6 +232,22 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
           </button>
         </div>
 
+        <div className="px-5 py-3 border-b border-border flex-shrink-0">
+          <input
+            type="text"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            aria-label={t("openTerminalPicker.nameLabel")}
+            placeholder={t("openTerminalPicker.namePlaceholder")}
+            disabled={openState === "pending"}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            className="input w-full text-sm"
+          />
+        </div>
+
         {openState === "error" && openError && (
           <p className="px-5 pt-3 text-xs text-rose-400">{openError}</p>
         )}
@@ -186,42 +268,24 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
               {t("openTerminalPicker.noProjects")}
             </p>
           )}
+          {!selected && projects && projects.length > 0 && topUsed.length > 0 && (
+            <p className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+              {t("openTerminalPicker.mostUsed")}
+            </p>
+          )}
           {!selected &&
             projects &&
             projects.length > 0 &&
-            projects.map((project) => {
-              const disabled = project.paths.length === 0;
-              const onlyPath = project.paths.length === 1 ? project.paths[0] : undefined;
-              const isOpeningThis = !!openingCwd && project.paths.some((p) => p.cwd === openingCwd);
-              return (
-                <button
-                  key={project.id}
-                  type="button"
-                  disabled={disabled || openState === "pending"}
-                  onClick={() => handleProjectClick(project)}
-                  title={disabled ? t("openTerminalPicker.noFolders") : undefined}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors ${
-                    disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-surface-4"
-                  }`}
-                >
-                  <FolderOpen className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-gray-200 truncate">{project.name}</p>
-                    <p className="text-[11px] text-gray-500 truncate">
-                      {onlyPath
-                        ? pathTail(onlyPath.cwd)
-                        : t("openTerminalPicker.folderCount", { count: project.paths.length })}
-                    </p>
-                  </div>
-                  {isOpeningThis && openState === "pending" && (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-accent flex-shrink-0" />
-                  )}
-                  {isOpeningThis && openState === "success" && (
-                    <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                  )}
-                </button>
-              );
-            })}
+            topUsed.map((project) => renderProjectRow(project))}
+          {!selected && projects && projects.length > 0 && topUsed.length > 0 && (
+            <p className="px-3 pt-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+              {t("openTerminalPicker.allProjects")}
+            </p>
+          )}
+          {!selected &&
+            projects &&
+            projects.length > 0 &&
+            rest.map((project) => renderProjectRow(project))}
 
           {selected && (
             <div className="space-y-1">

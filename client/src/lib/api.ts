@@ -732,11 +732,14 @@ export const api = {
      * `Error.message`) when the platform isn't macOS, the session has no
      * recorded working directory, or Terminal automation fails.
      * @param id The session id.
+     * @param name Optional effort/session name - passed through as
+     *   `claude -n <name>` so the fresh session starts already titled.
      * @returns `{ ok: true }`.
      */
-    openTerminal: (id: string) =>
+    openTerminal: (id: string, name?: string) =>
       request<{ ok: true }>(`/sessions/${encodeURIComponent(id)}/open-terminal`, {
         method: "POST",
+        body: JSON.stringify(name ? { name } : {}),
       }),
     /**
      * GET /api/sessions/:id/stats - per-session rollups for the detail page.
@@ -2183,15 +2186,18 @@ export const api = {
      * typed codes, surfaced via `Error.message`) when the platform isn't
      * macOS, the project has no mapped folders, `cwd` isn't one of them, or
      * Terminal automation fails.
-     * @param id  The project id.
-     * @param cwd Which mapped folder to open in — required only when the
-     *            project has more than one.
+     * @param id   The project id.
+     * @param cwd  Which mapped folder to open in — required only when the
+     *             project has more than one.
+     * @param name Optional effort/session name - passed through as
+     *             `claude -n <name>` so the fresh session starts already
+     *             titled.
      * @returns `{ ok: true }`.
      */
-    openTerminal: (id: string, cwd?: string) =>
+    openTerminal: (id: string, cwd?: string, name?: string) =>
       request<{ ok: true }>(`/projects/${encodeURIComponent(id)}/open-terminal`, {
         method: "POST",
-        body: JSON.stringify(cwd ? { cwd } : {}),
+        body: JSON.stringify({ ...(cwd ? { cwd } : {}), ...(name ? { name } : {}) }),
       }),
   },
 
