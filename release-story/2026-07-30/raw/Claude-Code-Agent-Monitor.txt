@@ -1,0 +1,79 @@
+Fork point: 6758179fd46ea474a9d20deca60da3afc754f83e (2026-07-24 21:12:38 -0700)
+HEAD:      2026-07-30 19:57:58 -0600
+Diff: 265 files changed, 64719 insertions(+), 4991 deletions(-)
+
+=== Commits (chronological) ===
+--COMMIT-- e97c514|2026-07-25|Sara LaFleur|feat(projects): group sessions/kanban by project, add devops skill and docs updates
+--COMMIT-- 9e1b4d7|2026-07-25|Sara LaFleur|feat(sessions): add per-session delete from the portal
+--COMMIT-- 46912c8|2026-07-25|Sara LaFleur|feat(plans): AGENT-PLAN.md ingestion, session focus declarations, and drift auditing
+--COMMIT-- c2e79fb|2026-07-25|Sara LaFleur|feat(plans): wire the client api.plans bindings for the AGENT-PLAN.md feature
+--COMMIT-- 56c00b0|2026-07-25|Sara LaFleur|feat(kanban): group Projects-view columns into draggable monitor boxes
+--COMMIT-- 792577b|2026-07-25|Sara LaFleur|feat(plans): finish plan-aware monitoring UI/docs; wip expensive-model quips
+--COMMIT-- 3d656d1|2026-07-25|Sara LaFleur|fix(kanban): render Ungrouped as a real container box, not a loose divider
+--COMMIT-- d5a5ea9|2026-07-25|Sara LaFleur|feat(plans): add a "view plan" icon to project headers on Projects and Kanban
+--COMMIT-- 921fdd5|2026-07-25|Sara LaFleur|feat(plans): add bug/feature detour badges; fix sub-agent false-Waiting status
+--COMMIT-- 8e30dfc|2026-07-25|Sara LaFleur|fix(plans): make ccam focus arg parsing quote-aware, not char-blacklist-based
+--COMMIT-- f17a7b7|2026-07-25|Sara LaFleur|feat(plans): show every focus state (item/detour/feature/bug) on session cards and in the plan modal
+--COMMIT-- 81291e1|2026-07-25|Sara LaFleur|Give plan_items a stable id independent of display number
+--COMMIT-- d87415e|2026-07-25|Sara LaFleur|feat(projects): add per-project focus-time report endpoint
+--COMMIT-- 19e1c35|2026-07-25|Sara LaFleur|feat(kanban): focus-time report modal and collapsible monitor/project columns
+--COMMIT-- 7bf1e92|2026-07-25|Sara LaFleur|docs: sync docs for focus-time report endpoint and collapsible kanban view
+--COMMIT-- 090ada9|2026-07-25|Sara LaFleur|Add hierarchical sub-items to AGENT-PLAN.md plan tracking
+--COMMIT-- 2c1ef2f|2026-07-26|Sara LaFleur|feat(focus): calendar view for focus-time report and background focus inference
+--COMMIT-- 2416292|2026-07-26|Sara LaFleur|feat(focus): styled hover popup, events-inspector modal, and active/idle chunk striping
+--COMMIT-- 6e29722|2026-07-26|Sara LaFleur|fix(focus-report): List view now honestly represents active vs. idle time
+--COMMIT-- 0ef79b3|2026-07-26|Sara LaFleur|feat(status): distinguish subagent/shell/monitor as active-work awaiting reasons
+--COMMIT-- c4ed211|2026-07-26|Sara LaFleur|feat(kanban): collapsible Ungrouped box + shareable dashboard link with token
+--COMMIT-- e4d4bda|2026-07-26|Sara LaFleur|feat(focus-report): add cross-project Focus Calendar board
+--COMMIT-- e0c96f0|2026-07-26|Sara LaFleur|fix(build): guard prepare/postinstall against nested mcp/ reinstall corrupting shared worktree git config
+--COMMIT-- 0416066|2026-07-26|Sara LaFleur|feat(focus-report): add windowed stat totals for calendar zoom, track delivery-pipeline docs
+--COMMIT-- 31927e2|2026-07-27|Sara LaFleur|feat(focus-report): add stakeholder-readable Focus page and plan-less activity summaries
+--COMMIT-- b3a2cc9|2026-07-27|Sara LaFleur|fix(focus-report): sort event timestamps before the active/idle gap-sum walk
+--COMMIT-- ed23878|2026-07-27|Sara LaFleur|feat(focus-report): add hour-window zoom control to the Focus Calendar
+--COMMIT-- b930824|2026-07-28|Sara LaFleur|feat(focus-report): AI window summaries with hierarchical multi-day rollups
+--COMMIT-- 0d5fbe7|2026-07-28|Sara LaFleur|feat(focus-report): Focus Calendar board polish + focus-report route fidelity fixes
+--COMMIT-- 50a2800|2026-07-29|Sara LaFleur|feat(kanban): shared monitor-layout groupings with live broadcast
+--COMMIT-- 5077a72|2026-07-29|Sara LaFleur|fix(update-check): isolate git subprocess env from GIT_DIR/GIT_WORK_TREE
+--COMMIT-- fa3f460|2026-07-29|Sara LaFleur|feat(wip): live priority-ranked work-in-progress queue page
+--COMMIT-- 97ae0a5|2026-07-29|Sara LaFleur|chore(intake): record delivery-pipeline docs for the WIP queue page effort
+--COMMIT-- 01eb368|2026-07-29|Sara LaFleur|Merge branch 'effort/2026-07-28-wip-queue-page'
+--COMMIT-- 524ed95|2026-07-30|Sara LaFleur|Land accumulated uncommitted work: docker-lifecycle devops command, librarian knowledge library, terminal-focus feature, cache/dev-build UI additions, and docs sync
+--COMMIT-- a9576ed|2026-07-30|Sara LaFleur|fix(dev): force NODE_ENV=development in web-up to stop it serving stale prod bundle
+--COMMIT-- 2394bc7|2026-07-30|Sara LaFleur|fix(settings-cache): bucket cache timeline/day-drilldown by viewer's local timezone, not UTC
+--COMMIT-- 18196dc|2026-07-30|Sara LaFleur|Remove the WIP queue feature; land accumulated cache-timeline/session-card work
+--COMMIT-- 15a1898|2026-07-30|Sara LaFleur|Move Kanban board's completed/abandoned/error/internal filters into one overflow menu
+--COMMIT-- 60af828|2026-07-30|Sara LaFleur|Stream the settings data export and fix a stack-overflow in focus-report interval building
+--COMMIT-- 57b875d|2026-07-30|Sara LaFleur|Add per-turn context-size tracking and chart, fix Kanban column alignment
+--COMMIT-- e685700|2026-07-30|Sara LaFleur|Add a vertical (token-count) scale to the context-size-over-time chart
+--COMMIT-- 8e495e7|2026-07-30|Sara LaFleur|Add "Open terminal in project" to Sessions and Kanban
+--COMMIT-- 9e5110a|2026-07-30|Sara LaFleur|Sync docs and wiki for the open-terminal-in-project feature
+--COMMIT-- 4a48a48|2026-07-30|Sara LaFleur|Move Kanban's "Open terminal in project" out of the filters dropdown
+--COMMIT-- ff83064|2026-07-30|Sara LaFleur|Let "Open terminal in project" carry an optional effort name
+
+=== Changed areas (cumulative % of touched files, by directory) ===
+4.9% .claude/skills/devops/
+   5.6% client/src/components/__tests__/
+  14.7% client/src/components/
+  10.5% client/src/i18n/locales/
+  11.3% client/src/i18n/
+   3.0% client/src/lib/__tests__/
+   7.9% client/src/lib/
+   3.7% client/src/pages/__tests__/
+   6.4% client/src/pages/
+  41.5% client/src/
+  42.6% client/
+   3.3% intake/2026-07-26-focus-calendar-board/qa/
+  11.6% intake/2026-07-26-focus-calendar-board/
+   3.0% intake/2026-07-26-focus-report-fidelity/qa/
+  10.1% intake/2026-07-26-focus-report-fidelity/
+  21.8% intake/
+   3.3% library/
+   6.4% server/__tests__/
+   4.5% server/lib/
+  16.6% server/
+
+=== Uncommitted working-tree changes (not yet in a commit) ===
+M client/src/components/SessionCard.tsx
+ M server/db.js
+ M server/routes/hooks.js
+?? release-story/

@@ -1,0 +1,46 @@
+--COMMIT-- [Claude-Code-Agent-Monitor] e97c514|2026-07-25|Sara LaFleur|feat(projects): group sessions/kanban by project, add devops skill and docs updates
+--COMMIT-- [Claude-Code-Agent-Monitor] 9e1b4d7|2026-07-25|Sara LaFleur|feat(sessions): add per-session delete from the portal
+--COMMIT-- [Claude-Code-Agent-Monitor] 46912c8|2026-07-25|Sara LaFleur|feat(plans): AGENT-PLAN.md ingestion, session focus declarations, and drift auditing
+--COMMIT-- [Claude-Code-Agent-Monitor] c2e79fb|2026-07-25|Sara LaFleur|feat(plans): wire the client api.plans bindings for the AGENT-PLAN.md feature
+--COMMIT-- [Claude-Code-Agent-Monitor] 56c00b0|2026-07-25|Sara LaFleur|feat(kanban): group Projects-view columns into draggable monitor boxes
+--COMMIT-- [Claude-Code-Agent-Monitor] 792577b|2026-07-25|Sara LaFleur|feat(plans): finish plan-aware monitoring UI/docs; wip expensive-model quips
+--COMMIT-- [Claude-Code-Agent-Monitor] 3d656d1|2026-07-25|Sara LaFleur|fix(kanban): render Ungrouped as a real container box, not a loose divider
+--COMMIT-- [Claude-Code-Agent-Monitor] d5a5ea9|2026-07-25|Sara LaFleur|feat(plans): add a "view plan" icon to project headers on Projects and Kanban
+--COMMIT-- [Claude-Code-Agent-Monitor] 921fdd5|2026-07-25|Sara LaFleur|feat(plans): add bug/feature detour badges; fix sub-agent false-Waiting status
+--COMMIT-- [Claude-Code-Agent-Monitor] 8e30dfc|2026-07-25|Sara LaFleur|fix(plans): make ccam focus arg parsing quote-aware, not char-blacklist-based
+--COMMIT-- [Claude-Code-Agent-Monitor] f17a7b7|2026-07-25|Sara LaFleur|feat(plans): show every focus state (item/detour/feature/bug) on session cards and in the plan modal
+--COMMIT-- [Claude-Code-Agent-Monitor] 81291e1|2026-07-25|Sara LaFleur|Give plan_items a stable id independent of display number
+--COMMIT-- [Claude-Code-Agent-Monitor] d87415e|2026-07-25|Sara LaFleur|feat(projects): add per-project focus-time report endpoint
+--COMMIT-- [Claude-Code-Agent-Monitor] 19e1c35|2026-07-25|Sara LaFleur|feat(kanban): focus-time report modal and collapsible monitor/project columns
+--COMMIT-- [Claude-Code-Agent-Monitor] 7bf1e92|2026-07-25|Sara LaFleur|docs: sync docs for focus-time report endpoint and collapsible kanban view
+--COMMIT-- [Claude-Code-Agent-Monitor] 090ada9|2026-07-25|Sara LaFleur|Add hierarchical sub-items to AGENT-PLAN.md plan tracking
+--COMMIT-- [Claude-Code-Agent-Monitor] 2c1ef2f|2026-07-26|Sara LaFleur|feat(focus): calendar view for focus-time report and background focus inference
+--COMMIT-- [Claude-Code-Agent-Monitor] 2416292|2026-07-26|Sara LaFleur|feat(focus): styled hover popup, events-inspector modal, and active/idle chunk striping
+--COMMIT-- [Claude-Code-Agent-Monitor] 6e29722|2026-07-26|Sara LaFleur|fix(focus-report): List view now honestly represents active vs. idle time
+--COMMIT-- [Claude-Code-Agent-Monitor] 0ef79b3|2026-07-26|Sara LaFleur|feat(status): distinguish subagent/shell/monitor as active-work awaiting reasons
+--COMMIT-- [Claude-Code-Agent-Monitor] c4ed211|2026-07-26|Sara LaFleur|feat(kanban): collapsible Ungrouped box + shareable dashboard link with token
+--COMMIT-- [Claude-Code-Agent-Monitor] e4d4bda|2026-07-26|Sara LaFleur|feat(focus-report): add cross-project Focus Calendar board
+--COMMIT-- [Claude-Code-Agent-Monitor] e0c96f0|2026-07-26|Sara LaFleur|fix(build): guard prepare/postinstall against nested mcp/ reinstall corrupting shared worktree git config
+--COMMIT-- [Claude-Code-Agent-Monitor] 0416066|2026-07-26|Sara LaFleur|feat(focus-report): add windowed stat totals for calendar zoom, track delivery-pipeline docs
+--COMMIT-- [Claude-Code-Agent-Monitor] 31927e2|2026-07-27|Sara LaFleur|feat(focus-report): add stakeholder-readable Focus page and plan-less activity summaries
+--COMMIT-- [Claude-Code-Agent-Monitor] b3a2cc9|2026-07-27|Sara LaFleur|fix(focus-report): sort event timestamps before the active/idle gap-sum walk
+--COMMIT-- [Claude-Code-Agent-Monitor] ed23878|2026-07-27|Sara LaFleur|feat(focus-report): add hour-window zoom control to the Focus Calendar
+--COMMIT-- [Claude-Code-Agent-Monitor] b930824|2026-07-28|Sara LaFleur|feat(focus-report): AI window summaries with hierarchical multi-day rollups
+--COMMIT-- [Claude-Code-Agent-Monitor] 0d5fbe7|2026-07-28|Sara LaFleur|feat(focus-report): Focus Calendar board polish + focus-report route fidelity fixes
+--COMMIT-- [Claude-Code-Agent-Monitor] 50a2800|2026-07-29|Sara LaFleur|feat(kanban): shared monitor-layout groupings with live broadcast
+--COMMIT-- [Claude-Code-Agent-Monitor] 5077a72|2026-07-29|Sara LaFleur|fix(update-check): isolate git subprocess env from GIT_DIR/GIT_WORK_TREE
+--COMMIT-- [Claude-Code-Agent-Monitor] fa3f460|2026-07-29|Sara LaFleur|feat(wip): live priority-ranked work-in-progress queue page
+--COMMIT-- [Claude-Code-Agent-Monitor] 97ae0a5|2026-07-29|Sara LaFleur|chore(intake): record delivery-pipeline docs for the WIP queue page effort
+--COMMIT-- [Claude-Code-Agent-Monitor] 01eb368|2026-07-29|Sara LaFleur|Merge branch 'effort/2026-07-28-wip-queue-page'
+--COMMIT-- [Claude-Code-Agent-Monitor] 524ed95|2026-07-30|Sara LaFleur|Land accumulated uncommitted work: docker-lifecycle devops command, librarian knowledge library, terminal-focus feature, cache/dev-build UI additions, and docs sync
+--COMMIT-- [Claude-Code-Agent-Monitor] a9576ed|2026-07-30|Sara LaFleur|fix(dev): force NODE_ENV=development in web-up to stop it serving stale prod bundle
+--COMMIT-- [Claude-Code-Agent-Monitor] 2394bc7|2026-07-30|Sara LaFleur|fix(settings-cache): bucket cache timeline/day-drilldown by viewer's local timezone, not UTC
+--COMMIT-- [Claude-Code-Agent-Monitor] 18196dc|2026-07-30|Sara LaFleur|Remove the WIP queue feature; land accumulated cache-timeline/session-card work
+--COMMIT-- [Claude-Code-Agent-Monitor] 15a1898|2026-07-30|Sara LaFleur|Move Kanban board's completed/abandoned/error/internal filters into one overflow menu
+--COMMIT-- [Claude-Code-Agent-Monitor] 60af828|2026-07-30|Sara LaFleur|Stream the settings data export and fix a stack-overflow in focus-report interval building
+--COMMIT-- [Claude-Code-Agent-Monitor] 57b875d|2026-07-30|Sara LaFleur|Add per-turn context-size tracking and chart, fix Kanban column alignment
+--COMMIT-- [Claude-Code-Agent-Monitor] e685700|2026-07-30|Sara LaFleur|Add a vertical (token-count) scale to the context-size-over-time chart
+--COMMIT-- [Claude-Code-Agent-Monitor] 8e495e7|2026-07-30|Sara LaFleur|Add "Open terminal in project" to Sessions and Kanban
+--COMMIT-- [Claude-Code-Agent-Monitor] 9e5110a|2026-07-30|Sara LaFleur|Sync docs and wiki for the open-terminal-in-project feature
+--COMMIT-- [Claude-Code-Agent-Monitor] 4a48a48|2026-07-30|Sara LaFleur|Move Kanban's "Open terminal in project" out of the filters dropdown
+--COMMIT-- [Claude-Code-Agent-Monitor] ff83064|2026-07-30|Sara LaFleur|Let "Open terminal in project" carry an optional effort name
