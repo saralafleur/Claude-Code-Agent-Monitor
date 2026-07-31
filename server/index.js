@@ -5,6 +5,18 @@
 
 if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";
 
+// A console.log/warn/error write throws EPIPE if stdout/stderr is a pipe
+// whose reader already exited (a piped shell command, a log consumer, an
+// Electron host that stopped reading the child's output, etc). Node has no
+// default handler for stream 'error' events, so an unlucky log line would
+// otherwise crash the whole dashboard server. Swallow only EPIPE; any other
+// stream error still propagates and crashes as before.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (err) => {
+    if (err.code !== "EPIPE") throw err;
+  });
+}
+
 // Load .env file (simple key=value, no external dependency needed)
 (function loadDotEnv() {
   const fs = require("fs");

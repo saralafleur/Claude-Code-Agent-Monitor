@@ -171,6 +171,17 @@ describe("probeLiveCwds — probe availability", () => {
     const r = realProbe(); // env is "0" for this whole suite
     assert.equal(r.available, false);
     assert.equal(r.cwds.size, 0);
+    assert.equal(r.pids.size, 0);
+  });
+
+  it("returns a pids Set alongside cwds", () => {
+    delete process.env.DASHBOARD_LIVENESS_PROBE;
+    try {
+      const r = realProbe();
+      assert.ok(r.pids instanceof Set);
+    } finally {
+      process.env.DASHBOARD_LIVENESS_PROBE = "0";
+    }
   });
 
   it("is disabled inside a container (CCAM_FORCE_CONTAINER)", () => {
@@ -252,6 +263,42 @@ describe("watchdog liveness reap", () => {
     hooksRouter.livenessReap();
 
     assert.equal(stmts.getSession.get(sid).status, "completed");
+  });
+
+  it("reaps a dead session even when a live sibling session shares its cwd — regression for the cwd-only blind spot", async () => {
+    // Two sessions opened in the same project folder: this one's own claude
+    // process has exited, but a DIFFERENT session's process is still alive in
+    // the same cwd. A cwd-only check reads the folder as "occupied" and would
+    // spare this session forever; the pid-based check must reap it anyway.
+    const sid = "dpid0000-0000-0000-0000-00000000000f";
+    const cwd = "/tmp/liveness-shared-cwd";
+    await seedSession(sid, cwd);
+    db.prepare("UPDATE sessions SET pid = ? WHERE id = ?").run(99999, sid);
+
+    liveness.probeLiveCwds = () => ({
+      available: true,
+      cwds: new Set([path.resolve(cwd)]), // folder looks occupied...
+      pids: new Set(["12345"]), // ...by some OTHER, unrelated live process
+    });
+    hooksRouter.livenessReap();
+
+    assert.equal(stmts.getSession.get(sid).status, "completed");
+  });
+
+  it("spares a session whose own recorded pid is still live, even when the cwd set disagrees", async () => {
+    const sid = "lpid0000-0000-0000-0000-000000000010";
+    const cwd = "/tmp/liveness-own-pid-alive";
+    await seedSession(sid, cwd);
+    db.prepare("UPDATE sessions SET pid = ? WHERE id = ?").run(54321, sid);
+
+    liveness.probeLiveCwds = () => ({
+      available: true,
+      cwds: new Set(), // cwd set alone would say "dead"...
+      pids: new Set(["54321"]), // ...but this exact pid is alive
+    });
+    hooksRouter.livenessReap();
+
+    assert.equal(stmts.getSession.get(sid).status, "active");
   });
 
   it("does nothing when the probe is unavailable", async () => {

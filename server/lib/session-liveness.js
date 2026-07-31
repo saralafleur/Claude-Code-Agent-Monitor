@@ -1,11 +1,15 @@
 /**
  * @file Process-liveness probe for Claude Code sessions. Answers "could any
  * running `claude` CLI process own this session?" by listing live claude
- * processes and their working directories. Used by the hooks watchdog to
- * reap sessions whose SessionEnd hook was lost because the dashboard was not
- * running when the user quit (e.g. Ctrl+C while the server was down) — the
- * only signal that a session ended is that hook, so a missed one previously
- * left the session stuck in Waiting until the 3 h stale sweep.
+ * processes, their working directories, and their pids. Used by the hooks
+ * watchdog to reap sessions whose SessionEnd hook was lost because the
+ * dashboard was not running when the user quit (e.g. Ctrl+C while the server
+ * was down) — the only signal that a session ended is that hook, so a missed
+ * one previously left the session stuck in Waiting until the 3 h stale sweep.
+ * The reaper prefers the pids set when a session has its own pid recorded
+ * (exact per-process match), falling back to the cwds set otherwise — a pure
+ * cwd match can't tell a dead session apart from a live sibling in the same
+ * folder, since any one live process there makes the whole cwd look occupied.
  *
  * Fail-safe by design: whenever the probe cannot produce a trustworthy
  * answer it reports `available: false` and the caller must change nothing.
@@ -21,7 +25,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { isInsideContainer } = require("../../scripts/install-hooks");
 
-const UNAVAILABLE = () => ({ available: false, cwds: new Set() });
+const UNAVAILABLE = () => ({ available: false, cwds: new Set(), pids: new Set() });
 
 /**
  * True when a `ps` args string is a Claude Code CLI process. Matches the
@@ -51,9 +55,12 @@ function probeDisabledByEnv() {
 /**
  * Enumerate the working directories of every live `claude` CLI process.
  *
- * @returns {{ available: boolean, cwds: Set<string> }} `available: false`
- * means "no trustworthy answer — do not act"; an `available: true` result
- * with an empty set genuinely means no claude process is running.
+ * @returns {{ available: boolean, cwds: Set<string>, pids: Set<string> }}
+ * `available: false` means "no trustworthy answer — do not act"; an
+ * `available: true` result with empty sets genuinely means no claude process
+ * is running. `pids` holds the same live claude processes as `cwds`, keyed
+ * by pid (as a string, matching `sessions.pid` coerced to string) instead of
+ * cwd — lets a caller do an exact per-process check when it has one.
  */
 function probeLiveCwds() {
   if (probeDisabledByEnv()) return UNAVAILABLE();
@@ -72,12 +79,16 @@ function probeLiveCwds() {
   }
 
   const pids = [];
+  const livePids = new Set();
   for (const line of psOut.split("\n")) {
     const m = line.match(/^\s*(\d+)\s+(.*)$/);
-    if (m && isClaudeCommand(m[2])) pids.push(m[1]);
+    if (m && isClaudeCommand(m[2])) {
+      pids.push(m[1]);
+      livePids.add(m[1]);
+    }
   }
   const cwds = new Set();
-  if (pids.length === 0) return { available: true, cwds };
+  if (pids.length === 0) return { available: true, cwds, pids: livePids };
 
   if (process.platform === "linux") {
     // /proc is authoritative and needs no external binary.
@@ -88,7 +99,7 @@ function probeLiveCwds() {
         /* process exited between ps and readlink — skip */
       }
     }
-    return { available: true, cwds };
+    return { available: true, cwds, pids: livePids };
   }
 
   // macOS (and other BSD-likes): resolve each pid's cwd via lsof. `-Fn`
@@ -110,7 +121,7 @@ function probeLiveCwds() {
   for (const line of lsofOut.split("\n")) {
     if (line.startsWith("n") && line.length > 1) cwds.add(path.resolve(line.slice(1)));
   }
-  return { available: true, cwds };
+  return { available: true, cwds, pids: livePids };
 }
 
 module.exports = { probeLiveCwds, isClaudeCommand };

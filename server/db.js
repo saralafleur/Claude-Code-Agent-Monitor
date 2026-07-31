@@ -1518,6 +1518,13 @@ const stmts = {
   insertEvent: db.prepare(
     "INSERT INTO events (session_id, agent_id, event_type, tool_name, summary, data, created_at) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
   ),
+  // Same as insertEvent but takes an explicit created_at instead of stamping
+  // "now" — used for events backdated to a transcript-derived timestamp (e.g.
+  // TurnDuration), where the caller's own dedup check needs created_at to
+  // actually match that timestamp on re-ingestion.
+  insertEventAt: db.prepare(
+    "INSERT INTO events (session_id, agent_id, event_type, tool_name, summary, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ),
   listEvents: db.prepare("SELECT * FROM events ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"),
   listEventsBySession: db.prepare(
     "SELECT * FROM events WHERE session_id = ? ORDER BY created_at DESC, id DESC"

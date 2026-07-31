@@ -1077,13 +1077,14 @@ const processEvent = db.transaction((hookType, data) => {
           if (existing) continue;
 
           const tdSummary = `Turn completed in ${(td.durationMs / 1000).toFixed(1)}s`;
-          stmts.insertEvent.run(
+          stmts.insertEventAt.run(
             sessionId,
             mainAgentId,
             "TurnDuration",
             null,
             tdSummary,
-            JSON.stringify({ durationMs: td.durationMs })
+            JSON.stringify({ durationMs: td.durationMs }),
+            tdTs
           );
           broadcast("new_event", {
             session_id: sessionId,
@@ -1578,7 +1579,7 @@ function livenessReap({ ignoreIdleGate = false } = {}) {
   // transcript), so the local process probe must leave them alone.
   const activeSessions = db
     .prepare(
-      `SELECT id, name, cwd, transcript_path, updated_at FROM sessions
+      `SELECT id, name, cwd, pid, transcript_path, updated_at FROM sessions
        WHERE status = 'active' AND cwd IS NOT NULL AND cwd <> ''
          AND (source = 'local' OR source IS NULL)`
     )
@@ -1587,34 +1588,57 @@ function livenessReap({ ignoreIdleGate = false } = {}) {
 
   const probe = liveness.probeLiveCwds();
   if (!probe.available) return;
+  // Defensive default: only production callers ever populate `pids` (added
+  // alongside `cwds`); older/incomplete stubs in tests that predate this
+  // field fall back to "no exact match", which just routes those sessions
+  // through the pre-existing cwd-only path below.
+  const livePids = probe.pids instanceof Set ? probe.pids : new Set();
   const now = Date.now();
   for (const sess of activeSessions) {
-    // Household-hook-forwarded sessions report cwd in the ORIGIN machine's own
-    // path syntax (e.g. Windows `D:\Git\ai-deck`). This probe only ever
-    // discovers *local* claude processes' cwds via /proc or lsof on THIS host,
-    // so a non-POSIX-absolute cwd can never appear in probe.cwds — treating
-    // that mismatch as "process is dead" is a false positive for every remote
-    // session, not a real crash signal. This guard protects the common mixed
-    // deployment (this host has BOTH local sessions the probe should keep
-    // reaping, AND remote household-hook sessions it must leave alone)
-    // without sacrificing local crash detection via DASHBOARD_LIVENESS_PROBE=0.
-    // The probe only ever reports POSIX cwds (/proc + lsof, and it bails out
-    // entirely on win32), so "could this cwd be local?" is precisely "is it
-    // POSIX-absolute?" — a leading-"/" check. Use path.posix.isAbsolute()
-    // explicitly rather than the platform-sensitive path.isAbsolute(): in
-    // production this only runs on POSIX hosts so the two are identical, but
-    // the unit tests mock probeLiveCwds() to exercise this reaper on a Windows
-    // host too, where bare path.isAbsolute("D:\\Git\\ai-deck") would be true
-    // and wrongly reap a forwarded remote session. posix keeps it host-agnostic.
-    if (!path.posix.isAbsolute(sess.cwd)) continue;
+    if (Number.isInteger(sess.pid) && sess.pid > 0) {
+      // Exact per-process check: this session recorded its own claude
+      // process's pid, so we don't need to reason about the cwd at all. This
+      // is what lets a dead session get reaped even while a live SIBLING
+      // session sits in the exact same folder — a cwd-only check can't tell
+      // the two apart, since any one live process there makes the whole cwd
+      // look "occupied" forever (see session-liveness.js's `pids` set, built
+      // off the same `ps` scan as `cwds`).
+      if (livePids.has(String(sess.pid))) continue; // this exact process is alive
+      // else: falls through — this exact process is confirmed dead, so reap
+      // it below regardless of what else is running in the same cwd.
+    } else {
+      // No pid was ever recorded for this session (predates pid-tracking, or
+      // a household-hook-forwarded session whose hint pid never resolved to
+      // a local process) — fall back to the cwd-only signal.
+      //
+      // Household-hook-forwarded sessions report cwd in the ORIGIN machine's
+      // own path syntax (e.g. Windows `D:\Git\ai-deck`). This probe only ever
+      // discovers *local* claude processes' cwds via /proc or lsof on THIS
+      // host, so a non-POSIX-absolute cwd can never appear in probe.cwds —
+      // treating that mismatch as "process is dead" is a false positive for
+      // every remote session, not a real crash signal. This guard protects
+      // the common mixed deployment (this host has BOTH local sessions the
+      // probe should keep reaping, AND remote household-hook sessions it
+      // must leave alone) without sacrificing local crash detection via
+      // DASHBOARD_LIVENESS_PROBE=0. The probe only ever reports POSIX cwds
+      // (/proc + lsof, and it bails out entirely on win32), so "could this
+      // cwd be local?" is precisely "is it POSIX-absolute?" — a leading-"/"
+      // check. Use path.posix.isAbsolute() explicitly rather than the
+      // platform-sensitive path.isAbsolute(): in production this only runs
+      // on POSIX hosts so the two are identical, but the unit tests mock
+      // probeLiveCwds() to exercise this reaper on a Windows host too, where
+      // bare path.isAbsolute("D:\\Git\\ai-deck") would be true and wrongly
+      // reap a forwarded remote session. posix keeps it host-agnostic.
+      if (!path.posix.isAbsolute(sess.cwd)) continue;
 
-    let resolvedCwd;
-    try {
-      resolvedCwd = path.resolve(sess.cwd);
-    } catch {
-      continue;
+      let resolvedCwd;
+      try {
+        resolvedCwd = path.resolve(sess.cwd);
+      } catch {
+        continue;
+      }
+      if (probe.cwds.has(resolvedCwd)) continue;
     }
-    if (probe.cwds.has(resolvedCwd)) continue;
 
     // Idle gate (watchdog ticks only — boot passes skip it, see above): the
     // transcript mtime is the ground truth for "when did this session last
