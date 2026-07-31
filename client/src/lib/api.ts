@@ -724,6 +724,21 @@ export const api = {
         method: "POST",
       }),
     /**
+     * POST /api/sessions/:id/open-terminal - opens a brand-new Terminal.app
+     * window in this session's working directory and starts a fresh `claude`
+     * instance in it (macOS only), so a second session can start against the
+     * same project without hunting down the existing tab. Rejects (see
+     * server/lib/terminal-focus.js's typed codes, surfaced via
+     * `Error.message`) when the platform isn't macOS, the session has no
+     * recorded working directory, or Terminal automation fails.
+     * @param id The session id.
+     * @returns `{ ok: true }`.
+     */
+    openTerminal: (id: string) =>
+      request<{ ok: true }>(`/sessions/${encodeURIComponent(id)}/open-terminal`, {
+        method: "POST",
+      }),
+    /**
      * GET /api/sessions/:id/stats - per-session rollups for the detail page.
      *
      * Aggregate metrics scoped to a single session (token/tool/cost rollups and
@@ -2157,6 +2172,27 @@ export const api = {
      */
     focusReport: (id: string) =>
       request<FocusReport>(`/projects/${encodeURIComponent(id)}/focus-report`),
+    /**
+     * POST /api/projects/:id/open-terminal — opens a brand-new Terminal.app
+     * window in one of this project's mapped folders and starts a fresh
+     * `claude` instance in it (macOS only). A project mapped to exactly one
+     * folder opens it with `cwd` omitted; a project mapped to more than one
+     * requires `cwd` to name which of its own {@link ProjectPath.cwd}s to
+     * use — the client's picker only shows the folder step when there's an
+     * actual choice to make. Rejects (see server/lib/terminal-focus.js's
+     * typed codes, surfaced via `Error.message`) when the platform isn't
+     * macOS, the project has no mapped folders, `cwd` isn't one of them, or
+     * Terminal automation fails.
+     * @param id  The project id.
+     * @param cwd Which mapped folder to open in — required only when the
+     *            project has more than one.
+     * @returns `{ ok: true }`.
+     */
+    openTerminal: (id: string, cwd?: string) =>
+      request<{ ok: true }>(`/projects/${encodeURIComponent(id)}/open-terminal`, {
+        method: "POST",
+        body: JSON.stringify(cwd ? { cwd } : {}),
+      }),
   },
 
   plans: {

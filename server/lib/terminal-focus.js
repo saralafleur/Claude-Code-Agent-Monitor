@@ -3,11 +3,16 @@
  * on macOS, jumps the user to the exact Terminal.app tab it's running in —
  * selecting the tab, fronting the window, and flashing its background a few
  * times so the tab is visually unmistakable rather than just silently
- * focus-stolen. Fail-safe by design, same posture as session-liveness.js:
- * every unresolvable step (no pid recorded, pid no longer alive, no tty, not
- * on macOS, Terminal automation not yet authorized) returns a typed `{ok:
- * false, code, message}` result instead of throwing, so the caller can
- * surface a clear reason rather than a raw error.
+ * focus-stolen. Also opens a brand-new Terminal.app window and starts a
+ * fresh `claude` instance there — in a session's working directory (for
+ * starting a second session against the same project without hunting down
+ * the existing tab), or in any arbitrary folder (for the Projects "open
+ * terminal in folder" picker, which has no session in the picture at all).
+ * Fail-safe by design, same posture as session-liveness.js:
+ * every unresolvable step (no pid recorded, pid no longer alive, no tty, no
+ * cwd recorded, not on macOS, Terminal automation not yet authorized)
+ * returns a typed `{ok: false, code, message}` result instead of throwing,
+ * so the caller can surface a clear reason rather than a raw error.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -16,6 +21,7 @@ const path = require("node:path");
 const { isClaudeCommand } = require("./session-liveness");
 
 const APPLESCRIPT_PATH = path.join(__dirname, "scripts", "focus-terminal-tab.applescript");
+const OPEN_APPLESCRIPT_PATH = path.join(__dirname, "scripts", "open-terminal-session.applescript");
 const PS_TIMEOUT_MS = 5_000;
 const OSASCRIPT_TIMEOUT_MS = 5_000;
 
@@ -178,6 +184,103 @@ function focusTerminalForSession(session) {
   };
 }
 
+/** Single-quotes `s` for safe splicing into a shell command string (closes
+ *  the quote, emits an escaped literal quote, reopens it) — the standard
+ *  `'\''` idiom for embedding arbitrary text, including embedded quotes, in
+ *  a POSIX shell single-quoted argument. */
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+/** Runs the bundled AppleScript with `shellCommand` as its sole argv element
+ *  (never interpolated into the script source); Terminal.app then runs that
+ *  command exactly as if it had been typed into a fresh window. Throws on
+ *  automation failure (commonly a not-yet-granted macOS Automation
+ *  permission) — callers catch and translate. */
+function runOpenTerminalScript(shellCommand) {
+  return execFileSync("osascript", [OPEN_APPLESCRIPT_PATH, shellCommand], {
+    encoding: "utf8",
+    timeout: OSASCRIPT_TIMEOUT_MS,
+  });
+}
+
+/**
+ * Opens a brand-new Terminal.app window in `cwd` and starts a fresh `claude`
+ * instance in it. The lower-level primitive shared by `openTerminalForSession`
+ * (session-scoped: adds the NOT_LOCAL check and session-flavored NO_CWD
+ * message below) and the Projects "open terminal in folder" picker
+ * (project-scoped: a project's mapped folder has no notion of a Remote Data
+ * Source session at all, so it calls this directly with an already-validated
+ * cwd from the project's own `paths`).
+ * @param {string|null|undefined} cwd
+ * @returns {{ok: true} | {ok: false, code: string, message: string}}
+ */
+function openTerminalForCwd(cwd) {
+  if (process.platform !== "darwin") {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_PLATFORM",
+      message: "Opening a new terminal is only supported on macOS (Terminal.app).",
+    };
+  }
+  if (!cwd) {
+    return {
+      ok: false,
+      code: "NO_CWD",
+      message: "No working directory was provided.",
+    };
+  }
+
+  const shellCommand = `cd ${exports.shellQuote(cwd)} && claude`;
+  try {
+    exports.runOpenTerminalScript(shellCommand);
+  } catch (err) {
+    const detail = err && err.stderr ? String(err.stderr).trim() : err.message;
+    return {
+      ok: false,
+      code: "AUTOMATION_ERROR",
+      message: `Terminal automation failed (${detail}). If this is the first attempt, grant Terminal automation access in System Settings > Privacy & Security > Automation.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Opens a brand-new Terminal.app window in `session`'s working directory and
+ * starts a fresh `claude` instance in it — the counterpart to
+ * `focusTerminalForSession` for starting a second session against the same
+ * project rather than jumping to the existing one. Unlike
+ * `focusTerminalForSession`, this doesn't require the session's original
+ * process to still be alive (or to have ever resolved a pid at all) — only
+ * its recorded working directory.
+ * @param {{cwd?: string|null, source?: string|null}} session
+ * @returns {{ok: true} | {ok: false, code: string, message: string}}
+ */
+function openTerminalForSession(session) {
+  if (process.platform !== "darwin") {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_PLATFORM",
+      message: "Opening a new terminal is only supported on macOS (Terminal.app).",
+    };
+  }
+  if (session.source && session.source !== "local") {
+    return {
+      ok: false,
+      code: "NOT_LOCAL",
+      message: "This session was collected from another machine, not this one.",
+    };
+  }
+  if (!session.cwd) {
+    return {
+      ok: false,
+      code: "NO_CWD",
+      message: "No working directory was recorded for this session.",
+    };
+  }
+  return exports.openTerminalForCwd(session.cwd);
+}
+
 // Assigned onto the existing `exports` object (never `module.exports = {...}`,
 // which would swap in a fresh object and break the `exports.xxx()` internal
 // call sites above) so a test can do
@@ -191,3 +294,7 @@ exports.isPidLiveClaude = isPidLiveClaude;
 exports.resolveTty = resolveTty;
 exports.runFocusScript = runFocusScript;
 exports.focusTerminalForSession = focusTerminalForSession;
+exports.shellQuote = shellQuote;
+exports.runOpenTerminalScript = runOpenTerminalScript;
+exports.openTerminalForCwd = openTerminalForCwd;
+exports.openTerminalForSession = openTerminalForSession;

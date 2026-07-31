@@ -1,5 +1,5 @@
 /**
- * @file Express router for session endpoints, allowing creation, retrieval, and updating of sessions with optional pagination and filtering by status. It also computes costs for sessions based on token usage and pricing rules, and broadcasts session changes to connected WebSocket clients for real-time updates.
+ * @file Express router for session endpoints, allowing creation, retrieval, and updating of sessions with optional pagination and filtering by status. It also computes costs and input/output/cache token totals for sessions based on token usage and pricing rules, and broadcasts session changes to connected WebSocket clients for real-time updates.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -133,6 +133,23 @@ async function readFirstLine(filePath) {
   return null;
 }
 
+/**
+ * Sums a session's token_usage rows (one per model/speed/tier bucket) into the
+ * three totals the Kanban session card shows: fresh input, generated output,
+ * and cache (read + write combined — the card treats "cache" as one number,
+ * not the read/write split `token_usage` stores it as).
+ */
+function sumSessionTokens(tokenRows) {
+  const totals = { input: 0, output: 0, cache: 0 };
+  if (!tokenRows) return totals;
+  for (const t of tokenRows) {
+    totals.input += t.input_tokens;
+    totals.output += t.output_tokens;
+    totals.cache += t.cache_read_tokens + t.cache_write_tokens;
+  }
+  return totals;
+}
+
 router.get("/", (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 10000);
   const offset = parseInt(req.query.offset) || 0;
@@ -210,6 +227,7 @@ router.get("/", (req, res) => {
           row.cost = sessionTokens
             ? calculateCost(sessionTokens, rules, row.started_at).total_cost
             : 0;
+          row.tokens = sumSessionTokens(sessionTokens);
         }
       }
 
@@ -261,6 +279,7 @@ router.get("/", (req, res) => {
         row.cost = sessionTokens
           ? calculateCost(sessionTokens, rules, row.started_at).total_cost
           : 0;
+        row.tokens = sumSessionTokens(sessionTokens);
       }
     }
   }
@@ -526,6 +545,34 @@ router.post("/:id/focus-terminal", (req, res) => {
   const result = terminalFocus.focusTerminalForSession(session);
   if (result.ok) return res.json({ ok: true });
   const status = TERMINAL_FOCUS_STATUS[result.code] || 500;
+  res.status(status).json({ error: { code: result.code, message: result.message } });
+});
+
+// Maps server/lib/terminal-focus.js's typed failure codes to HTTP status for
+// the open-terminal route — see the comment above TERMINAL_FOCUS_STATUS.
+const OPEN_TERMINAL_STATUS = {
+  UNSUPPORTED_PLATFORM: 501,
+  NOT_LOCAL: 409,
+  NO_CWD: 409,
+  AUTOMATION_ERROR: 500,
+};
+
+/**
+ * POST /:id/open-terminal — opens a brand-new Terminal.app window in this
+ * session's working directory and starts a fresh `claude` instance in it
+ * (macOS only), so you can start a second session against the same project
+ * without hunting down the existing tab. See server/lib/terminal-focus.js
+ * for the cwd-resolution/AppleScript chain; this route only maps its typed
+ * result to HTTP.
+ */
+router.post("/:id/open-terminal", (req, res) => {
+  const session = stmts.getSession.get(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Session not found" } });
+  }
+  const result = terminalFocus.openTerminalForSession(session);
+  if (result.ok) return res.json({ ok: true });
+  const status = OPEN_TERMINAL_STATUS[result.code] || 500;
   res.status(status).json({ error: { code: result.code, message: result.message } });
 });
 

@@ -246,6 +246,17 @@ function createOpenApiSpec() {
             agent_count: { type: "integer", nullable: true },
             last_activity: { type: "string", format: "date-time", nullable: true },
             cost: { type: "number", nullable: true },
+            tokens: {
+              type: "object",
+              nullable: true,
+              description:
+                "Session-lifetime token totals, summed across every model/speed/tier bucket. Only present on GET /api/sessions (list). `cache` combines cache-read and cache-write tokens.",
+              properties: {
+                input: { type: "integer" },
+                output: { type: "integer" },
+                cache: { type: "integer" },
+              },
+            },
             awaiting_input_since: {
               type: "string",
               format: "date-time",

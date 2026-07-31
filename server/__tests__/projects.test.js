@@ -1,12 +1,16 @@
 /**
  * @file Tests for the Projects router: CRUD validation, folder (cwd) mapping
  * uniqueness, aggregated session-count/active-count/last-activity stats per
- * project, and the unassigned-cwd bucket for sessions not yet mapped to any
- * project.
+ * project, the unassigned-cwd bucket for sessions not yet mapped to any
+ * project, and the POST /:id/open-terminal action's single-folder-vs-picker
+ * branching plus its typed-code → HTTP-status mapping (the actual AppleScript
+ * call is stubbed via `terminalFocus.openTerminalForCwd` — see
+ * server/__tests__/terminal-focus.test.js for that function's own unit
+ * coverage).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
-const { describe, it, before, after } = require("node:test");
+const { describe, it, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
 const os = require("os");
@@ -17,6 +21,9 @@ process.env.DASHBOARD_DB_PATH = TEST_DB;
 
 const { createApp, startServer } = require("../index");
 const { db, stmts } = require("../db");
+const terminalFocus = require("../lib/terminal-focus");
+
+const realOpenTerminalForCwd = terminalFocus.openTerminalForCwd;
 
 let server;
 let BASE;
@@ -78,6 +85,10 @@ after(() => {
   } catch {
     /* already closed */
   }
+});
+
+beforeEach(() => {
+  terminalFocus.openTerminalForCwd = realOpenTerminalForCwd;
 });
 
 describe("Project CRUD", () => {
@@ -290,5 +301,94 @@ describe("GET /:id/focus-report", () => {
 
     assert.equal(res.body.totals.by_kind.bug.wall_ms, 15 * 60_000);
     assert.equal(res.body.totals.by_kind.item.wall_ms, 20 * 60_000);
+  });
+});
+
+describe("POST /:id/open-terminal", () => {
+  it("404 for a project that doesn't exist", async () => {
+    const res = await post("/api/projects/does-not-exist/open-terminal", {});
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
+  });
+
+  it("409 NO_FOLDERS for a project with no mapped folders", async () => {
+    const created = await post("/api/projects", { name: "No Folders Yet" });
+    const res = await post(`/api/projects/${created.body.project.id}/open-terminal`, {});
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, "NO_FOLDERS");
+  });
+
+  it("opens the single mapped folder directly, no cwd required in the body", async () => {
+    const created = await post("/api/projects", {
+      name: "Single Folder Project",
+      cwds: ["/tmp/single-folder-project"],
+    });
+    let seen;
+    terminalFocus.openTerminalForCwd = (cwd) => {
+      seen = cwd;
+      return { ok: true };
+    };
+    const res = await post(`/api/projects/${created.body.project.id}/open-terminal`, {});
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { ok: true });
+    assert.equal(seen, "/tmp/single-folder-project");
+  });
+
+  it("400 INVALID_INPUT when a multi-folder project's open request omits cwd", async () => {
+    const created = await post("/api/projects", {
+      name: "Multi Folder Project A",
+      cwds: ["/tmp/multi-a-1", "/tmp/multi-a-2"],
+    });
+    const res = await post(`/api/projects/${created.body.project.id}/open-terminal`, {});
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  });
+
+  it("400 INVALID_INPUT when the requested cwd isn't one of the project's own folders", async () => {
+    const created = await post("/api/projects", {
+      name: "Multi Folder Project B",
+      cwds: ["/tmp/multi-b-1", "/tmp/multi-b-2"],
+    });
+    const res = await post(`/api/projects/${created.body.project.id}/open-terminal`, {
+      cwd: "/tmp/not-a-mapped-folder",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  });
+
+  it("opens the requested folder when it's one of a multi-folder project's own paths", async () => {
+    const created = await post("/api/projects", {
+      name: "Multi Folder Project C",
+      cwds: ["/tmp/multi-c-1", "/tmp/multi-c-2"],
+    });
+    let seen;
+    terminalFocus.openTerminalForCwd = (cwd) => {
+      seen = cwd;
+      return { ok: true };
+    };
+    const res = await post(`/api/projects/${created.body.project.id}/open-terminal`, {
+      cwd: "/tmp/multi-c-2",
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { ok: true });
+    assert.equal(seen, "/tmp/multi-c-2");
+  });
+
+  it("maps each typed failure code to its documented HTTP status", async () => {
+    const created = await post("/api/projects", {
+      name: "Status Mapping Project",
+      cwds: ["/tmp/status-mapping-project"],
+    });
+    const cases = [
+      ["UNSUPPORTED_PLATFORM", 501],
+      ["NO_CWD", 409],
+      ["AUTOMATION_ERROR", 500],
+    ];
+    for (const [code, status] of cases) {
+      terminalFocus.openTerminalForCwd = () => ({ ok: false, code, message: `msg:${code}` });
+      const res = await post(`/api/projects/${created.body.project.id}/open-terminal`, {});
+      assert.equal(res.status, status, `${code} should map to ${status}`);
+      assert.equal(res.body.error.code, code);
+    }
   });
 });

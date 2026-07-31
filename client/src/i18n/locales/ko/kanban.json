@@ -20,6 +20,18 @@
   "showOldErrors": "모든 오류 표시",
   "hideInternal": "내부 세션 숨기기 (사용자가 아닌 대시보드의 백그라운드 포커스 분류기가 생성한 세션)",
   "showInternal": "내부 세션 표시",
+  "openTerminalInProject": "프로젝트에서 터미널 열기…",
+  "openTerminalPicker": {
+    "title": "프로젝트에서 터미널 열기",
+    "back": "뒤로",
+    "loading": "프로젝트를 불러오는 중…",
+    "loadError": "프로젝트를 불러오지 못했습니다",
+    "noProjects": "아직 프로젝트가 없습니다",
+    "noFolders": "이 프로젝트에 매핑된 폴더가 없습니다",
+    "folderCount_one": "폴더 {{count}}개",
+    "folderCount_other": "폴더 {{count}}개",
+    "error": "새 터미널을 열지 못했습니다"
+  },
   "copyLink": "공유 링크 복사",
   "linkCopied": "링크가 복사되었습니다!",
   "noAgents": "아직 추적된 Agent가 없습니다",
@@ -47,7 +59,19 @@
     "lastMessageEmpty": "최근 메시지를 찾을 수 없습니다",
     "expensiveModel": "프리미엄 모델(Opus/Fable) 사용 중 - 토큰당 비용이 더 높습니다",
     "focusTerminal": "터미널로 이동",
-    "focusTerminalError": "터미널로 이동하지 못했습니다"
+    "focusTerminalError": "터미널로 이동하지 못했습니다",
+    "openTerminal": "여기에서 새 터미널 열기",
+    "openTerminalError": "새 터미널을 열지 못했습니다",
+    "tokens": {
+      "in": "입력",
+      "out": "출력",
+      "cache": "캐시",
+      "total": "합계",
+      "inTooltip": "이 세션의 총 입력 토큰 수",
+      "outTooltip": "이 세션에서 생성된 총 출력 토큰 수",
+      "cacheTooltip": "이 세션의 총 캐시(읽기 + 쓰기) 토큰 수",
+      "totalTooltip": "이 세션의 총 토큰 수(입력 + 출력 + 캐시)"
+    }
   },
   "tooltip": {
     "agent": {

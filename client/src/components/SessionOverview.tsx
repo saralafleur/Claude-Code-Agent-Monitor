@@ -525,10 +525,17 @@ const CONTEXT_TICK_FRACTIONS = [0, 1 / 3, 2 / 3, 1];
  *  axis ticks and gridlines - 0 at the baseline, 1 at the chart's top. */
 const CONTEXT_Y_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
 
+/** Evenly spaced fractions of `maxTurns` for the secondary (turn count)
+ *  axis ticks on the right - mirrors CONTEXT_Y_TICK_FRACTIONS. */
+const CONTEXT_TURN_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
+
 /**
  * Sawtooth line chart of the session's ACTIVE context size per turn (not the
- * lifetime cumulative total shown in the token-flow strip below). Renders
- * nothing until there are at least two points to draw a line between.
+ * lifetime cumulative total shown in the token-flow strip below), overlaid
+ * with a cumulative turn-count step line so the quantity of back-and-forth
+ * iterations between the agent and the model is visible alongside token
+ * growth. Renders nothing until there are at least two points to draw a
+ * line between.
  */
 function ContextOverTimeChart({ series }: { series: SessionStats["context_series"] }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -542,11 +549,14 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
     if (!first || !last) return null;
     const span = Math.max(1, last.ts - first.ts);
     const maxTokens = Math.max(CONTEXT_WARN_TOKENS, ...points.map((p) => p.tokens));
-    const coords = points.map((p) => ({
+    const maxTurns = points.length;
+    const coords = points.map((p, i) => ({
       x: ((p.ts - first.ts) / span) * 100,
       y: 100 - (p.tokens / maxTokens) * 100,
+      turnY: 100 - ((i + 1) / maxTurns) * 100,
       ts: p.ts,
       tokens: p.tokens,
+      turn: i + 1,
     }));
     const firstCoord = coords[0];
     const lastCoord = coords[coords.length - 1];
@@ -558,6 +568,13 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
     });
     const linePath = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x},${c.y}`).join(" ");
     const areaPath = `${linePath} L${lastCoord.x},100 L${firstCoord.x},100 Z`;
+    // Step-after path for cumulative turn count: holds flat at the count in
+    // effect since the previous turn, then jumps vertically the instant a new
+    // turn lands - visually separating "many turns landed in a burst" (steep
+    // stack of steps) from "few turns, spread out" (long flat treads).
+    const turnStepPath = coords
+      .map((c, i) => (i === 0 ? `M${c.x},${c.turnY}` : ` H${c.x} V${c.turnY}`))
+      .join("");
     const warnY = 100 - (CONTEXT_WARN_TOKENS / maxTokens) * 100;
     // Ticks are placed at fixed fractions of the TIME span (inverting the same
     // scale used for `x` above), not at fixed fractions of the point array -
@@ -569,11 +586,41 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
       y: 100 - f * 100,
       tokens: f * maxTokens,
     }));
-    return { coords, drops, linePath, areaPath, warnY, latest: lastCoord, ticks, yTicks, sameDay };
+    const turnYTicks = CONTEXT_TURN_TICK_FRACTIONS.map((f) => ({
+      y: 100 - f * 100,
+      turns: Math.round(f * maxTurns),
+    }));
+    return {
+      coords,
+      drops,
+      linePath,
+      areaPath,
+      turnStepPath,
+      warnY,
+      latest: lastCoord,
+      ticks,
+      yTicks,
+      turnYTicks,
+      maxTurns,
+      sameDay,
+    };
   }, [series]);
 
   if (!chart) return null;
-  const { coords, drops, linePath, areaPath, warnY, latest, ticks, yTicks, sameDay } = chart;
+  const {
+    coords,
+    drops,
+    linePath,
+    areaPath,
+    turnStepPath,
+    warnY,
+    latest,
+    ticks,
+    yTicks,
+    turnYTicks,
+    maxTurns,
+    sameDay,
+  } = chart;
   const isHigh = latest.tokens >= CONTEXT_WARN_TOKENS;
   const hovered = hoverIndex !== null ? coords[hoverIndex] : null;
 
@@ -595,7 +642,7 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
 
   return (
     <div className="rounded-lg border border-surface-3 bg-surface-2/60 p-3.5 mb-5">
-      <div className="flex items-center justify-between mb-2.5">
+      <div className="flex items-center justify-between mb-1">
         <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
           <Gauge className="w-3.5 h-3.5 text-indigo-400" />
           Context size over time
@@ -603,6 +650,16 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
         <span className={`text-[10px] font-mono ${isHigh ? "text-amber-300" : "text-gray-500"}`}>
           {fmt(latest.tokens)} tokens now
           {isHigh ? " · consider /compact or /clear" : ""}
+        </span>
+      </div>
+      <div className="flex items-center gap-3 mb-3">
+        <span className="flex items-center gap-1 text-[9px] text-gray-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+          Tokens
+        </span>
+        <span className="flex items-center gap-1 text-[9px] text-gray-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+          Turns ({maxTurns} total)
         </span>
       </div>
       <div className="flex gap-1.5">
@@ -685,6 +742,18 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
                 strokeWidth={1.5}
                 vectorEffect="non-scaling-stroke"
               />
+              {/* Cumulative turn-count step line, plotted on its own 0..maxTurns
+               *  scale (turnY) sharing the same time-based x-axis as the token
+               *  line above - the two series read off the left (tokens) and
+               *  right (turns) label columns respectively. */}
+              <path
+                d={turnStepPath}
+                fill="none"
+                className="stroke-teal-400"
+                strokeWidth={1.25}
+                strokeDasharray="3,2"
+                vectorEffect="non-scaling-stroke"
+              />
               {hovered && (
                 <line
                   x1={hovered.x}
@@ -717,6 +786,10 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
                   className="absolute w-2 h-2 rounded-full bg-indigo-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-2 ring-indigo-400/30"
                   style={{ left: `${hovered.x}%`, top: `${hovered.y}%` }}
                 />
+                <span
+                  className="absolute w-1.5 h-1.5 rounded-full bg-teal-400 -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-2 ring-teal-400/30"
+                  style={{ left: `${hovered.x}%`, top: `${hovered.turnY}%` }}
+                />
                 <div
                   className="absolute -top-1 rounded-lg border border-border-light bg-[#0a0a12] px-2.5 py-1.5 text-[11px] text-gray-300 shadow-2xl pointer-events-none whitespace-nowrap"
                   style={{
@@ -727,6 +800,9 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
                   }}
                 >
                   <p className="font-semibold text-gray-100">{fmt(hovered.tokens)} tokens</p>
+                  <p className="text-teal-300">
+                    Turn {hovered.turn} of {maxTurns}
+                  </p>
                   <p className="text-gray-500">
                     {formatDateTime(new Date(hovered.ts).toISOString())}
                   </p>
@@ -757,6 +833,28 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
               </span>
             ))}
           </div>
+        </div>
+        {/* Turn-axis (secondary vertical scale) labels - mirrors the token
+         *  label column on the left but for the cumulative turn-count step
+         *  line, so both series can be read directly off the chart. */}
+        <div className="relative w-8 h-24 flex-shrink-0">
+          {turnYTicks.map((t) => (
+            <span
+              key={t.y}
+              className="absolute left-0 text-[9px] text-teal-400/80 font-mono whitespace-nowrap"
+              style={{
+                top: `${t.y}%`,
+                transform:
+                  t.y === 0
+                    ? "translateY(-100%)"
+                    : t.y === 100
+                      ? "translateY(0%)"
+                      : "translateY(-50%)",
+              }}
+            >
+              {t.turns}
+            </span>
+          ))}
         </div>
       </div>
     </div>

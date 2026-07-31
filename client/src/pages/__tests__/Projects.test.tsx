@@ -140,10 +140,16 @@ describe("Projects page", () => {
     renderPage();
 
     expect(await screen.findByText("Agent Monitor")).toBeInTheDocument();
-    expect(screen.getAllByText("/repo/agent-monitor").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("1 session").length).toBeGreaterThan(0);
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
     expect(screen.getAllByText("/repo/scratch").length).toBeGreaterThan(0);
+
+    // The session/active counts are visible on the row without expanding
+    // (mockProject has session_count: 1, active_count: 1).
+    expect(screen.getAllByRole("cell", { name: "1" }).length).toBeGreaterThanOrEqual(2);
+
+    // Folder chips are behind the row's expand toggle.
+    fireEvent.click(screen.getByTitle("Show details"));
+    expect(screen.getAllByText("/repo/agent-monitor").length).toBeGreaterThan(0);
   });
 
   it("opens the focus-time report scoped to the clicked project", async () => {
@@ -208,6 +214,8 @@ describe("Projects page", () => {
     renderPage();
     await screen.findByText("Agent Monitor");
 
+    // Folder management lives behind the row's expand toggle.
+    fireEvent.click(screen.getByTitle("Show details"));
     fireEvent.click(screen.getByRole("button", { name: /Add folder/i }));
     fireEvent.change(screen.getByPlaceholderText("/path/to/folder"), {
       target: { value: "/repo/second-folder" },
@@ -232,6 +240,9 @@ describe("Projects page", () => {
 
       await waitFor(() => expect(screen.queryByText("Unassigned")).not.toBeInTheDocument());
       expect(screen.getByText("Agent Monitor")).toBeInTheDocument();
+
+      // The project row is collapsed by default - expand it to see the session card.
+      fireEvent.click(screen.getByTitle("Show details"));
       expect(screen.getByText("Test session")).toBeInTheDocument();
       expect(screen.queryByText("Scratch session")).not.toBeInTheDocument();
     });
@@ -246,6 +257,9 @@ describe("Projects page", () => {
 
       await waitFor(() => expect(screen.queryByText("Agent Monitor")).not.toBeInTheDocument());
       expect(screen.getByText("Unassigned")).toBeInTheDocument();
+
+      // The Unassigned folder's session-cards strip is collapsed by default too.
+      fireEvent.click(screen.getByTitle("Show sessions"));
       expect(screen.getByText("Scratch session")).toBeInTheDocument();
     });
 
@@ -308,8 +322,8 @@ describe("Projects page", () => {
       await screen.findByText("Agent Monitor");
       expect(projectCardOrder()).toEqual(["Agent Monitor", "Coaching Assistant"]);
 
-      const cards = screen.getAllByRole("heading", { level: 2 }).map((h) => h.closest(".card"));
-      const [agentMonitorCard, coachingCard] = cards as [HTMLElement, HTMLElement];
+      const cards = screen.getAllByRole("heading", { level: 2 }).map((h) => h.closest("tr"));
+      const [agentMonitorCard, coachingCard] = cards as [HTMLTableRowElement, HTMLTableRowElement];
 
       fireEvent.dragStart(coachingCard);
       fireEvent.dragOver(agentMonitorCard);

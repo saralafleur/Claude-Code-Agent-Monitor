@@ -700,6 +700,16 @@ export interface Session {
    *  active pricing rules. Only present on responses that attach pricing.
    *  Absolute dollars (e.g. `0.42`), already summed across all buckets. */
   cost?: number;
+  /** Session-lifetime token totals, summed across every model/speed/tier bucket
+   *  in `token_usage`. `cache` combines cache-read and cache-write tokens (the
+   *  Kanban session card shows one "cache" figure, not the read/write split).
+   *  Only present on responses that join token usage (currently `GET
+   *  /api/sessions`); undefined ≠ zero, it means "not computed here". */
+  tokens?: {
+    input: number;
+    output: number;
+    cache: number;
+  };
   /** ISO timestamp set when Claude Code is blocked waiting for the user
    * (permission prompt or "waiting for your input" notice). Cleared on the
    * next non-Notification hook event. Null when the session is not waiting.

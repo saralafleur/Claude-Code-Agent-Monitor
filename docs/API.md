@@ -175,10 +175,13 @@ classDiagram
         +string awaiting_reason "notification|stop|session_start|interrupted|subagent|shell|monitor; null unless Waiting"
         +number cost
         +number agent_count
+        +object tokens "input/output/cache totals; list endpoint only"
     }
     
     SessionListResponse --> Session
 ```
+
+> **Note on `tokens`** — only `GET /api/sessions` (this endpoint) attaches a `tokens` object per session: session-lifetime totals summed across every model/speed/tier bucket in `token_usage`, `{ input, output, cache }`. `cache` combines cache-read and cache-write tokens into one figure (the Kanban session card shows a single "Cache" number, not the read/write split). Undefined on other endpoints — it means "not computed here," not zero usage.
 
 ---
 
@@ -298,6 +301,44 @@ curl -X POST http://localhost:4820/api/sessions/sess_abc123/focus-terminal
 | 409 | `NOT_LOCAL` | Session was collected from another machine (Remote Data Sources) |
 | 409 | `NO_PID` | No process id was ever recorded for this session (predates this feature, or the hint never resolved) |
 | 410 | `PROCESS_GONE` | The session's `claude` process is no longer running |
+| 500 | `AUTOMATION_ERROR` | Terminal automation failed — commonly means macOS hasn't yet granted Automation access to control Terminal (System Settings > Privacy & Security > Automation) |
+| 501 | `UNSUPPORTED_PLATFORM` | Not running on macOS |
+
+---
+
+#### Open New Terminal
+
+```http
+POST /api/sessions/:id/open-terminal
+```
+
+macOS only. Opens a brand-new Terminal.app window in this session's recorded working directory and starts a fresh `claude` instance in it, so you can start a second session against the same project without hunting down the existing tab. Unlike Focus Terminal above, this doesn't require the session's original process to still be running — only its `cwd` to be known and the session to be local (see `server/lib/terminal-focus.js`).
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | Session ID |
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:4820/api/sessions/sess_abc123/open-terminal
+```
+
+**Example Response:**
+
+```json
+{ "ok": true }
+```
+
+**Error Responses:**
+
+| Status | Code | Description |
+|--------|------|-------------|
+| 404 | `NOT_FOUND` | Session not found |
+| 409 | `NOT_LOCAL` | Session was collected from another machine (Remote Data Sources) |
+| 409 | `NO_CWD` | No working directory was ever recorded for this session |
 | 500 | `AUTOMATION_ERROR` | Terminal automation failed — commonly means macOS hasn't yet granted Automation access to control Terminal (System Settings > Privacy & Security > Automation) |
 | 501 | `UNSUPPORTED_PLATFORM` | Not running on macOS |
 
@@ -1377,6 +1418,54 @@ Because `wall_clock_ms` spans each session's whole life, an **open-but-silent** 
 Sessions that never declared any focus surface through the inference fallback above when a usable verdict exists, and through a `"none"`-kind segment otherwise (see above) — no session is ever omitted from `sessions` purely for lacking a declaration or inference. `items` only includes segments with a non-null `item_number`; a detour with no base item, or a `"none"` segment, still counts toward `totals` but not toward any per-item rollup.
 
 Each session entry carries `ended_at` (`null` while still active/waiting) straight through from the underlying session row — a client rendering a calendar/timeline can't otherwise tell "genuinely still running" apart from "just happened to end near when the report was fetched," since both look identical from segment timestamps alone. The client's `FocusCalendarView` (a day-view swimlane calendar — see `client/README.md`) uses it to give the still-open segment of a live session a distinct "in progress" treatment.
+
+---
+
+#### Open Terminal in Project Folder
+
+```http
+POST /api/projects/:id/open-terminal
+```
+
+macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the Kanban board's "Open terminal in project…" picker (in the header's filters menu, reachable from any view): picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | Project ID |
+
+**Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `cwd` | string | Only when the project has more than one mapped folder | Which of the project's own `paths[].cwd` to open. Ignored (the project's single folder is used) when the project has exactly one. |
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:4820/api/projects/proj_abc123/open-terminal \
+  -H "Content-Type: application/json" \
+  -d '{"cwd": "/Users/dev/my-repo"}'
+```
+
+**Example Response:**
+
+```json
+{ "ok": true }
+```
+
+**Error Responses:**
+
+| Status | Code | Description |
+|--------|------|-------------|
+| 404 | `NOT_FOUND` | Project not found |
+| 409 | `NO_FOLDERS` | This project has no mapped folders |
+| 400 | `INVALID_INPUT` | `cwd` is missing or isn't one of this project's mapped folders (only possible when the project has more than one) |
+| 500 | `AUTOMATION_ERROR` | Terminal automation failed — commonly means macOS hasn't yet granted Automation access to control Terminal (System Settings > Privacy & Security > Automation) |
+| 501 | `UNSUPPORTED_PLATFORM` | Not running on macOS |
+
+---
 
 #### Get Cross-Project Focus Report
 

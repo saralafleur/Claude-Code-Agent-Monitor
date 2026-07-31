@@ -6,7 +6,9 @@
  * new session relationship. Exposes CRUD for projects plus add/remove folder
  * mapping endpoints, and returns aggregated session counts per project (and
  * for cwds not yet mapped to any project) so the client can render a live
- * "active projects" view without a separate stats round-trip.
+ * "active projects" view without a separate stats round-trip. Also exposes
+ * an "open terminal in one of this project's folders" action (macOS only,
+ * see server/lib/terminal-focus.js) for the Kanban board's project picker.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -15,6 +17,11 @@ const { v4: uuidv4 } = require("uuid");
 const dbModule = require("../db");
 const { stmts, db } = dbModule;
 const { buildProjectFocusReport } = require("../lib/focus-report");
+// Required as a module object (not destructured) so tests can swap
+// `terminalFocus.openTerminalForCwd` and this route picks the stub up at
+// call time — same idiom routes/sessions.js uses for its own terminal-focus
+// calls.
+const terminalFocus = require("../lib/terminal-focus");
 
 const router = Router();
 
@@ -232,6 +239,57 @@ router.get("/:id/focus-report", (req, res) => {
           .all(JSON.stringify(cwds));
   const report = buildProjectFocusReport(dbModule, sessions);
   res.json({ project_id: project.id, ...report });
+});
+
+// Maps server/lib/terminal-focus.js's typed failure codes to HTTP status —
+// same idiom routes/sessions.js's TERMINAL_FOCUS_STATUS/OPEN_TERMINAL_STATUS
+// use for the session-scoped counterparts of this action.
+const OPEN_TERMINAL_STATUS = {
+  UNSUPPORTED_PLATFORM: 501,
+  NO_CWD: 409,
+  AUTOMATION_ERROR: 500,
+};
+
+/**
+ * POST /:id/open-terminal — opens a brand-new Terminal.app window in one of
+ * this project's mapped folders and starts a fresh `claude` instance in it
+ * (macOS only). A project mapped to exactly one folder opens it directly; a
+ * project mapped to more than one requires `cwd` in the body naming which
+ * of its own `paths` to use — the client's picker only shows the folder
+ * step when there's an actual choice to make.
+ */
+router.post("/:id/open-terminal", (req, res) => {
+  const project = stmts.getProject.get(req.params.id);
+  if (!project) {
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+  }
+  const paths = stmts.listProjectPaths.all(project.id);
+  if (paths.length === 0) {
+    return res.status(409).json({
+      error: { code: "NO_FOLDERS", message: "This project has no mapped folders." },
+    });
+  }
+
+  let cwd;
+  if (paths.length === 1) {
+    cwd = paths[0].cwd;
+  } else {
+    const requested = req.body?.cwd;
+    if (!requested || typeof requested !== "string" || !paths.some((p) => p.cwd === requested)) {
+      return res.status(400).json({
+        error: {
+          code: "INVALID_INPUT",
+          message: "cwd must be one of this project's mapped folders",
+        },
+      });
+    }
+    cwd = requested;
+  }
+
+  const result = terminalFocus.openTerminalForCwd(cwd);
+  if (result.ok) return res.json({ ok: true });
+  const status = OPEN_TERMINAL_STATUS[result.code] || 500;
+  res.status(status).json({ error: { code: result.code, message: result.message } });
 });
 
 module.exports = router;

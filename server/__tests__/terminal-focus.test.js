@@ -1,16 +1,18 @@
 /**
- * @file Tests for jump-to-terminal: resolving a hook-reported pid hint to the
- * real `claude` CLI process (server/lib/terminal-focus.js's resolveSessionPid,
- * walking an intermediate shell wrapper when present), the pre-action
- * liveness re-check (isPidLiveClaude), the full focusTerminalForSession
- * branching (platform/source/pid/liveness/tty/AppleScript-result → typed
- * result), the hook-ingestion wiring that persists a resolved pid on
- * SessionStart (server/routes/hooks.js's ensureSession), and the
- * POST /api/sessions/:id/focus-terminal route's typed-code → HTTP-status
- * mapping. `listProcesses`/`resolveTty`/`runFocusScript` are swapped on the
- * module object for deterministic fixtures instead of depending on this test
- * run's own real OS process tree — same idiom session-liveness.test.js uses
- * for `liveness.probeLiveCwds`.
+ * @file Tests for jump-to-terminal and open-new-terminal: resolving a
+ * hook-reported pid hint to the real `claude` CLI process
+ * (server/lib/terminal-focus.js's resolveSessionPid, walking an intermediate
+ * shell wrapper when present), the pre-action liveness re-check
+ * (isPidLiveClaude), the full focusTerminalForSession and
+ * openTerminalForSession branching (platform/source/pid-or-cwd/
+ * liveness/tty/AppleScript-result → typed result), the hook-ingestion wiring
+ * that persists a resolved pid on SessionStart (server/routes/hooks.js's
+ * ensureSession), and the POST /api/sessions/:id/focus-terminal and
+ * POST /api/sessions/:id/open-terminal routes' typed-code → HTTP-status
+ * mapping. `listProcesses`/`resolveTty`/`runFocusScript`/
+ * `runOpenTerminalScript` are swapped on the module object for deterministic
+ * fixtures instead of depending on this test run's own real OS process tree
+ * — same idiom session-liveness.test.js uses for `liveness.probeLiveCwds`.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -38,6 +40,8 @@ const real = {
   resolveTty: terminalFocus.resolveTty,
   runFocusScript: terminalFocus.runFocusScript,
   focusTerminalForSession: terminalFocus.focusTerminalForSession,
+  runOpenTerminalScript: terminalFocus.runOpenTerminalScript,
+  openTerminalForSession: terminalFocus.openTerminalForSession,
 };
 function restoreTerminalFocus() {
   Object.assign(terminalFocus, real);
@@ -227,6 +231,92 @@ describe("focusTerminalForSession — full branching", () => {
   });
 });
 
+describe("shellQuote — safe splicing into a shell command string", () => {
+  it("wraps a plain path in single quotes", () => {
+    assert.equal(terminalFocus.shellQuote("/Users/dev/project"), "'/Users/dev/project'");
+  });
+
+  it("escapes an embedded single quote", () => {
+    assert.equal(terminalFocus.shellQuote("/tmp/it's a dir"), "'/tmp/it'\\''s a dir'");
+  });
+});
+
+describe("openTerminalForSession — full branching", () => {
+  beforeEach(() => {
+    terminalFocus.runOpenTerminalScript = () => "";
+  });
+
+  it("succeeds when every step resolves", () => {
+    assert.deepEqual(
+      terminalFocus.openTerminalForSession({ cwd: "/repo/agent-monitor", source: "local" }),
+      { ok: true }
+    );
+  });
+
+  it("treats an unset/undefined source as local (default)", () => {
+    assert.deepEqual(terminalFocus.openTerminalForSession({ cwd: "/repo/agent-monitor" }), {
+      ok: true,
+    });
+  });
+
+  it("NOT_LOCAL for a session collected from another machine", () => {
+    const r = terminalFocus.openTerminalForSession({
+      cwd: "/repo/agent-monitor",
+      source: "laptop-2",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "NOT_LOCAL");
+  });
+
+  it("NO_CWD when no working directory was ever recorded", () => {
+    for (const cwd of [null, undefined, ""]) {
+      const r = terminalFocus.openTerminalForSession({ cwd, source: "local" });
+      assert.equal(r.ok, false);
+      assert.equal(r.code, "NO_CWD");
+    }
+  });
+
+  it("passes a `cd <quoted cwd> && claude` command to the AppleScript runner", () => {
+    let seen;
+    terminalFocus.runOpenTerminalScript = (cmd) => {
+      seen = cmd;
+      return "";
+    };
+    terminalFocus.openTerminalForSession({ cwd: "/repo/agent-monitor", source: "local" });
+    assert.equal(seen, "cd '/repo/agent-monitor' && claude");
+  });
+
+  it("AUTOMATION_ERROR when the AppleScript invocation throws", () => {
+    terminalFocus.runOpenTerminalScript = () => {
+      const err = new Error("execution error");
+      err.stderr = "osascript: Not authorized to send Apple events to Terminal.";
+      throw err;
+    };
+    const r = terminalFocus.openTerminalForSession({
+      cwd: "/repo/agent-monitor",
+      source: "local",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "AUTOMATION_ERROR");
+    assert.match(r.message, /not authorized/i);
+  });
+
+  it("UNSUPPORTED_PLATFORM off-macOS", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const r = terminalFocus.openTerminalForSession({
+        cwd: "/repo/agent-monitor",
+        source: "local",
+      });
+      assert.equal(r.ok, false);
+      assert.equal(r.code, "UNSUPPORTED_PLATFORM");
+    } finally {
+      Object.defineProperty(process, "platform", original);
+    }
+  });
+});
+
 describe("hook ingestion — pid resolved and persisted on SessionStart", () => {
   it("resolves the hint's real claude pid and stores it, first-seen-wins", async () => {
     terminalFocus.listProcesses = () =>
@@ -310,6 +400,47 @@ describe("POST /api/sessions/:id/focus-terminal — typed code to HTTP status", 
   it("200 { ok: true } on success", async () => {
     terminalFocus.focusTerminalForSession = () => ({ ok: true });
     const res = await req("POST", `/api/sessions/${sid}/focus-terminal`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { ok: true });
+  });
+});
+
+describe("POST /api/sessions/:id/open-terminal — typed code to HTTP status", () => {
+  let sid;
+
+  before(async () => {
+    sid = `open-terminal-route-${Date.now()}`;
+    const res = await req("POST", "/api/hooks/event", {
+      hook_type: "SessionStart",
+      data: { session_id: sid, cwd: "/tmp/proj4" },
+    });
+    assert.equal(res.status, 200);
+  });
+
+  it("404 for a session that doesn't exist", async () => {
+    const res = await req("POST", "/api/sessions/does-not-exist/open-terminal");
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
+  });
+
+  it("maps each typed failure code to its documented HTTP status", async () => {
+    const cases = [
+      ["UNSUPPORTED_PLATFORM", 501],
+      ["NOT_LOCAL", 409],
+      ["NO_CWD", 409],
+      ["AUTOMATION_ERROR", 500],
+    ];
+    for (const [code, status] of cases) {
+      terminalFocus.openTerminalForSession = () => ({ ok: false, code, message: `msg:${code}` });
+      const res = await req("POST", `/api/sessions/${sid}/open-terminal`);
+      assert.equal(res.status, status, `${code} should map to ${status}`);
+      assert.equal(res.body.error.code, code);
+    }
+  });
+
+  it("200 { ok: true } on success", async () => {
+    terminalFocus.openTerminalForSession = () => ({ ok: true });
+    const res = await req("POST", `/api/sessions/${sid}/open-terminal`);
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, { ok: true });
   });

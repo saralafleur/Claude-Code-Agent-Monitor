@@ -20,6 +20,18 @@
   "showOldErrors": "显示所有错误",
   "hideInternal": "隐藏内部会话（由仪表盘自身的后台专注分类器生成，并非你创建）",
   "showInternal": "显示内部会话",
+  "openTerminalInProject": "在项目中打开终端…",
+  "openTerminalPicker": {
+    "title": "在项目中打开终端",
+    "back": "返回",
+    "loading": "正在加载项目…",
+    "loadError": "加载项目失败",
+    "noProjects": "暂无项目",
+    "noFolders": "此项目未映射任何文件夹",
+    "folderCount_one": "{{count}} 个文件夹",
+    "folderCount_other": "{{count}} 个文件夹",
+    "error": "打开新终端失败"
+  },
   "copyLink": "复制共享链接",
   "linkCopied": "链接已复制！",
   "noAgents": "暂无追踪的 Agent",
@@ -47,7 +59,19 @@
     "lastMessageEmpty": "未找到最近的消息",
     "expensiveModel": "正在使用高级模型(Opus/Fable)- 每个 token 成本更高",
     "focusTerminal": "跳转到终端",
-    "focusTerminalError": "跳转到终端失败"
+    "focusTerminalError": "跳转到终端失败",
+    "openTerminal": "在此打开新终端",
+    "openTerminalError": "打开新终端失败",
+    "tokens": {
+      "in": "输入",
+      "out": "输出",
+      "cache": "缓存",
+      "total": "总计",
+      "inTooltip": "此会话的输入 token 总数",
+      "outTooltip": "此会话生成的输出 token 总数",
+      "cacheTooltip": "此会话的缓存读取 + 写入 token 总数",
+      "totalTooltip": "此会话的 token 总数(输入 + 输出 + 缓存)"
+    }
   },
   "tooltip": {
     "agent": {

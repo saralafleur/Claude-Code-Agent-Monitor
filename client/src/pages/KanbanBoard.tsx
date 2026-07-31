@@ -114,6 +114,7 @@ import {
   Copy,
   Check,
   MoreHorizontal,
+  SquareTerminal,
 } from "lucide-react";
 import { api, dashboardToken } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -124,6 +125,7 @@ import { CardSkeleton } from "../components/Skeleton";
 import { PlanPanel } from "../components/PlanPanel";
 import { PlanModal } from "../components/PlanModal";
 import { FocusReportModal } from "../components/FocusReportModal";
+import { OpenTerminalModal } from "../components/OpenTerminalModal";
 import { loadProjectOrder, persistProjectOrder, applyProjectOrder } from "../lib/projectOrder";
 import { buildCwdProjectIndex, projectForSession } from "../lib/projectLookup";
 import { useFocusMap } from "../lib/focusStore";
@@ -411,6 +413,11 @@ export function KanbanBoard() {
   // item-chip session lookups never bleed across projects.
   const [openPlan, setOpenPlan] = useState<{ plans: Plan[]; sessions: Session[] } | null>(null);
   const [openReport, setOpenReport] = useState<{ id: string; name: string } | null>(null);
+  // "Open terminal in project…" picker - reachable from the header's filters
+  // menu regardless of which board view is active (unlike `projectsList`,
+  // which is only fetched in the Projects view), so it fetches its own
+  // project list on open rather than depending on board state.
+  const [openTerminalPickerOpen, setOpenTerminalPickerOpen] = useState(false);
 
   // Manual drag order for the Projects view's columns - shared with the
   // standalone Projects page (same localStorage key via lib/projectOrder),
@@ -1146,6 +1153,19 @@ export function KanbanBoard() {
                   {hideInternal ? t("showInternal") : t("hideInternal")}
                 </span>
               </button>
+              <div className="my-1 border-t border-border" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setFiltersOpen(false);
+                  setOpenTerminalPickerOpen(true);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-300 hover:bg-surface-4 transition-colors duration-150"
+              >
+                <SquareTerminal className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">{t("openTerminalInProject")}</span>
+              </button>
             </div>
           )}
         </div>
@@ -1173,6 +1193,14 @@ export function KanbanBoard() {
             }
           />
         </div>
+        {/* `Header`'s filters menu (including "Open terminal in project…") is
+            reachable even in this empty-board state, so its picker modal has
+            to be reachable from here too - the openPlan/openReport popups
+            don't need the same treatment since nothing in this branch can
+            open them (there are no columns to click). */}
+        {openTerminalPickerOpen && (
+          <OpenTerminalModal onClose={() => setOpenTerminalPickerOpen(false)} />
+        )}
       </div>
     );
   }
@@ -1426,6 +1454,9 @@ export function KanbanBoard() {
           projectName={openReport.name}
           onClose={() => setOpenReport(null)}
         />
+      )}
+      {openTerminalPickerOpen && (
+        <OpenTerminalModal onClose={() => setOpenTerminalPickerOpen(false)} />
       )}
     </div>
   );

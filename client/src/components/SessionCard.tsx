@@ -2,8 +2,10 @@
  * @file SessionCard.tsx
  * @description Compact session card for the Kanban board's "Sessions" view.
  * Mirrors AgentCard's information hierarchy (icon · title · meta line) but
- * surfaces session-relevant fields: model, agent count, cost, last activity.
- * Clicking the card navigates to the session detail page. While a session is
+ * surfaces session-relevant fields: model, agent count, cost, last activity,
+ * and — when the session response joins token usage — a compact input/
+ * output/cache token strip with an aggregate total. Clicking the card
+ * navigates to the session detail page. While a session is
  * Waiting, a thin 25px hover bar appears flush against the card's bottom
  * edge; hovering THAT bar (not the card at large — a full-card hover proved
  * too eager/intrusive) lazily fetches the last thing Claude actually said
@@ -78,9 +80,13 @@ import {
   Cpu,
   MessageSquare,
   Terminal,
+  SquareTerminal,
   Loader2,
   Check,
   X,
+  ArrowDown,
+  ArrowUp,
+  Database,
 } from "lucide-react";
 import { SessionStatusBadge } from "./StatusBadge";
 import { FOCUS_KIND_ICONS } from "./PlanModal";
@@ -101,6 +107,7 @@ import {
   formatModelName,
   isExpensiveModel,
   pathTail,
+  fmt,
 } from "../lib/format";
 import { useSessionFocus } from "../lib/focusStore";
 
@@ -219,6 +226,11 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
   const model = formatModelName(session.model);
   const modelIsExpensive = isExpensiveModel(session.model);
   const lastActivity = session.last_activity || session.ended_at || session.started_at;
+  // Session-lifetime token totals (undefined on responses that don't join
+  // token_usage) - the aggregate is derived here rather than trusting a
+  // server-computed sum, so it always matches what the three figures above it show.
+  const tokens = session.tokens;
+  const tokenTotal = tokens ? tokens.input + tokens.output + tokens.cache : 0;
 
   // Declared focus breadcrumb (AGENT-PLAN.md item + detour chain). Read from
   // the shared focusStore — one bulk hydrate + WS merges, never a per-card
@@ -327,6 +339,36 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
       });
   }
 
+  // "Open new terminal" — sibling action to "Jump to terminal" above, but
+  // starts a brand-new `claude` instance in the session's cwd instead of
+  // locating the existing one. Doesn't require the session to still be
+  // active/have a resolved pid (unlike canFocusTerminal) since it's opening
+  // a fresh process, not locating a running one — only a known local cwd.
+  const canOpenTerminal = (session.source === "local" || !session.source) && !!session.cwd;
+  const [openTerminalState, setOpenTerminalState] = useState<
+    "idle" | "pending" | "success" | "error"
+  >("idle");
+  const [openTerminalError, setOpenTerminalError] = useState<string | null>(null);
+  const openTerminalResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleOpenTerminal(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (openTerminalState === "pending") return;
+    if (openTerminalResetTimerRef.current) clearTimeout(openTerminalResetTimerRef.current);
+    setOpenTerminalState("pending");
+    setOpenTerminalError(null);
+    api.sessions
+      .openTerminal(session.id)
+      .then(() => setOpenTerminalState("success"))
+      .catch((err: unknown) => {
+        setOpenTerminalError(err instanceof Error ? err.message : t("session.openTerminalError"));
+        setOpenTerminalState("error");
+      })
+      .finally(() => {
+        openTerminalResetTimerRef.current = setTimeout(() => setOpenTerminalState("idle"), 2000);
+      });
+  }
+
   // Only the bottom hover bar (rendered when isWaiting) opens the preview
   // popup now - the card at large no longer does, since that read as too
   // intrusive for a card the user was merely scanning past.
@@ -411,6 +453,36 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
           {/* compact: cards are narrow — inline reason chip would squeeze the
               title, so the reason stays hover-tooltip-only here. */}
           <SessionStatusBadge status={status} reason={sessionAwaitingReason(session)} compact />
+          {canOpenTerminal && (
+            <button
+              type="button"
+              onClick={handleOpenTerminal}
+              disabled={openTerminalState === "pending"}
+              title={
+                openTerminalState === "error"
+                  ? (openTerminalError ?? undefined)
+                  : t("session.openTerminal")
+              }
+              aria-label={t("session.openTerminal")}
+              className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 transition-colors ${
+                openTerminalState === "success"
+                  ? "bg-emerald-500/15 text-emerald-500"
+                  : openTerminalState === "error"
+                    ? "bg-red-500/15 text-red-500"
+                    : "bg-accent/15 text-accent hover:bg-accent/25"
+              }`}
+            >
+              {openTerminalState === "pending" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : openTerminalState === "success" ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : openTerminalState === "error" ? (
+                <X className="w-3.5 h-3.5" />
+              ) : (
+                <SquareTerminal className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
           {canFocusTerminal && (
             <button
               type="button"
@@ -532,6 +604,61 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
           {timeAgo(session.ended_at || lastActivity)}
         </span>
       </div>
+
+      {/* Compact token strip - input/output/cache totals plus an aggregate,
+          same hairline-separated treatment as the Waiting hover bar below.
+          Only present once the session has actually used any tokens. */}
+      {tokens && tokenTotal > 0 && (
+        <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_auto] gap-2.5 mt-2.5 pt-2 border-t border-border/50">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5">
+              <ArrowDown className="w-2.5 h-2.5 text-sky-400" />
+              {t("session.tokens.in")}
+            </div>
+            <div
+              className="text-[11px] font-semibold text-gray-300 truncate"
+              title={t("session.tokens.inTooltip")}
+            >
+              {fmt(tokens.input)}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5">
+              <ArrowUp className="w-2.5 h-2.5 text-emerald-400" />
+              {t("session.tokens.out")}
+            </div>
+            <div
+              className="text-[11px] font-semibold text-gray-300 truncate"
+              title={t("session.tokens.outTooltip")}
+            >
+              {fmt(tokens.output)}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5">
+              <Database className="w-2.5 h-2.5 text-purple-400" />
+              {t("session.tokens.cache")}
+            </div>
+            <div
+              className="text-[11px] font-semibold text-gray-300 truncate"
+              title={t("session.tokens.cacheTooltip")}
+            >
+              {fmt(tokens.cache)}
+            </div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <div className="text-[9px] uppercase tracking-wide text-accent-hover mb-0.5">
+              {t("session.tokens.total")}
+            </div>
+            <div
+              className="text-xs font-bold text-accent-hover"
+              title={t("session.tokens.totalTooltip")}
+            >
+              {fmt(tokenTotal)}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Waiting-only hover bar - flush against the card's bottom edge via
           negative margins that cancel the card's own p-4 padding, clipped to

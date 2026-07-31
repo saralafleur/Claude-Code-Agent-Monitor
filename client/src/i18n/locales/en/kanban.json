@@ -20,6 +20,18 @@
   "showOldErrors": "Show all errors",
   "hideInternal": "Hide internal sessions (spawned by this dashboard's own background focus classifiers, not by you)",
   "showInternal": "Show internal sessions",
+  "openTerminalInProject": "Open terminal in project…",
+  "openTerminalPicker": {
+    "title": "Open terminal in project",
+    "back": "Back",
+    "loading": "Loading projects…",
+    "loadError": "Failed to load projects",
+    "noProjects": "No projects yet",
+    "noFolders": "No folders mapped to this project",
+    "folderCount_one": "{{count}} folder",
+    "folderCount_other": "{{count}} folders",
+    "error": "Failed to open a new terminal"
+  },
   "copyLink": "Copy shareable link",
   "linkCopied": "Link copied!",
   "noAgents": "No agents tracked yet",
@@ -47,7 +59,19 @@
     "lastMessageEmpty": "No recent message found",
     "expensiveModel": "Running on a premium model (Opus/Fable) - higher cost per token",
     "focusTerminal": "Jump to terminal",
-    "focusTerminalError": "Failed to jump to terminal"
+    "focusTerminalError": "Failed to jump to terminal",
+    "openTerminal": "Open new terminal here",
+    "openTerminalError": "Failed to open a new terminal",
+    "tokens": {
+      "in": "In",
+      "out": "Out",
+      "cache": "Cache",
+      "total": "Total",
+      "inTooltip": "Total fresh input tokens for this session",
+      "outTooltip": "Total output tokens generated for this session",
+      "cacheTooltip": "Total cache-read + cache-write tokens for this session",
+      "totalTooltip": "Total tokens for this session (input + output + cache)"
+    }
   },
   "tooltip": {
     "agent": {

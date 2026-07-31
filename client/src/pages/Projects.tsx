@@ -1,17 +1,22 @@
 /**
  * @file Projects.tsx
  * @description Projects view: group session working directories (cwds) into
- * named projects and see each project's sessions laid out as a horizontal
- * row, instead of the flat Sessions/Agent Board lists. A project can claim
- * multiple folders (one-to-many); a folder belongs to at most one project.
- * Supports creating a project (optionally from an existing folder), inline
- * rename, deleting a project, and adding/removing folder mappings. Sessions
- * whose cwd isn't mapped to any project yet render in a separate "Unassigned"
- * row so nothing silently disappears from view. A search box filters
+ * named projects, instead of the flat Sessions/Agent Board lists. Projects
+ * render as a compact table (one row per project: name, session/active
+ * counts, last activity, and quick actions) rather than a full card each, so
+ * a machine with many projects doesn't turn into a long vertical scroll.
+ * Each row expands (chevron) to reveal its folder mappings, any AGENT-PLAN.md
+ * checklist, and its sessions laid out as a horizontal row of `SessionCard`s
+ * — collapsed by default. A project can claim multiple folders (one-to-many);
+ * a folder belongs to at most one project. Supports creating a project
+ * (optionally from an existing folder), inline rename, deleting a project,
+ * and adding/removing folder mappings. Sessions whose cwd isn't mapped to any
+ * project yet render in a separate "Unassigned" section (also collapsible
+ * per folder) so nothing silently disappears from view. A search box filters
  * SESSIONS by their folder (cwd) — not project names — and any project (or
  * the Unassigned bucket) left with zero matching sessions is hidden entirely
- * rather than rendered as an empty shell. Project cards are drag-reorderable
- * (native HTML5 drag-and-drop on the whole card); the display order persists
+ * rather than rendered as an empty shell. Project rows are drag-reorderable
+ * (native HTML5 drag-and-drop on the whole row); the display order persists
  * in localStorage per-browser, purely a personal arrangement — it has no
  * server-side representation and doesn't affect any other view. Unassigned
  * always stays pinned last and isn't part of the reorderable set.
@@ -19,6 +24,7 @@
  */
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -37,11 +43,12 @@ import {
   X,
   Trash2,
   RefreshCw,
-  Bot,
   Search,
   GripVertical,
   ClipboardList,
   BarChart3,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -206,7 +213,7 @@ export function Projects() {
     setLiveOrderIds(orderedProjects.map((p) => p.id));
   }
 
-  function handleProjectDragOver(e: DragEvent<HTMLDivElement>, targetId: string) {
+  function handleProjectDragOver(e: DragEvent<HTMLTableRowElement>, targetId: string) {
     e.preventDefault(); // required for onDrop to ever fire
     if (!draggedId || draggedId === targetId) return;
     setLiveOrderIds((prev) => {
@@ -478,62 +485,89 @@ export function Projects() {
       )}
 
       <div className="space-y-6">
-        {loading && projects.length === 0
-          ? Array.from({ length: 2 }).map((_, i) => <CardSkeleton key={`sk-${i}`} />)
-          : projectRows.map(({ project, sessions, overflowCount }) => (
-              <ProjectSection
-                key={project.id}
-                project={project}
-                sessions={sessions}
-                overflowCount={overflowCount}
-                plans={project.paths
-                  .map((p) => plansByCwd.get(p.cwd))
-                  .filter((p): p is Plan => Boolean(p))}
-                onOpenPlan={(plans, sess) => setOpenPlan({ plans, sessions: sess })}
-                onOpenReport={() => setOpenReport({ id: project.id, name: project.name })}
-                t={t}
-                editing={editingId === project.id}
-                editingName={editingName}
-                onStartEdit={() => {
-                  setEditingId(project.id);
-                  setEditingName(project.name);
-                }}
-                onEditingNameChange={setEditingName}
-                onSaveEdit={() => handleRename(project.id)}
-                onCancelEdit={() => setEditingId(null)}
-                confirmingDelete={confirmDeleteId === project.id}
-                onDeleteClick={() =>
-                  confirmDeleteId === project.id
-                    ? handleDelete(project.id)
-                    : setConfirmDeleteId(project.id)
-                }
-                onCancelDelete={() => setConfirmDeleteId(null)}
-                addingFolder={addingFolderFor === project.id}
-                newFolderCwd={newFolderCwd}
-                onStartAddFolder={() => {
-                  setAddingFolderFor(project.id);
-                  setNewFolderCwd("");
-                }}
-                onNewFolderCwdChange={setNewFolderCwd}
-                onConfirmAddFolder={() => handleAddFolder(project.id)}
-                onCancelAddFolder={() => setAddingFolderFor(null)}
-                confirmRemovePathId={
-                  confirmRemovePath?.startsWith(`${project.id}:`)
-                    ? Number(confirmRemovePath.split(":")[1])
-                    : null
-                }
-                onRemoveFolderClick={(pathId) =>
-                  confirmRemovePath === `${project.id}:${pathId}`
-                    ? handleRemoveFolder(project.id, pathId)
-                    : setConfirmRemovePath(`${project.id}:${pathId}`)
-                }
-                onCancelRemoveFolder={() => setConfirmRemovePath(null)}
-                dragging={draggedId === project.id}
-                onDragStart={() => handleProjectDragStart(project.id)}
-                onDragOverCard={(e) => handleProjectDragOver(e, project.id)}
-                onDragEnd={handleProjectDragEnd}
-              />
-            ))}
+        {loading && projects.length === 0 ? (
+          Array.from({ length: 2 }).map((_, i) => <CardSkeleton key={`sk-${i}`} />)
+        ) : projectRows.length > 0 ? (
+          <div className="card overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border text-left">
+                  <th className="w-8"></th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    {t("tableProject")}
+                  </th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    {t("tableSessions")}
+                  </th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    {t("tableActive")}
+                  </th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    {t("tableLastActivity")}
+                  </th>
+                  <th className="px-3 py-2.5 w-28"></th>
+                  <th className="w-9"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {projectRows.map(({ project, sessions, overflowCount }) => (
+                  <ProjectRow
+                    key={project.id}
+                    project={project}
+                    sessions={sessions}
+                    overflowCount={overflowCount}
+                    plans={project.paths
+                      .map((p) => plansByCwd.get(p.cwd))
+                      .filter((p): p is Plan => Boolean(p))}
+                    onOpenPlan={(plans, sess) => setOpenPlan({ plans, sessions: sess })}
+                    onOpenReport={() => setOpenReport({ id: project.id, name: project.name })}
+                    t={t}
+                    editing={editingId === project.id}
+                    editingName={editingName}
+                    onStartEdit={() => {
+                      setEditingId(project.id);
+                      setEditingName(project.name);
+                    }}
+                    onEditingNameChange={setEditingName}
+                    onSaveEdit={() => handleRename(project.id)}
+                    onCancelEdit={() => setEditingId(null)}
+                    confirmingDelete={confirmDeleteId === project.id}
+                    onDeleteClick={() =>
+                      confirmDeleteId === project.id
+                        ? handleDelete(project.id)
+                        : setConfirmDeleteId(project.id)
+                    }
+                    onCancelDelete={() => setConfirmDeleteId(null)}
+                    addingFolder={addingFolderFor === project.id}
+                    newFolderCwd={newFolderCwd}
+                    onStartAddFolder={() => {
+                      setAddingFolderFor(project.id);
+                      setNewFolderCwd("");
+                    }}
+                    onNewFolderCwdChange={setNewFolderCwd}
+                    onConfirmAddFolder={() => handleAddFolder(project.id)}
+                    onCancelAddFolder={() => setAddingFolderFor(null)}
+                    confirmRemovePathId={
+                      confirmRemovePath?.startsWith(`${project.id}:`)
+                        ? Number(confirmRemovePath.split(":")[1])
+                        : null
+                    }
+                    onRemoveFolderClick={(pathId) =>
+                      confirmRemovePath === `${project.id}:${pathId}`
+                        ? handleRemoveFolder(project.id, pathId)
+                        : setConfirmRemovePath(`${project.id}:${pathId}`)
+                    }
+                    onCancelRemoveFolder={() => setConfirmRemovePath(null)}
+                    dragging={draggedId === project.id}
+                    onDragStart={() => handleProjectDragStart(project.id)}
+                    onDragOverCard={(e) => handleProjectDragOver(e, project.id)}
+                    onDragEnd={handleProjectDragEnd}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
 
         {unassignedRows.length > 0 && (
           <div className="card p-4">
@@ -548,41 +582,15 @@ export function Projects() {
             </div>
             <div className="space-y-4">
               {unassignedRows.map(({ cwd, sessions: cwdSessions }) => (
-                <div key={cwd}>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="flex items-center gap-1.5 text-xs text-gray-400 font-mono truncate">
-                      <Folder className="w-3.5 h-3.5 flex-shrink-0" />
-                      {cwd}
-                    </span>
-                    <button
-                      onClick={() => startCreateFromFolder(cwd)}
-                      className="flex items-center gap-1 text-[11px] text-accent hover:text-accent/80 flex-shrink-0"
-                    >
-                      <FolderPlus className="w-3 h-3" /> {t("createFromFolder")}
-                    </button>
-                  </div>
-                  {plansByCwd.has(cwd) && (
-                    <div className="mb-2">
-                      <PlanPanel
-                        plan={plansByCwd.get(cwd) as Plan}
-                        items={(plansByCwd.get(cwd) as Plan).items}
-                        onOpen={() =>
-                          setOpenPlan({
-                            plans: [plansByCwd.get(cwd) as Plan],
-                            sessions: cwdSessions,
-                          })
-                        }
-                      />
-                    </div>
-                  )}
-                  <div className="flex gap-3 overflow-x-auto pb-2">
-                    {cwdSessions.map((session) => (
-                      <div key={session.id} className="w-72 flex-shrink-0">
-                        <SessionCard session={session} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <UnassignedFolderRow
+                  key={cwd}
+                  cwd={cwd}
+                  sessions={cwdSessions}
+                  plan={plansByCwd.get(cwd) ?? null}
+                  t={t}
+                  onCreateFromFolder={() => startCreateFromFolder(cwd)}
+                  onOpenPlan={(plan) => setOpenPlan({ plans: [plan], sessions: cwdSessions })}
+                />
               ))}
             </div>
           </div>
@@ -608,7 +616,7 @@ export function Projects() {
   );
 }
 
-interface ProjectSectionProps {
+interface ProjectRowProps {
   project: Project;
   sessions: Session[];
   overflowCount: number;
@@ -637,16 +645,20 @@ interface ProjectSectionProps {
   confirmRemovePathId: number | null;
   onRemoveFolderClick: (pathId: number) => void;
   onCancelRemoveFolder: () => void;
-  /** True while this card is the one being dragged (dims it as feedback). */
+  /** True while this row is the one being dragged (dims it as feedback). */
   dragging: boolean;
   onDragStart: () => void;
-  /** Fired while another dragged card is over this one — the parent live-
+  /** Fired while another dragged row is over this one — the parent live-
    *  reorders on this, so drop itself only needs to preventDefault. */
-  onDragOverCard: (e: DragEvent<HTMLDivElement>) => void;
+  onDragOverCard: (e: DragEvent<HTMLTableRowElement>) => void;
   onDragEnd: () => void;
 }
 
-function ProjectSection({
+/** One project's row in the compact projects table. Collapsed by default —
+ *  the expand chevron reveals folder mappings, any AGENT-PLAN.md checklist,
+ *  and the session-cards strip, all of which used to render inline in a
+ *  full-height card regardless of whether anyone was looking at them. */
+function ProjectRow({
   project,
   sessions,
   overflowCount,
@@ -676,20 +688,25 @@ function ProjectSection({
   onDragStart,
   onDragOverCard,
   onDragEnd,
-}: ProjectSectionProps) {
+}: ProjectRowProps) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOverCard}
-      onDrop={(e) => e.preventDefault()}
-      onDragEnd={onDragEnd}
-      className={`card p-4 cursor-grab active:cursor-grabbing transition-opacity ${
-        dragging ? "opacity-40" : ""
-      }`}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-        <div className="min-w-0 flex-1">
+    <Fragment>
+      <tr
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={onDragOverCard}
+        onDrop={(e) => e.preventDefault()}
+        onDragEnd={onDragEnd}
+        className={`cursor-grab active:cursor-grabbing transition-opacity hover:bg-surface-4 ${
+          dragging ? "opacity-40" : ""
+        }`}
+      >
+        <td className="pl-4 py-3">
+          <GripVertical className="w-3.5 h-3.5 text-gray-600" aria-hidden="true" />
+        </td>
+        <td className="px-3 py-3 min-w-0">
           {editing ? (
             <div className="flex items-center gap-2" draggable={false}>
               <input
@@ -717,11 +734,7 @@ function ProjectSection({
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2 min-w-0">
-              <GripVertical
-                className="w-3.5 h-3.5 text-gray-600 flex-shrink-0"
-                aria-hidden="true"
-              />
+            <div className="flex items-center gap-1.5 min-w-0">
               <h2 className="text-sm font-semibold text-gray-100 truncate">{project.name}</h2>
               <button
                 onClick={onStartEdit}
@@ -731,157 +744,239 @@ function ProjectSection({
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              {plans.length > 0 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenPlan(plans, sessions);
-                  }}
-                  title={t("viewPlan")}
-                  draggable={false}
-                  className="p-1 rounded-md text-gray-500 hover:text-accent hover:bg-surface-3 flex-shrink-0"
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                </button>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenReport();
-                }}
-                title={t("viewReport")}
-                draggable={false}
-                className="p-1 rounded-md text-gray-500 hover:text-accent hover:bg-surface-3 flex-shrink-0"
-              >
-                <BarChart3 className="w-3.5 h-3.5" />
-              </button>
             </div>
           )}
-
-          {/* draggable={false}: folder chips (with their own remove buttons)
-              and the add-folder control shouldn't double as a drag handle. */}
-          <div className="flex flex-wrap items-center gap-1.5 mt-2" draggable={false}>
-            {project.paths.length === 0 && (
-              <span className="text-[11px] text-gray-500 italic">{t("noFolders")}</span>
-            )}
-            {project.paths.map((p) => (
-              <span
-                key={p.id}
-                className="group flex items-center gap-1 text-[11px] font-mono text-gray-400 bg-surface-2 border border-border rounded-full pl-2 pr-1 py-0.5"
-              >
-                <Folder className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate max-w-[16rem]">{p.cwd}</span>
-                <button
-                  onClick={() => onRemoveFolderClick(p.id)}
-                  onBlur={onCancelRemoveFolder}
-                  title={t("removeFolder")}
-                  className={`ml-0.5 p-0.5 rounded-full flex-shrink-0 ${
-                    confirmRemovePathId === p.id
-                      ? "bg-red-500/20 text-red-400"
-                      : "text-gray-500 hover:text-red-400 hover:bg-red-500/10"
-                  }`}
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            ))}
-            {addingFolder ? (
-              <span className="flex items-center gap-1">
-                <input
-                  type="text"
-                  autoFocus
-                  list="unassigned-cwds"
-                  value={newFolderCwd}
-                  onChange={(e) => onNewFolderCwdChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") onConfirmAddFolder();
-                    if (e.key === "Escape") onCancelAddFolder();
-                  }}
-                  placeholder={t("folderPlaceholder")}
-                  className="input text-xs py-1 px-2 font-mono w-56"
-                />
-                <button
-                  onClick={onConfirmAddFolder}
-                  className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/10"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={onCancelAddFolder}
-                  className="p-1 rounded-md text-gray-400 hover:bg-surface-3"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </span>
-            ) : (
+        </td>
+        <td className="px-3 py-3 text-sm text-gray-300">{project.session_count}</td>
+        <td className="px-3 py-3 text-sm">
+          {project.active_count > 0 ? (
+            <span className="text-emerald-400">{project.active_count}</span>
+          ) : (
+            <span className="text-gray-600">—</span>
+          )}
+        </td>
+        <td className="px-3 py-3 text-[11px] text-gray-500 whitespace-nowrap">
+          {project.last_activity ? timeAgo(project.last_activity) : "—"}
+        </td>
+        <td className="px-3 py-3">
+          <div className="flex items-center gap-1" draggable={false}>
+            {plans.length > 0 && (
               <button
-                onClick={onStartAddFolder}
-                className="flex items-center gap-1 text-[11px] text-accent hover:text-accent/80 rounded-full border border-dashed border-accent/30 px-2 py-0.5"
+                onClick={() => onOpenPlan(plans, sessions)}
+                title={t("viewPlan")}
+                className="p-1 rounded-md text-gray-500 hover:text-accent hover:bg-surface-3 flex-shrink-0"
               >
-                <Plus className="w-3 h-3" /> {t("addFolder")}
+                <ClipboardList className="w-3.5 h-3.5" />
               </button>
             )}
+            <button
+              onClick={onOpenReport}
+              title={t("viewReport")}
+              className="p-1 rounded-md text-gray-500 hover:text-accent hover:bg-surface-3 flex-shrink-0"
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onDeleteClick}
+              onBlur={onCancelDelete}
+              title={confirmingDelete ? t("confirmDelete") : t("delete")}
+              className={`flex items-center gap-1 text-xs px-1.5 py-1 rounded-md ${
+                confirmingDelete
+                  ? "bg-red-500/20 text-red-400"
+                  : "text-gray-500 hover:text-red-400 hover:bg-red-500/10"
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {confirmingDelete && t("confirmDelete")}
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <div className="text-right">
-            <div className="flex items-center gap-1.5 text-xs text-gray-300">
-              <Bot className="w-3.5 h-3.5 text-gray-500" />
-              {t("sessionCount", { count: project.session_count })}
-            </div>
-            {project.last_activity && (
-              <p className="text-[11px] text-gray-500">{timeAgo(project.last_activity)}</p>
-            )}
-          </div>
+        </td>
+        <td className="pr-4 py-3">
           <button
-            onClick={onDeleteClick}
-            onBlur={onCancelDelete}
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            title={expanded ? t("collapseProject") : t("expandProject")}
             draggable={false}
-            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
-              confirmingDelete
-                ? "bg-red-500/20 text-red-400"
-                : "text-gray-500 hover:text-red-400 hover:bg-red-500/10"
-            }`}
+            className="p-1.5 rounded-md text-gray-500 hover:text-gray-200 hover:bg-surface-3"
           >
-            <Trash2 className="w-3.5 h-3.5" /> {confirmingDelete ? t("confirmDelete") : t("delete")}
+            {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </button>
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={7} className="px-4 pb-4">
+            {/* draggable={false}: folder chips (with their own remove buttons),
+                the add-folder control, checklist rows, and session chips must
+                not double as a drag handle for the row's own reorder-drag. */}
+            <div className="pl-8 pt-1" draggable={false}>
+              <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                {project.paths.length === 0 && (
+                  <span className="text-[11px] text-gray-500 italic">{t("noFolders")}</span>
+                )}
+                {project.paths.map((p) => (
+                  <span
+                    key={p.id}
+                    className="group flex items-center gap-1 text-[11px] font-mono text-gray-400 bg-surface-2 border border-border rounded-full pl-2 pr-1 py-0.5"
+                  >
+                    <Folder className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate max-w-[16rem]">{p.cwd}</span>
+                    <button
+                      onClick={() => onRemoveFolderClick(p.id)}
+                      onBlur={onCancelRemoveFolder}
+                      title={t("removeFolder")}
+                      className={`ml-0.5 p-0.5 rounded-full flex-shrink-0 ${
+                        confirmRemovePathId === p.id
+                          ? "bg-red-500/20 text-red-400"
+                          : "text-gray-500 hover:text-red-400 hover:bg-red-500/10"
+                      }`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {addingFolder ? (
+                  <span className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      autoFocus
+                      list="unassigned-cwds"
+                      value={newFolderCwd}
+                      onChange={(e) => onNewFolderCwdChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") onConfirmAddFolder();
+                        if (e.key === "Escape") onCancelAddFolder();
+                      }}
+                      placeholder={t("folderPlaceholder")}
+                      className="input text-xs py-1 px-2 font-mono w-56"
+                    />
+                    <button
+                      onClick={onConfirmAddFolder}
+                      className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/10"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={onCancelAddFolder}
+                      className="p-1 rounded-md text-gray-400 hover:bg-surface-3"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={onStartAddFolder}
+                    className="flex items-center gap-1 text-[11px] text-accent hover:text-accent/80 rounded-full border border-dashed border-accent/30 px-2 py-0.5"
+                  >
+                    <Plus className="w-3 h-3" /> {t("addFolder")}
+                  </button>
+                )}
+              </div>
+
+              {plans.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  {plans.map((plan) => (
+                    <PlanPanel
+                      key={plan.cwd}
+                      plan={plan}
+                      items={plan.items}
+                      onOpen={() => onOpenPlan([plan], sessions)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {sessions.length === 0 ? (
+                <p className="text-xs text-gray-500 italic py-2">{t("noSessions")}</p>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {sessions.map((session) => (
+                    <div key={session.id} className="w-72 flex-shrink-0">
+                      <SessionCard session={session} />
+                    </div>
+                  ))}
+                  {overflowCount > 0 && (
+                    <div className="w-40 flex-shrink-0 flex items-center justify-center text-xs text-gray-500 italic">
+                      {t("moreSessions", { count: overflowCount })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </Fragment>
+  );
+}
+
+interface UnassignedFolderRowProps {
+  cwd: string;
+  sessions: Session[];
+  plan: Plan | undefined | null;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+  onCreateFromFolder: () => void;
+  onOpenPlan: (plan: Plan) => void;
+}
+
+/** One folder's row inside the Unassigned bucket - mirrors ProjectSection's
+ *  collapsed-by-default session-cards strip so both sections behave the
+ *  same way. */
+function UnassignedFolderRow({
+  cwd,
+  sessions,
+  plan,
+  t,
+  onCreateFromFolder,
+  onOpenPlan,
+}: UnassignedFolderRowProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="flex items-center gap-1.5 text-xs text-gray-400 font-mono truncate">
+          <Folder className="w-3.5 h-3.5 flex-shrink-0" />
+          {cwd}
+        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-[11px] text-gray-500">
+            {t("sessionCount", { count: sessions.length })}
+          </span>
+          {sessions.length > 0 && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              title={expanded ? t("collapseSessions") : t("expandSessions")}
+              className="p-1 rounded-md text-gray-500 hover:text-gray-200 hover:bg-surface-3"
+            >
+              {expanded ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+            </button>
+          )}
+          <button
+            onClick={onCreateFromFolder}
+            className="flex items-center gap-1 text-[11px] text-accent hover:text-accent/80"
+          >
+            <FolderPlus className="w-3 h-3" /> {t("createFromFolder")}
           </button>
         </div>
       </div>
-
-      {/* draggable={false}: checklist rows and session chips must not start
-          a project reorder-drag (same DnD opt-out as the session strip). */}
-      {plans.length > 0 && (
-        <div className="mb-3 space-y-2" draggable={false}>
-          {plans.map((plan) => (
-            <PlanPanel
-              key={plan.cwd}
-              plan={plan}
-              items={plan.items}
-              onOpen={() => onOpenPlan([plan], sessions)}
-            />
-          ))}
+      {plan && (
+        <div className="mb-2">
+          <PlanPanel plan={plan} items={plan.items} onOpen={() => onOpenPlan(plan)} />
         </div>
       )}
-
-      {sessions.length === 0 ? (
-        <p className="text-xs text-gray-500 italic py-2">{t("noSessions")}</p>
-      ) : (
-        // draggable={false}: opts this subtree out of the card's own drag
-        // region (per the HTML5 DnD spec) so clicking through to a session
-        // card navigates normally instead of the whole project card
-        // hijacking the gesture into a reorder-drag.
-        <div className="flex gap-3 overflow-x-auto pb-2" draggable={false}>
+      {expanded && (
+        <div className="flex gap-3 overflow-x-auto pb-2">
           {sessions.map((session) => (
             <div key={session.id} className="w-72 flex-shrink-0">
               <SessionCard session={session} />
             </div>
           ))}
-          {overflowCount > 0 && (
-            <div className="w-40 flex-shrink-0 flex items-center justify-center text-xs text-gray-500 italic">
-              {t("moreSessions", { count: overflowCount })}
-            </div>
-          )}
         </div>
       )}
     </div>

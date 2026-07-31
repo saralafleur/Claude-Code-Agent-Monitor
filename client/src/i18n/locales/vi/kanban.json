@@ -20,6 +20,18 @@
   "showOldErrors": "Hiện tất cả lỗi",
   "hideInternal": "Ẩn phiên nội bộ (do bộ phân loại tiêu điểm nền của chính bảng điều khiển tạo ra, không phải do bạn)",
   "showInternal": "Hiện phiên nội bộ",
+  "openTerminalInProject": "Mở terminal trong dự án…",
+  "openTerminalPicker": {
+    "title": "Mở terminal trong dự án",
+    "back": "Quay lại",
+    "loading": "Đang tải danh sách dự án…",
+    "loadError": "Không thể tải danh sách dự án",
+    "noProjects": "Chưa có dự án nào",
+    "noFolders": "Không có thư mục nào được gán cho dự án này",
+    "folderCount_one": "{{count}} thư mục",
+    "folderCount_other": "{{count}} thư mục",
+    "error": "Không thể mở terminal mới"
+  },
   "copyLink": "Sao chép liên kết chia sẻ",
   "linkCopied": "Đã sao chép liên kết!",
   "noAgents": "Chưa có Agent được theo dõi",
@@ -47,7 +59,19 @@
     "lastMessageEmpty": "Không tìm thấy tin nhắn gần đây",
     "expensiveModel": "Đang chạy mô hình cao cấp (Opus/Fable) - chi phí mỗi token cao hơn",
     "focusTerminal": "Chuyển đến terminal",
-    "focusTerminalError": "Không thể chuyển đến terminal"
+    "focusTerminalError": "Không thể chuyển đến terminal",
+    "openTerminal": "Mở terminal mới tại đây",
+    "openTerminalError": "Không thể mở terminal mới",
+    "tokens": {
+      "in": "Vào",
+      "out": "Ra",
+      "cache": "Cache",
+      "total": "Tổng",
+      "inTooltip": "Tổng số token đầu vào (input) của phiên này",
+      "outTooltip": "Tổng số token đầu ra (output) được tạo ra trong phiên này",
+      "cacheTooltip": "Tổng số token cache (đọc + ghi) của phiên này",
+      "totalTooltip": "Tổng số token của phiên này (vào + ra + cache)"
+    }
   },
   "tooltip": {
     "agent": {
