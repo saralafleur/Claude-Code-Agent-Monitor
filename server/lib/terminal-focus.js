@@ -192,13 +192,15 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-/** Runs the bundled AppleScript with `shellCommand` as its sole argv element
- *  (never interpolated into the script source); Terminal.app then runs that
- *  command exactly as if it had been typed into a fresh window. Throws on
- *  automation failure (commonly a not-yet-granted macOS Automation
- *  permission) — callers catch and translate. */
-function runOpenTerminalScript(shellCommand) {
-  return execFileSync("osascript", [OPEN_APPLESCRIPT_PATH, shellCommand], {
+/** Runs the bundled AppleScript with `cdCommand` and `claudeCommand` as two
+ *  separate argv elements (never interpolated into the script source);
+ *  Terminal.app runs `cdCommand` in a fresh window, then submits
+ *  `claudeCommand` into that same tab as a distinct, second command —
+ *  rather than one chained `cd ... && claude` line. Throws on automation
+ *  failure (commonly a not-yet-granted macOS Automation permission) —
+ *  callers catch and translate. */
+function runOpenTerminalScript(cdCommand, claudeCommand) {
+  return execFileSync("osascript", [OPEN_APPLESCRIPT_PATH, cdCommand, claudeCommand], {
     encoding: "utf8",
     timeout: OSASCRIPT_TIMEOUT_MS,
   });
@@ -236,9 +238,10 @@ function openTerminalForCwd(cwd, name) {
   }
 
   const nameFlag = name ? ` -n ${exports.shellQuote(name)}` : "";
-  const shellCommand = `cd ${exports.shellQuote(cwd)} && claude${nameFlag}`;
+  const cdCommand = `cd ${exports.shellQuote(cwd)}`;
+  const claudeCommand = `claude${nameFlag}`;
   try {
-    exports.runOpenTerminalScript(shellCommand);
+    exports.runOpenTerminalScript(cdCommand, claudeCommand);
   } catch (err) {
     const detail = err && err.stderr ? String(err.stderr).trim() : err.message;
     return {

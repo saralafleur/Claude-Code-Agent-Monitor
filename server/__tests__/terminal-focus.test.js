@@ -276,14 +276,16 @@ describe("openTerminalForSession — full branching", () => {
     }
   });
 
-  it("passes a `cd <quoted cwd> && claude` command to the AppleScript runner", () => {
-    let seen;
-    terminalFocus.runOpenTerminalScript = (cmd) => {
-      seen = cmd;
+  it("passes the `cd <quoted cwd>` and `claude` commands to the AppleScript runner as two separate commands", () => {
+    let seenCd, seenClaude;
+    terminalFocus.runOpenTerminalScript = (cdCommand, claudeCommand) => {
+      seenCd = cdCommand;
+      seenClaude = claudeCommand;
       return "";
     };
     terminalFocus.openTerminalForSession({ cwd: "/repo/agent-monitor", source: "local" });
-    assert.equal(seen, "cd '/repo/agent-monitor' && claude");
+    assert.equal(seenCd, "cd '/repo/agent-monitor'");
+    assert.equal(seenClaude, "claude");
   });
 
   it("AUTOMATION_ERROR when the AppleScript invocation throws", () => {
