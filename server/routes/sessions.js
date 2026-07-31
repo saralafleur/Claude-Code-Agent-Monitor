@@ -355,6 +355,9 @@ router.get("/:id/stats", (req, res) => {
   // Per-turn context-size series (distinct from `tokens` above, which is a
   // lifetime cumulative total) — powers the "context over time" chart.
   const contextSeries = stmts.sessionContextSeries.all(sessionId);
+  // Cumulative running total (context + output tokens per turn, never
+  // decreasing) — powers the "token baggage" chart below it.
+  const tokenBaggageSeries = stmts.sessionTokenBaggageSeries.all(sessionId);
 
   // Aggregate agent counts by category
   const agentCounts = {
@@ -392,6 +395,7 @@ router.get("/:id/stats", (req, res) => {
     subagent_types: subagentTypes.filter((r) => r.subagent_type !== "compaction"),
     tokens,
     context_series: contextSeries,
+    token_baggage_series: tokenBaggageSeries,
   });
 });
 

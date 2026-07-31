@@ -640,6 +640,50 @@ function createOpenApiSpec() {
                 },
               },
             },
+            token_baggage_series: {
+              type: "array",
+              description:
+                "Cumulative running total of tokens consumed per turn, oldest first — each point's `tokens` is a running SUM of that turn's context_series value plus its own newly-generated output tokens. Unlike context_series, this is monotonic and never decreases across /compact or /clear. Rendered as a bar chart, bars getting taller faster means the active context is large enough that each turn is adding more tokens. Each point also carries that single turn's own, non-cumulative input_tokens/output_tokens/cache_read_tokens/cache_write_tokens — the components context_tokens and the running `tokens` total are built from — purely so the chart's hover tooltip can show a per-turn breakdown; they don't sum into anything themselves. All four are 0 for turns recorded before this breakdown was added.",
+              items: {
+                type: "object",
+                required: [
+                  "ts",
+                  "tokens",
+                  "input_tokens",
+                  "output_tokens",
+                  "cache_read_tokens",
+                  "cache_write_tokens",
+                ],
+                properties: {
+                  ts: {
+                    type: "string",
+                    format: "date-time",
+                    description: "Transcript timestamp of the turn.",
+                  },
+                  tokens: { type: "integer", minimum: 0 },
+                  input_tokens: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "That single turn's own input tokens (not cumulative).",
+                  },
+                  output_tokens: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "That single turn's own output tokens (not cumulative).",
+                  },
+                  cache_read_tokens: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "That single turn's own cache-read tokens (not cumulative).",
+                  },
+                  cache_write_tokens: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "That single turn's own cache-write tokens (not cumulative).",
+                  },
+                },
+              },
+            },
           },
         },
         SessionUpdateRequest: {

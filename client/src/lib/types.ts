@@ -2331,6 +2331,26 @@ export interface SessionStats {
    *  model on that call). Plotted over time this is a sawtooth: climbing
    *  during normal work, dropping sharply at each /compact or /clear. */
   context_series: Array<{ ts: string; tokens: number }>;
+  /** Cumulative running total of tokens consumed per turn, oldest first —
+   *  each point is a running sum of that turn's `context_series` value plus
+   *  its own newly-generated output tokens. Unlike `context_series`, this
+   *  never decreases across /compact or /clear. Plotted over time, a
+   *  steepening slope means the active context is large enough that each
+   *  turn is adding more tokens ("token baggage"). `input_tokens`,
+   *  `cache_read_tokens`, and `cache_write_tokens` are that single turn's OWN
+   *  (non-cumulative) components of `context_tokens` in `context_series`
+   *  above — carried alongside `tokens` purely so the chart's hover tooltip
+   *  can show a per-turn input/output/cached breakdown; they don't sum into
+   *  anything themselves. 0 for turns recorded before this breakdown was
+   *  added. */
+  token_baggage_series: Array<{
+    ts: string;
+    tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+  }>;
 }
 
 // ───── Workflow intelligence (events-derived) ─────

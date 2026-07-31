@@ -223,6 +223,19 @@ db.exec(`
     transcript_uuid TEXT NOT NULL,
     transcript_ts TEXT NOT NULL,
     context_tokens INTEGER NOT NULL DEFAULT 0,
+    -- This turn's own newly-generated output tokens (distinct from
+    -- context_tokens, which is what was SENT to the model). Powers the
+    -- "token baggage" cumulative series: unlike context_tokens, which resets
+    -- on /compact or /clear, baggage = running SUM(context_tokens +
+    -- output_tokens) and never decreases.
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    -- context_tokens' own components (input + cache_read + cache_write),
+    -- kept alongside it so the token-baggage chart's hover tooltip can show
+    -- a per-turn input/output/cached breakdown instead of just the total.
+    -- Not summed into anything cumulative themselves.
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     model TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     UNIQUE (session_id, transcript_uuid),
@@ -1212,6 +1225,39 @@ db.exec(`
   }
 }
 
+// Migrate: add output_tokens to context_snapshots (existing DBs predate the
+// "token baggage" cumulative chart, which needs each turn's own output
+// tokens alongside its context_tokens). Defaults to 0 for historical rows —
+// their baggage total simply won't include output tokens earned before the
+// upgrade, which is harmless since the series is a running sum going forward.
+try {
+  db.prepare("SELECT output_tokens FROM context_snapshots LIMIT 1").get();
+} catch {
+  db.prepare(
+    "ALTER TABLE context_snapshots ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0"
+  ).run();
+}
+
+// Migrate: add input_tokens/cache_read_tokens/cache_write_tokens to
+// context_snapshots (existing DBs predate the token-baggage hover tooltip's
+// per-turn input/output/cached breakdown). Defaults to 0 for historical rows
+// — their tooltip just won't have a breakdown for turns recorded before the
+// upgrade, which is harmless since context_tokens/output_tokens (the totals
+// actually driving the chart) are unaffected.
+try {
+  db.prepare("SELECT input_tokens FROM context_snapshots LIMIT 1").get();
+} catch {
+  db.prepare(
+    "ALTER TABLE context_snapshots ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0"
+  ).run();
+  db.prepare(
+    "ALTER TABLE context_snapshots ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0"
+  ).run();
+  db.prepare(
+    "ALTER TABLE context_snapshots ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0"
+  ).run();
+}
+
 // Migrate: add compaction baseline columns to token_usage.
 // When conversation compaction rewrites the JSONL, pre-compaction token counts
 // are lost from the transcript. Baselines preserve those counts so the effective
@@ -1779,14 +1825,31 @@ const stmts = {
   // transcript_uuid at write time, so re-ingesting the same turn is a no-op.
   insertContextSnapshot: db.prepare(`
     INSERT OR IGNORE INTO context_snapshots
-      (session_id, transcript_uuid, transcript_ts, context_tokens, model)
-    VALUES (?, ?, ?, ?, ?)
+      (session_id, transcript_uuid, transcript_ts, context_tokens, output_tokens,
+       input_tokens, cache_read_tokens, cache_write_tokens, model)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   sessionContextSeries: db.prepare(`
     SELECT transcript_ts as ts, context_tokens as tokens
     FROM context_snapshots
     WHERE session_id = ?
     ORDER BY transcript_ts ASC
+  `),
+  // Cumulative "token baggage" series for the chart below context-size-over-
+  // time: a running SUM of what each turn sent (context_tokens) plus what it
+  // generated (output_tokens). Unlike context_tokens alone, this never drops
+  // at /compact or /clear — it's a monotonic ledger, so a large active
+  // context shows up as a steepening slope rather than a sawtooth. Also
+  // surfaces that turn's own (non-cumulative) input/output/cache-read/
+  // cache-write tokens so the chart's hover tooltip can show a per-turn
+  // breakdown alongside the running total.
+  sessionTokenBaggageSeries: db.prepare(`
+    SELECT transcript_ts as ts,
+           SUM(context_tokens + output_tokens) OVER (ORDER BY transcript_ts ASC, id ASC) as tokens,
+           input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+    FROM context_snapshots
+    WHERE session_id = ?
+    ORDER BY transcript_ts ASC, id ASC
   `),
 
   // ── Alerting engine ───────────────────────────────────────────────────────

@@ -523,12 +523,21 @@ class TranscriptCache {
     accumulateBucket(state.tokensByModel[key], fields);
 
     // Overwrite (not accumulate) — append-only file, so the last one seen is
-    // the current context snapshot.
+    // the current context snapshot. outputTokens is this turn's own newly
+    // generated tokens, carried alongside contextTokens so the "token
+    // baggage" cumulative series can add both without re-deriving them later.
+    // The individual input/cacheRead/cacheWrite fields are also carried
+    // alongside the contextTokens total they sum to, purely so the token-
+    // baggage chart's hover tooltip can show a per-turn breakdown.
     state.lastUsage = {
       uuid: entry.uuid || null,
       timestamp: entry.timestamp || null,
       model,
       contextTokens: fields.input + fields.cacheRead + fields.cacheWrite,
+      outputTokens: fields.output,
+      inputTokens: fields.input,
+      cacheReadTokens: fields.cacheRead,
+      cacheWriteTokens: fields.cacheWrite,
     };
 
     if (msg.usage.service_tier) state.usageExtras.service_tiers.add(msg.usage.service_tier);

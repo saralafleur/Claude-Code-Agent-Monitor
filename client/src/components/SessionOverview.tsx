@@ -6,6 +6,8 @@
  * context-size-over-time sawtooth chart (live active context window per turn,
  * distinct from lifetime totals - flags when a session is getting expensive to
  * keep alive and whether a /compact or /clear actually brought it back down),
+ * a token-baggage bar chart (cumulative tokens consumed per turn, never resets,
+ * so bars getting taller faster flags a session burning tokens faster over time),
  * and a token flow strip. Live-refreshes on `new_event` (debounced) so counters
  * track the running session without spamming the backend.
  * @author Son Nguyen <hoangson091104@gmail.com>
@@ -74,6 +76,7 @@ import {
   Coins,
   Bot,
   Gauge,
+  Luggage,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -469,6 +472,14 @@ export function SessionOverview({ session, agents }: SessionOverviewProps) {
        *  back down. */}
       <ContextOverTimeChart series={stats.context_series} />
 
+      {/* Token baggage - a cumulative running total (context tokens + output
+       *  tokens per turn) plotted on the same time axis as the chart above.
+       *  Unlike context size, this never drops at /compact or /clear, so a
+       *  steepening slope is the "how fast are we burning tokens" signal:
+       *  it visibly climbs faster once the active context is large enough
+       *  that each turn resends/generates more. */}
+      <TokenBaggageChart series={stats.token_baggage_series} />
+
       {/* Token flow strip */}
       {totalTokens > 0 && (
         <div className="rounded-lg border border-surface-3 bg-surface-2/60 p-3.5">
@@ -855,6 +866,244 @@ function ContextOverTimeChart({ series }: { series: SessionStats["context_series
               {t.turns}
             </span>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Cumulative "token baggage" bar chart: a running total of tokens consumed
+ * per turn (context tokens sent + output tokens generated that turn),
+ * sharing the same time x-axis and tick-fraction constants as
+ * {@link ContextOverTimeChart} above it. Unlike that chart, this series
+ * never decreases — /compact and /clear shrink the ACTIVE context but don't
+ * undo tokens already spent — so the shape to watch for is bars getting
+ * taller faster: each turn adding a bigger chunk means the active context
+ * has gotten large enough to make every turn expensive. Hovering a bar shows
+ * that single turn's own (non-cumulative) input/output/cached breakdown
+ * alongside the running total. Renders nothing until there are at least two
+ * points to draw bars for.
+ */
+function TokenBaggageChart({ series }: { series: SessionStats["token_baggage_series"] }) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  const chart = useMemo(() => {
+    if (!series || series.length < 2) return null;
+    const points = series.map((p) => ({
+      ts: new Date(p.ts).getTime(),
+      tokens: p.tokens,
+      inputTokens: p.input_tokens,
+      outputTokens: p.output_tokens,
+      cacheTokens: p.cache_read_tokens + p.cache_write_tokens,
+    }));
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (!first || !last) return null;
+    const span = Math.max(1, last.ts - first.ts);
+    const maxTokens = Math.max(1, ...points.map((p) => p.tokens));
+    const coords = points.map((p, i) => ({
+      x: ((p.ts - first.ts) / span) * 100,
+      y: 100 - (p.tokens / maxTokens) * 100,
+      ts: p.ts,
+      tokens: p.tokens,
+      inputTokens: p.inputTokens,
+      outputTokens: p.outputTokens,
+      cacheTokens: p.cacheTokens,
+      turn: i + 1,
+    }));
+    const firstCoord = coords[0];
+    const lastCoord = coords[coords.length - 1];
+    if (!firstCoord || !lastCoord) return null;
+    // Bar width: a fraction of the average gap between consecutive points,
+    // clamped so a bursty run of closely-spaced turns doesn't produce
+    // hairline bars and a sparse one doesn't produce a single fat block.
+    const avgGap = coords.length > 1 ? 100 / (coords.length - 1) : 100;
+    const barWidth = Math.min(6, Math.max(0.8, avgGap * 0.6));
+    const sameDay = new Date(first.ts).toDateString() === new Date(last.ts).toDateString();
+    // Reuses the same tick-fraction constants as the context chart above -
+    // both charts share one time axis shape, so there's nothing chart-
+    // specific about where the gridlines fall.
+    const ticks = CONTEXT_TICK_FRACTIONS.map((f) => ({ x: f * 100, ts: first.ts + f * span }));
+    const yTicks = CONTEXT_Y_TICK_FRACTIONS.map((f) => ({
+      y: 100 - f * 100,
+      tokens: f * maxTokens,
+    }));
+    return { coords, barWidth, latest: lastCoord, ticks, yTicks, sameDay };
+  }, [series]);
+
+  if (!chart) return null;
+  const { coords, barWidth, latest, ticks, yTicks, sameDay } = chart;
+  const hovered = hoverIndex !== null ? coords[hoverIndex] : null;
+
+  const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const fraction = ((e.clientX - rect.left) / rect.width) * 100;
+    let closest = 0;
+    let closestDist = Infinity;
+    coords.forEach((c, i) => {
+      const dist = Math.abs(c.x - fraction);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = i;
+      }
+    });
+    setHoverIndex(closest);
+  };
+
+  return (
+    <div className="rounded-lg border border-surface-3 bg-surface-2/60 p-3.5 mb-5">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+          <Luggage className="w-3.5 h-3.5 text-amber-400" />
+          Token baggage
+        </h3>
+        <span className="text-[10px] font-mono text-gray-500">
+          {fmt(latest.tokens)} tokens carried
+        </span>
+      </div>
+      <div className="flex items-center gap-3 mb-3">
+        <span className="flex items-center gap-1 text-[9px] text-gray-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+          Cumulative tokens (never resets)
+        </span>
+      </div>
+      <div className="flex gap-1.5">
+        {/* Token-axis labels - see the matching column in ContextOverTimeChart
+         *  for why these are plain HTML, not SVG text. Wider than that
+         *  chart's column (w-10 vs w-8) since baggage routinely reaches
+         *  "12.4M" / "1.2B"-length labels, not just "200K". */}
+        <div className="relative w-10 h-24 flex-shrink-0">
+          {yTicks.map((t) => (
+            <span
+              key={t.y}
+              className="absolute right-0 text-[9px] text-gray-500 font-mono whitespace-nowrap"
+              style={{
+                top: `${t.y}%`,
+                transform:
+                  t.y === 0
+                    ? "translateY(-100%)"
+                    : t.y === 100
+                      ? "translateY(0%)"
+                      : "translateY(-50%)",
+              }}
+            >
+              {fmt(t.tokens)}
+            </span>
+          ))}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="relative h-24">
+            <svg
+              ref={svgRef}
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="w-full h-full"
+              onMouseMove={handleMove}
+              onMouseLeave={() => setHoverIndex(null)}
+            >
+              {ticks.map((t) => (
+                <line
+                  key={t.x}
+                  x1={t.x}
+                  x2={t.x}
+                  y1={0}
+                  y2={100}
+                  className="stroke-gray-500/10"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              {yTicks.map((t) => (
+                <line
+                  key={t.y}
+                  x1={0}
+                  x2={100}
+                  y1={t.y}
+                  y2={t.y}
+                  className="stroke-gray-500/10"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              {coords.map((c, i) => (
+                <rect
+                  key={c.ts}
+                  x={c.x - barWidth / 2}
+                  y={c.y}
+                  width={barWidth}
+                  height={Math.max(0, 100 - c.y)}
+                  className={i === hoverIndex ? "fill-amber-300" : "fill-amber-400/80"}
+                />
+              ))}
+              {hovered && (
+                <line
+                  x1={hovered.x}
+                  x2={hovered.x}
+                  y1={0}
+                  y2={100}
+                  className="stroke-gray-500/40"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+            </svg>
+            {hovered && (
+              <div
+                className="absolute -top-1 rounded-lg border border-border-light bg-[#0a0a12] px-2.5 py-1.5 text-[11px] text-gray-300 shadow-2xl pointer-events-none whitespace-nowrap"
+                style={{
+                  left: `${hovered.x}%`,
+                  transform: `translate(${
+                    hovered.x > 85 ? "-100%" : hovered.x < 15 ? "0%" : "-50%"
+                  }, -100%)`,
+                }}
+              >
+                <p className="font-semibold text-gray-100">{fmt(hovered.tokens)} tokens</p>
+                <p className="text-gray-500">Turn {hovered.turn}</p>
+                <p className="text-gray-500 mb-1.5">
+                  {formatDateTime(new Date(hovered.ts).toISOString())}
+                </p>
+                <div className="space-y-0.5 border-t border-border-light/50 pt-1.5">
+                  <p className="flex items-center justify-between gap-3">
+                    <span className="text-emerald-300">Input</span>
+                    <span className="font-mono text-gray-300">{fmt(hovered.inputTokens)}</span>
+                  </p>
+                  <p className="flex items-center justify-between gap-3">
+                    <span className="text-orange-300">Output</span>
+                    <span className="font-mono text-gray-300">{fmt(hovered.outputTokens)}</span>
+                  </p>
+                  <p className="flex items-center justify-between gap-3">
+                    <span className="text-sky-300">Cached</span>
+                    <span className="font-mono text-gray-300">{fmt(hovered.cacheTokens)}</span>
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* Time axis - same rendering rationale as ContextOverTimeChart's. */}
+          <div className="relative h-3.5 mt-1">
+            {ticks.map((t, i) => (
+              <span
+                key={t.x}
+                className="absolute text-[9px] text-gray-500 font-mono whitespace-nowrap"
+                style={{
+                  left: `${t.x}%`,
+                  transform:
+                    i === 0
+                      ? "translateX(0%)"
+                      : i === ticks.length - 1
+                        ? "translateX(-100%)"
+                        : "translateX(-50%)",
+                }}
+              >
+                {sameDay
+                  ? formatTime(new Date(t.ts).toISOString())
+                  : formatDateTime(new Date(t.ts).toISOString())}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </div>

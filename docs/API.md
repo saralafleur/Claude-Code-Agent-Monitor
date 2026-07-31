@@ -409,11 +409,39 @@ curl http://localhost:4820/api/sessions/sess_abc123/stats
     { "ts": "2026-04-26T18:59:03.000Z", "tokens": 4821 },
     { "ts": "2026-04-26T19:02:11.000Z", "tokens": 118400 },
     { "ts": "2026-04-26T19:05:47.000Z", "tokens": 6120 }
+  ],
+  "token_baggage_series": [
+    {
+      "ts": "2026-04-26T18:59:03.000Z",
+      "tokens": 4821,
+      "input_tokens": 42,
+      "output_tokens": 611,
+      "cache_read_tokens": 3920,
+      "cache_write_tokens": 248
+    },
+    {
+      "ts": "2026-04-26T19:02:11.000Z",
+      "tokens": 123954,
+      "input_tokens": 58,
+      "output_tokens": 4813,
+      "cache_read_tokens": 113400,
+      "cache_write_tokens": 861
+    },
+    {
+      "ts": "2026-04-26T19:05:47.000Z",
+      "tokens": 130890,
+      "input_tokens": 24,
+      "output_tokens": 3720,
+      "cache_read_tokens": 2376,
+      "cache_write_tokens": 0
+    }
   ]
 }
 ```
 
 `tokens` is a lifetime cumulative total across the whole session (used for cost). `context_series` is different: one point per transcript turn, oldest first, each the ACTIVE context size for that single turn (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens`) — not summed. Plotted over time it's a sawtooth that climbs during normal work and drops sharply at each `/compact` or `/clear`, which is what the Session Overview page's context-over-time chart renders. Empty until the session has at least one transcript-bearing hook event.
+
+`token_baggage_series` shares the same shape and the same per-turn points as `context_series`, but each `tokens` value is a running SUM of that turn's `context_series` value plus its own newly-generated output tokens — so, unlike `context_series`, it never decreases, even across a `/compact` or `/clear`. Plotted over time it's a monotonically climbing bar chart; bars getting taller faster means the active context has gotten large enough that each turn is adding more tokens. This is what the Session Overview page's "Token Baggage" chart (rendered directly below the context-over-time chart) renders. Each point also carries that single turn's OWN, non-cumulative `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` — the components `context_tokens` and the running `tokens` total are built from — purely so the chart's hover tooltip can show a per-turn input/output/cached breakdown; they aren't summed into anything themselves. All four are `0` for turns recorded before this breakdown was added (existing DBs migrate the new columns in with a `0` default).
 
 **Error Responses:**
 

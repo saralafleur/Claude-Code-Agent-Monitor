@@ -970,16 +970,22 @@ const processEvent = db.transaction((hookType, data) => {
 
       // Snapshot the current context size (one point-in-time reading of the
       // active context window, distinct from tokensByModel's lifetime total)
-      // for the "context over time" chart. Skipped when the turn has no uuid
-      // (nothing to dedup against) — dedup relies on the UNIQUE constraint,
-      // and SQLite never treats two NULLs as equal so a null uuid would insert
-      // a fresh row on every hook event instead of being ignored.
+      // for the "context over time" chart, plus this turn's own output
+      // tokens for the "token baggage" cumulative chart. Skipped when the
+      // turn has no uuid (nothing to dedup against) — dedup relies on the
+      // UNIQUE constraint, and SQLite never treats two NULLs as equal so a
+      // null uuid would insert a fresh row on every hook event instead of
+      // being ignored.
       if (lastUsage && lastUsage.uuid) {
         stmts.insertContextSnapshot.run(
           sessionId,
           lastUsage.uuid,
           lastUsage.timestamp || new Date().toISOString(),
           lastUsage.contextTokens,
+          lastUsage.outputTokens || 0,
+          lastUsage.inputTokens || 0,
+          lastUsage.cacheReadTokens || 0,
+          lastUsage.cacheWriteTokens || 0,
           lastUsage.model
         );
       }
