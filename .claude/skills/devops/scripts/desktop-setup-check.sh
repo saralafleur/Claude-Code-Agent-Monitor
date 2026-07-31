@@ -7,7 +7,18 @@
 
 setopt null_glob
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+SKILL_ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+PROJECT_ROOT="$SKILL_ROOT"
+
+# Prefer the worktree we're actually invoked from (e.g. an isolated
+# team-build effort worktree), not this skill's own checkout -- both share
+# the same git-common-dir, so compare that rather than trusting $PWD alone.
+if PWD_TOPLEVEL="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)"; then
+  PWD_COMMON="$(cd "$PWD" && cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
+  SKILL_COMMON="$(cd "$SKILL_ROOT" && cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
+  [ -n "$PWD_COMMON" ] && [ "$PWD_COMMON" = "$SKILL_COMMON" ] && PROJECT_ROOT="$PWD_TOPLEVEL"
+fi
+
 cd "$PROJECT_ROOT" || exit 0
 
 line() { printf '%-24s | %-8s | %s\n' "$1" "$2" "$3"; }
