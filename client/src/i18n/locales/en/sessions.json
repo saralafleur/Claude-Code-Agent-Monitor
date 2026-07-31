@@ -29,6 +29,8 @@
     "loading": "Loading session...",
     "notFound": "Session not found",
     "backToSessions": "Back to Sessions",
+    "copyId": "Copy session ID",
+    "idCopied": "Copied",
     "agents": "Agents",
     "noAgents": "No agents recorded.",
     "unparented": "Unparented Subagents",

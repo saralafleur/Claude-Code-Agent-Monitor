@@ -29,6 +29,8 @@
     "loading": "正在加载会话...",
     "notFound": "未找到会话",
     "backToSessions": "返回会话列表",
+    "copyId": "复制会话 ID",
+    "idCopied": "已复制",
     "agents": "Agent",
     "noAgents": "暂无Agent记录。",
     "unparented": "独立Subagent",

@@ -89,6 +89,7 @@ import {
   ClipboardList,
   Check,
   Circle,
+  Copy,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -192,6 +193,7 @@ export function SessionDetail() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [idCopied, setIdCopied] = useState(false);
 
   // Plan tab data. Live focus (banner + chips) comes from the shared
   // focusStore; the plan checklist, focus history, and TodoWrite micro-plan
@@ -296,6 +298,17 @@ export function SessionDetail() {
       setDeleting(false);
     }
   }, [id, navigate, t]);
+
+  const handleCopyId = useCallback(async () => {
+    if (!session) return;
+    try {
+      await navigator.clipboard.writeText(session.id);
+      setIdCopied(true);
+      setTimeout(() => setIdCopied(false), 1500);
+    } catch {
+      // Clipboard API can fail in insecure contexts - silently ignore.
+    }
+  }, [session]);
 
   // If this session gets deleted from elsewhere (Settings cleanup, another
   // tab, the CLI) while it's open here, don't leave the user staring at a
@@ -705,6 +718,15 @@ export function SessionDetail() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
             <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 font-mono bg-surface-2 px-2 py-1 rounded">
               {session.id.slice(0, 16)}
+              <button
+                type="button"
+                onClick={handleCopyId}
+                title={idCopied ? t("detail.idCopied") : t("detail.copyId")}
+                aria-label={idCopied ? t("detail.idCopied") : t("detail.copyId")}
+                className="text-gray-500 hover:text-gray-200 cursor-pointer"
+              >
+                {idCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+              </button>
             </span>
             {session.model && (
               <span className="inline-flex items-center gap-1.5 text-xs text-gray-400 bg-surface-2 px-2 py-1 rounded">

@@ -29,6 +29,8 @@
     "loading": "Đang tải phiên...",
     "notFound": "Không tìm thấy phiên",
     "backToSessions": "Quay lại danh sách phiên",
+    "copyId": "Sao chép ID phiên",
+    "idCopied": "Đã sao chép",
     "agents": "Agent",
     "noAgents": "Chưa có Agent được ghi nhận.",
     "unparented": "Subagent không có cha",

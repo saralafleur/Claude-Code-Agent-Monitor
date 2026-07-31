@@ -485,17 +485,14 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
             : ""
       }`}
     >
-      <div className="flex items-start justify-between gap-2 mb-3 min-w-0">
-        <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
+      <p className="text-sm font-medium text-gray-200 truncate mb-2">{title}</p>
+
+      <div className="flex items-center justify-between gap-2 mb-3 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
           <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 bg-accent/15 text-accent">
             <FolderOpen className="w-3.5 h-3.5" />
           </div>
-          <div className="min-w-0 overflow-hidden">
-            <p className="text-sm font-medium text-gray-200 truncate">{title}</p>
-            <p className="text-[11px] text-gray-500 font-mono truncate">
-              {session.id.slice(0, 12)}
-            </p>
-          </div>
+          <p className="text-[11px] text-gray-500 font-mono truncate">{session.id.slice(0, 12)}</p>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {/* compact: cards are narrow — inline reason chip would squeeze the
