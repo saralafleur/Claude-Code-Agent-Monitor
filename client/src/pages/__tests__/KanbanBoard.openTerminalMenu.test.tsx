@@ -1,13 +1,13 @@
 /**
  * @file KanbanBoard.openTerminalMenu.test.tsx
  * @description Tests the Kanban board header's "Open terminal in project…"
- * entry (in the same overflow "filters" menu as hide-completed/
- * hide-abandoned/etc.): reachable from any board view, not just Projects,
- * opens OpenTerminalModal's picker, and a single-folder project opens
- * directly through it via api.projects.openTerminal. OpenTerminalModal's
- * own picker mechanics (multi-folder drill-in, error/success feedback) are
- * covered by its own test file — this one only proves the menu entry wires
- * up to the modal correctly.
+ * button (a standalone icon button next to the copy-link button, no longer
+ * nested in the overflow "filters" menu): reachable from any board view, not
+ * just Projects, opens OpenTerminalModal's picker, and a single-folder
+ * project opens directly through it via api.projects.openTerminal.
+ * OpenTerminalModal's own picker mechanics (multi-folder drill-in,
+ * error/success feedback) are covered by its own test file — this one only
+ * proves the button wires up to the modal correctly.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -75,7 +75,7 @@ function renderPage() {
   );
 }
 
-describe("Kanban Board - Open terminal in project menu entry", () => {
+describe("Kanban Board - Open terminal in project button", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     try {
@@ -91,7 +91,7 @@ describe("Kanban Board - Open terminal in project menu entry", () => {
     });
   });
 
-  it("is reachable from the Agents view's filters menu and opens the picker", async () => {
+  it("is reachable from the Agents view's header and opens the picker", async () => {
     renderPage();
     // Waits for the load to fully settle (not just for the mock to have been
     // called) before interacting - React 18 can interleave a still-in-flight
@@ -99,8 +99,7 @@ describe("Kanban Board - Open terminal in project menu entry", () => {
     // "was it called" wait can race an in-progress commit.
     await screen.findByText("No agents tracked yet");
 
-    fireEvent.click(screen.getByTitle("Filters"));
-    fireEvent.click(screen.getByText("Open terminal in project…"));
+    fireEvent.click(screen.getByTitle("Open terminal in project…"));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
@@ -115,8 +114,7 @@ describe("Kanban Board - Open terminal in project menu entry", () => {
     // "was it called" wait can race an in-progress commit.
     await screen.findByText("No agents tracked yet");
 
-    fireEvent.click(screen.getByTitle("Filters"));
-    fireEvent.click(screen.getByText("Open terminal in project…"));
+    fireEvent.click(screen.getByTitle("Open terminal in project…"));
 
     await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Agent Monitor"));
@@ -124,7 +122,7 @@ describe("Kanban Board - Open terminal in project menu entry", () => {
     expect(openTerminalMock).toHaveBeenCalledWith("proj-1", "/repo/agent-monitor");
   });
 
-  it("closes the filters menu when the entry is clicked", async () => {
+  it("does not affect the separate filters menu when clicked", async () => {
     renderPage();
     // Waits for the load to fully settle (not just for the mock to have been
     // called) before interacting - React 18 can interleave a still-in-flight
@@ -134,17 +132,17 @@ describe("Kanban Board - Open terminal in project menu entry", () => {
 
     fireEvent.click(screen.getByTitle("Filters"));
     expect(screen.getByRole("menuitem", { name: "Hide completed" })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Open terminal in project…"));
+    fireEvent.click(screen.getByTitle("Open terminal in project…"));
 
-    expect(screen.queryByRole("menuitem", { name: "Hide completed" })).not.toBeInTheDocument();
+    // The terminal button lives outside the filters menu now, so opening the
+    // picker should not touch the filters menu's own open/closed state.
+    expect(screen.getByRole("menuitem", { name: "Hide completed" })).toBeInTheDocument();
   });
 
   // A non-empty board takes a DIFFERENT return branch than the other tests
   // here (KanbanBoard early-returns a dedicated empty-state tree when
   // `total === 0`, which is what those tests exercise) - guards against a
-  // regression where the picker modal is wired into only one of the two
-  // branches (exactly what shipped first: the empty-state branch reused
-  // `Header`, so the menu entry and click handler both fired, but the modal
+  // regression where the button and click handler both fired, but the modal
   // itself lived only in the other branch and never rendered).
   it("is also reachable when the board has agents (the non-empty-state branch)", async () => {
     agentsListMock.mockImplementation((params?: { status?: string }) =>
@@ -155,8 +153,7 @@ describe("Kanban Board - Open terminal in project menu entry", () => {
     renderPage();
     await screen.findByText("Worker");
 
-    fireEvent.click(screen.getByTitle("Filters"));
-    fireEvent.click(screen.getByText("Open terminal in project…"));
+    fireEvent.click(screen.getByTitle("Open terminal in project…"));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());

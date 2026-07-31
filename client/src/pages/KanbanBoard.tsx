@@ -1153,22 +1153,17 @@ export function KanbanBoard() {
                   {hideInternal ? t("showInternal") : t("hideInternal")}
                 </span>
               </button>
-              <div className="my-1 border-t border-border" />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setFiltersOpen(false);
-                  setOpenTerminalPickerOpen(true);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-300 hover:bg-surface-4 transition-colors duration-150"
-              >
-                <SquareTerminal className="w-4 h-4 flex-shrink-0" />
-                <span className="truncate">{t("openTerminalInProject")}</span>
-              </button>
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={() => setOpenTerminalPickerOpen(true)}
+          title={t("openTerminalInProject")}
+          className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-border text-gray-400 hover:text-gray-200 hover:bg-surface-4 transition-colors duration-150 flex-shrink-0"
+        >
+          <SquareTerminal className="w-4 h-4" />
+        </button>
         <CopyLinkButton />
         <button onClick={load} className="btn-ghost flex-shrink-0">
           <RefreshCw className="w-4 h-4" /> {t("common:refresh")}
@@ -1193,11 +1188,11 @@ export function KanbanBoard() {
             }
           />
         </div>
-        {/* `Header`'s filters menu (including "Open terminal in project…") is
-            reachable even in this empty-board state, so its picker modal has
-            to be reachable from here too - the openPlan/openReport popups
-            don't need the same treatment since nothing in this branch can
-            open them (there are no columns to click). */}
+        {/* `Header`'s "Open terminal in project…" button is reachable even in
+            this empty-board state, so its picker modal has to be reachable
+            from here too - the openPlan/openReport popups don't need the
+            same treatment since nothing in this branch can open them (there
+            are no columns to click). */}
         {openTerminalPickerOpen && (
           <OpenTerminalModal onClose={() => setOpenTerminalPickerOpen(false)} />
         )}

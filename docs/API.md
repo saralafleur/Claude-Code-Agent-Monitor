@@ -1427,7 +1427,7 @@ Each session entry carries `ended_at` (`null` while still active/waiting) straig
 POST /api/projects/:id/open-terminal
 ```
 
-macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the Kanban board's "Open terminal in project…" picker (in the header's filters menu, reachable from any view): picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first.
+macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view): picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first.
 
 **Path Parameters:**
 
