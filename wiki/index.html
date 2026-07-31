@@ -932,16 +932,21 @@
                   <p>
                     Groups sessions by the folder(s) they run from into a user-named
                     <strong>project</strong>, replacing the flat Agents/Sessions view with one
-                    grouped by where the work actually happens. A project claims one or more
-                    working directories — a folder belongs to at most one project — and
-                    membership is derived by joining each session's <code>cwd</code> against the
-                    project's mapped folders, with no schema change on <code>sessions</code>
-                    itself. Each project renders as a horizontally scrollable row of its
-                    sessions, with an aggregated session count, active count, and last-activity
-                    badge computed server-side. Create a project (optionally from an existing
-                    folder), rename it inline, add or remove folder mappings, or delete it —
-                    sessions are never deleted, they simply fall back to the
-                    <strong>Unassigned</strong> bucket.
+                    grouped by where the work actually happens. Projects list as a compact table
+                    — one row per project with its name, session count, active count,
+                    last-activity, and quick plan/report/delete actions, drag-reorderable on the
+                    row — instead of a full card each, so a machine with many projects doesn't
+                    turn into a long vertical scroll. A project claims one or more working
+                    directories — a folder belongs to at most one project — and membership is
+                    derived by joining each session's <code>cwd</code> against the project's
+                    mapped folders, with no schema change on <code>sessions</code> itself. Each
+                    row expands via a chevron (collapsed by default) to reveal its folder
+                    mappings, any AGENT-PLAN.md checklist, and its sessions rendered as a
+                    horizontally scrollable row of session cards — the same collapsed-by-default
+                    treatment applies to each folder inside Unassigned. Create a project
+                    (optionally from an existing folder), rename it inline, add or remove folder
+                    mappings, or delete it — sessions are never deleted, they simply fall back to
+                    the <strong>Unassigned</strong> bucket.
                   </p>
                 </div>
                 <div class="feature-card">
@@ -955,7 +960,9 @@
                     any column header for lifecycle tooltips explaining each state transition.
                     Cards surface model name, cumulative cost, and the current tool being called.
                     The model chip renders in <strong>bright red</strong> for premium/expensive
-                    models — Opus or Fable — flagging cost-heavy sessions at a glance.
+                    models — Opus or Fable — flagging cost-heavy sessions at a glance. Session
+                    cards also show a compact <strong>input / output / cache</strong> token strip
+                    with a running total, once the session has used any tokens.
                     Counts update in real time via WebSocket so the board is always in sync with
                     the live event store. Hover a Waiting badge to see why — needs input, turn done, at prompt, or interrupted.
                     A third <strong>Projects</strong> view groups sessions by project instead of status; once at
@@ -1677,7 +1684,7 @@
             </div>
             <div class="screenshot-card">
               <img src="../images/board-sessions.png" alt="Kanban Board — Sessions view" width="100%" loading="lazy" decoding="async" />
-              <div class="screenshot-caption"><span class="caption-icon">🗂️</span> <span><strong>Kanban Board (sessions)</strong> — sessions swim-laned across 5 columns: Active, Waiting, Completed, Error, Abandoned. Each card shows agent count, duration, model, and cumulative cost</span></div>
+              <div class="screenshot-caption"><span class="caption-icon">🗂️</span> <span><strong>Kanban Board (sessions)</strong> — sessions swim-laned across 5 columns: Active, Waiting, Completed, Error, Abandoned. Each card shows agent count, duration, model, cumulative cost, and a compact input/output/cache token strip</span></div>
             </div>
             <div class="screenshot-card" id="ss-sessions">
               <img src="../images/sessions.png" alt="Sessions Overview" width="100%" loading="lazy" decoding="async" />
@@ -7196,7 +7203,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=64" defer></script>
+    <script src="i18n-content.js?v=67" defer></script>
     <script src="script.js?v=33" defer></script>
     <script>
       (function () {
