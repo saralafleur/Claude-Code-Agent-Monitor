@@ -964,11 +964,46 @@ function TokenBaggageChart({ series }: { series: SessionStats["token_baggage_ser
           {fmt(latest.tokens)} tokens carried
         </span>
       </div>
-      <div className="flex items-center gap-3 mb-3">
-        <span className="flex items-center gap-1 text-[9px] text-gray-500">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-          Cumulative tokens (never resets)
-        </span>
+      <div className="mt-2 mb-3 rounded-lg border border-surface-3 bg-surface-3/30 px-4 py-3.5">
+        <p className="text-xs text-gray-300 leading-relaxed mb-3">
+          Every turn sends the model three kinds of tokens:
+        </p>
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-3 items-baseline">
+          <span className="inline-flex justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+            Input
+          </span>
+          <p className="text-sm leading-relaxed text-gray-300">
+            Brand-new content the model has never seen before and must fully read this turn.
+          </p>
+
+          <span className="inline-flex justify-center rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-300">
+            Cached
+          </span>
+          <p className="text-sm leading-relaxed text-gray-300">
+            The same conversation history as earlier turns, replayed from Claude&apos;s prompt cache
+            instead of being reprocessed from scratch — far cheaper than a fresh read.
+          </p>
+
+          <span className="inline-flex justify-center rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-orange-300">
+            Output
+          </span>
+          <p className="text-sm leading-relaxed text-gray-300">
+            What the model generates in its reply.
+          </p>
+        </div>
+        <div className="mt-3.5 pt-3 border-t border-surface-3/70 space-y-2">
+          <p className="text-xs leading-relaxed text-gray-500">
+            As a session grows, most of the context stops changing turn to turn, so it gets served
+            from cache: Input often shrinks to just the newest few tokens while Cached grows to
+            match the whole context — a tiny Input next to a huge Cached number means caching is
+            working well, not missing data.
+          </p>
+          <p className="text-xs leading-relaxed text-gray-500">
+            The bar height below is the running total of Input + Cached + Output across every turn
+            so far. It only grows — even after /compact or /clear shrink the active context, those
+            tokens were already spent and stay counted.
+          </p>
+        </div>
       </div>
       <div className="flex gap-1.5">
         {/* Token-axis labels - see the matching column in ContextOverTimeChart
