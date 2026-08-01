@@ -1,0 +1,186 @@
+/**
+ * @file accounts.js
+ * @description Express router for named Claude accounts used by the
+ * multi-account Usage feature — each account just points at a
+ * `CLAUDE_CONFIG_DIR` the user has already run `claude login` into (see
+ * server/lib/claude-cli-credentials.js). No secret is ever stored or
+ * accepted here: `POST /:id/capture` reads that account's OAuth credential
+ * live from the OS keychain (or, on Linux, a file) at request time, uses it
+ * to fetch usage via server/lib/usage-fetch-oauth.js, and persists the
+ * result into the existing `usage_captures` table scoped by `account_id`.
+ *
+ *   GET    /api/accounts             — list accounts + each one's latest known %s
+ *   POST   /api/accounts             — add an account { label, configDir }
+ *   DELETE /api/accounts/:id         — remove an account (capture history kept)
+ *   POST   /api/accounts/:id/capture — fetch + persist a fresh capture for one account
+ *
+ * Security model: same loopback-Origin guard as `/api/usage` and `/api/run`
+ * — `/:id/capture` makes a real outbound network call using a live OAuth
+ * token, so it must not be drive-by triggerable from an arbitrary webpage
+ * (see server/lib/origin-guard.js).
+ *
+ * @author Son Nguyen <hoangson091104@gmail.com>
+ */
+
+const { Router } = require("express");
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
+const { stmts } = require("../db");
+const { sameOriginGuard } = require("../lib/origin-guard");
+const claudeCliCredentials = require("../lib/claude-cli-credentials");
+const usageFetchOauth = require("../lib/usage-fetch-oauth");
+const usageCapturesDb = require("../lib/usage-captures-db");
+
+const router = Router();
+
+router.use(sameOriginGuard);
+
+function serialize(row) {
+  const latest = usageCapturesDb.listCaptures({ accountId: row.id, limit: 1 })[0] || null;
+  return {
+    id: row.id,
+    label: row.label,
+    config_dir: row.config_dir,
+    account_email: row.account_email,
+    account_org: row.account_org,
+    enabled: !!row.enabled,
+    status: row.status,
+    last_error: row.last_error,
+    last_capture_id: row.last_capture_id,
+    last_capture_at: row.last_capture_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    latest_session_window_pct: latest?.session_window_pct ?? null,
+    latest_session_window_reset_raw: latest?.session_window_reset_raw ?? null,
+    latest_week_window_pct: latest?.week_window_pct ?? null,
+    latest_week_reset_raw: latest?.week_reset_raw ?? null,
+  };
+}
+
+/** Human-readable fallback for a credential status that has no explicit message. */
+function describeCredentialStatus(status, configDir) {
+  if (status === "not_found") {
+    return `No Claude CLI login found for ${configDir}. Run 'CLAUDE_CONFIG_DIR=${configDir} claude' once to log in.`;
+  }
+  if (status === "expired") {
+    return `Access token expired. Run 'CLAUDE_CONFIG_DIR=${configDir} claude' once to refresh this profile's login.`;
+  }
+  return `Stored credential for ${configDir} looks invalid.`;
+}
+
+// GET / — list all accounts with their latest known usage percentages.
+router.get("/", (_req, res) => {
+  const rows = stmts.listAccounts.all();
+  res.json({ accounts: rows.map(serialize) });
+});
+
+// POST / — add an account. Validates configDir is a real, existing directory;
+// does not require a valid login yet (that's discoverable via /:id/capture).
+router.post("/", (req, res) => {
+  const body = req.body || {};
+  const label = typeof body.label === "string" ? body.label.trim() : "";
+  const configDirInput = typeof body.configDir === "string" ? body.configDir.trim() : "";
+
+  if (!label) {
+    return res.status(400).json({ error: { code: "EBADLABEL", message: "label is required" } });
+  }
+  if (!configDirInput) {
+    return res
+      .status(400)
+      .json({ error: { code: "EBADCONFIGDIR", message: "configDir is required" } });
+  }
+
+  const absConfigDir = path.resolve(os.homedir(), configDirInput);
+  let stat;
+  try {
+    stat = fs.statSync(absConfigDir);
+  } catch {
+    return res.status(400).json({
+      error: { code: "ENOCONFIGDIR", message: `${configDirInput} does not exist` },
+    });
+  }
+  if (!stat.isDirectory()) {
+    return res.status(400).json({
+      error: { code: "ENOTADIR", message: `${configDirInput} is not a directory` },
+    });
+  }
+
+  if (stmts.getAccountByConfigDir.get(absConfigDir)) {
+    return res.status(409).json({
+      error: { code: "EDUPLICATE", message: "An account for this config dir already exists" },
+    });
+  }
+
+  const id = `acct_${crypto.randomBytes(6).toString("hex")}`;
+  stmts.insertAccount.run(id, label, absConfigDir, 1);
+  res.status(201).json({ account: serialize(stmts.getAccount.get(id)) });
+});
+
+// DELETE /:id — remove the account. Its past captures keep their (now
+// orphaned) account_id, same as remote_sources deletion leaving sessions alone.
+router.delete("/:id", (req, res) => {
+  const existing = stmts.getAccount.get(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: { code: "ENOTFOUND", message: "account not found" } });
+  }
+  stmts.deleteAccount.run(req.params.id);
+  res.json({ ok: true });
+});
+
+/**
+ * Trigger a fresh capture for one account: read its OAuth credential live
+ * (never stored by this app), and if usable, fetch usage and persist a
+ * usage_captures row. If the credential isn't usable (no login yet, expired,
+ * or an unreadable/invalid stored credential), that's an expected, actionable
+ * state — reported as 200, not a 500 — since nothing on this server is broken.
+ */
+router.post("/:id/capture", async (req, res) => {
+  const account = stmts.getAccount.get(req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: { code: "ENOTFOUND", message: "account not found" } });
+  }
+
+  const cred = await claudeCliCredentials.readCredential(account.config_dir);
+
+  if (cred.status !== "ok") {
+    const accountStatus = cred.status === "invalid" ? "error" : "needs_login";
+    const message = cred.message || describeCredentialStatus(cred.status, account.config_dir);
+    stmts.setAccountCredentialStatus.run(accountStatus, message, account.id);
+    return res.status(200).json({
+      account: serialize(stmts.getAccount.get(account.id)),
+      status: cred.status,
+      message,
+    });
+  }
+
+  const usage = await usageFetchOauth.fetchUsageViaOAuth(cred.accessToken);
+  const capture = usageCapturesDb.recordCapture({
+    cwd: account.config_dir,
+    status: usage.status === "ok" ? "ok" : "error",
+    errorMessage: usage.errorMessage,
+    accountId: account.id,
+    accountEmail: cred.accountEmail,
+    accountOrg: cred.accountOrg,
+    sessionWindowPct: usage.sessionWindowPct,
+    sessionWindowResetRaw: usage.sessionWindowResetRaw,
+    weekWindowPct: usage.weekWindowPct,
+    weekResetRaw: usage.weekResetRaw,
+  });
+
+  stmts.setAccountCaptureResult.run(
+    usage.status === "ok" ? "ok" : "error",
+    usage.status === "ok" ? null : usage.errorMessage,
+    capture.id,
+    capture.captured_at,
+    cred.accountEmail,
+    cred.accountOrg,
+    account.id
+  );
+
+  return res.status(201).json(capture);
+});
+
+module.exports = router;

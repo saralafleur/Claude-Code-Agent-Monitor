@@ -1,6 +1,6 @@
 /**
  * @file Sidebar.tsx
- * @description Defines the Sidebar component that provides navigation links to different sections of the application, displays the connection status, and includes a toggle button for collapsing or expanding the sidebar. The component uses React Router's NavLink for navigation and Lucide icons for visual representation. The collapsed state of the sidebar is stored in localStorage to persist user preferences across sessions.
+ * @description Defines the Sidebar component that provides navigation links to different sections of the application, displays the connection status, and includes a toggle button for collapsing or expanding the sidebar. The component uses React Router's NavLink for navigation and Lucide icons for visual representation. The collapsed state of the sidebar is stored in localStorage to persist user preferences across sessions. The Projects nav row also carries a "new session" icon button (expanded state only) that opens the shared OpenTerminalModal project/session picker, mirroring the Kanban board's own entry point to it.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -85,35 +85,47 @@ import {
   ChevronDown,
   CalendarDays,
   Focus,
+  SquareTerminal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
 import { DevBuildSiteCard } from "./DevBuildSiteCard";
+import { OpenTerminalModal } from "./OpenTerminalModal";
 import type { UpdateStatusPayload, WSMessage } from "../lib/types";
 
 function isUpdatePayload(x: unknown): x is UpdateStatusPayload {
   return typeof x === "object" && x !== null && "git_repo" in x && "update_available" in x;
 }
 
-const NAV_KEYS = [
-  { to: "/", icon: LayoutDashboard, key: "nav:dashboard" },
-  { to: "/projects", icon: FolderKanban, key: "nav:projects" },
-  // Right after Projects, per DEC-5 (decisions.md) - corrected from the
-  // original draft's after-Kanban placement.
-  { to: "/focus-calendar", icon: CalendarDays, key: "nav:focusCalendar" },
-  // Right after Calendar - the stakeholder-readable "what did we actually
-  // do" report sibling to the swimlane calendar view.
-  { to: "/focus", icon: Focus, key: "nav:focus" },
-  { to: "/kanban", icon: Columns3, key: "nav:agentBoard" },
-  { to: "/sessions", icon: FolderOpen, key: "nav:sessions" },
-  { to: "/activity", icon: Activity, key: "nav:activityFeed" },
-  { to: "/analytics", icon: BarChart3, key: "nav:analytics" },
-  { to: "/workflows", icon: Workflow, key: "nav:workflows" },
-  { to: "/usage", icon: Gauge, key: "nav:usage" },
-  { to: "/cc-config", icon: Boxes, key: "nav:ccConfig" },
-  { to: "/run", icon: Play, key: "nav:run" },
-  { to: "/settings", icon: Settings, key: "nav:settings" },
+// Grouped so the sidebar can render a divider between them: the built-in
+// Agent Monitor surface (dashboard), our own additions (project/focus
+// tracking + usage), and the rest of the built-in surface. Keeps "our
+// additions" visually distinct without reordering within each group.
+const NAV_GROUPS = [
+  [{ to: "/", icon: LayoutDashboard, key: "nav:dashboard" }],
+  [
+    { to: "/projects", icon: FolderKanban, key: "nav:projects" },
+    // Right after Projects, per DEC-5 (decisions.md) - corrected from the
+    // original draft's after-Kanban placement.
+    { to: "/focus-calendar", icon: CalendarDays, key: "nav:focusCalendar" },
+    // Right after Calendar - the stakeholder-readable "what did we actually
+    // do" report sibling to the swimlane calendar view.
+    { to: "/focus", icon: Focus, key: "nav:focus" },
+    // Grouped with Projects/Calendar/Focus rather than left near Workflows -
+    // all four are our additions on top of the original nav surface.
+    { to: "/usage", icon: Gauge, key: "nav:usage" },
+  ],
+  [
+    { to: "/kanban", icon: Columns3, key: "nav:agentBoard" },
+    { to: "/sessions", icon: FolderOpen, key: "nav:sessions" },
+    { to: "/activity", icon: Activity, key: "nav:activityFeed" },
+    { to: "/analytics", icon: BarChart3, key: "nav:analytics" },
+    { to: "/workflows", icon: Workflow, key: "nav:workflows" },
+    { to: "/cc-config", icon: Boxes, key: "nav:ccConfig" },
+    { to: "/run", icon: Play, key: "nav:run" },
+    { to: "/settings", icon: Settings, key: "nav:settings" },
+  ],
 ] as const;
 
 const STORAGE_KEY = "sidebar-collapsed";
@@ -205,6 +217,10 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  // Project→session picker, reachable from the Projects nav row - same
+  // OpenTerminalModal the Kanban board's header button opens, just a second
+  // entry point so it's available without leaving the sidebar.
+  const [openTerminalPickerOpen, setOpenTerminalPickerOpen] = useState(false);
   const [connectedSince, setConnectedSince] = useState<number | null>(
     wsConnected ? Date.now() : null
   );
@@ -435,29 +451,58 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
           user knows there's more to reach without inspecting the scrollbar. */}
       <div className="flex-1 min-h-0 relative flex">
         <nav ref={navRef} className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-3 space-y-1">
-          {NAV_KEYS.map(({ to, icon: Icon, key }) => {
-            const label = t(key);
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === "/"}
-                title={collapsed ? label : undefined}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg text-sm font-medium transition-colors duration-150 ${
-                    collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5"
-                  } ${
-                    isActive
-                      ? "bg-accent/10 text-accent border border-accent/20"
-                      : "text-gray-400 hover:text-gray-200 hover:bg-surface-3 border border-transparent"
-                  }`
+          {NAV_GROUPS.map((group, groupIndex) => (
+            <div
+              key={groupIndex}
+              className={`space-y-1 ${groupIndex > 0 ? "pt-2 mt-1 border-t border-border" : ""}`}
+            >
+              {group.map(({ to, icon: Icon, key }) => {
+                const label = t(key);
+                const navLink = (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={to === "/"}
+                    title={collapsed ? label : undefined}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-lg text-sm font-medium transition-colors duration-150 ${
+                        collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5"
+                      } ${
+                        isActive
+                          ? "bg-accent/10 text-accent border border-accent/20"
+                          : "text-gray-400 hover:text-gray-200 hover:bg-surface-3 border border-transparent"
+                      }`
+                    }
+                  >
+                    <Icon className="w-4 h-4 flex-shrink-0" />
+                    {!collapsed && <span>{label}</span>}
+                  </NavLink>
+                );
+                // Second entry point for the project → session picker
+                // (OpenTerminalModal), right of the Projects row itself -
+                // only when expanded, matching every other secondary
+                // sidebar control (scroll chevrons, language grid, footer
+                // links) which are hidden while collapsed for space.
+                if (to === "/projects" && !collapsed) {
+                  return (
+                    <div key={to} className="flex items-center gap-1.5">
+                      <div className="flex-1 min-w-0">{navLink}</div>
+                      <button
+                        type="button"
+                        onClick={() => setOpenTerminalPickerOpen(true)}
+                        title={t("nav:newSession")}
+                        aria-label={t("nav:newSession")}
+                        className="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg border border-transparent text-gray-500 hover:text-gray-200 hover:bg-surface-3 transition-colors duration-150"
+                      >
+                        <SquareTerminal className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
                 }
-              >
-                <Icon className="w-4 h-4 flex-shrink-0" />
-                {!collapsed && <span>{label}</span>}
-              </NavLink>
-            );
-          })}
+                return navLink;
+              })}
+            </div>
+          ))}
         </nav>
         {!collapsed && navOverflow.up && (
           <button
@@ -720,6 +765,10 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
           }
         }}
       />
+
+      {openTerminalPickerOpen && (
+        <OpenTerminalModal onClose={() => setOpenTerminalPickerOpen(false)} />
+      )}
     </aside>
   );
 }

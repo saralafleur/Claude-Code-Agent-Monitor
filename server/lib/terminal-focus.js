@@ -24,6 +24,12 @@ const APPLESCRIPT_PATH = path.join(__dirname, "scripts", "focus-terminal-tab.app
 const OPEN_APPLESCRIPT_PATH = path.join(__dirname, "scripts", "open-terminal-session.applescript");
 const PS_TIMEOUT_MS = 5_000;
 const OSASCRIPT_TIMEOUT_MS = 5_000;
+// Longer than OSASCRIPT_TIMEOUT_MS: open-terminal-session.applescript can
+// itself wait out a cold Terminal.app launch (up to 1s) plus a slow shell
+// startup before submitting `claude` (up to 4s) as race guards - see that
+// script's header comment. This timeout just needs to outlast both plus
+// normal automation overhead.
+const OPEN_TERMINAL_TIMEOUT_MS = 8_000;
 
 /**
  * Snapshot of every live process as `{pid: {ppid, args}}`, or null if `ps`
@@ -202,7 +208,7 @@ function shellQuote(s) {
 function runOpenTerminalScript(cdCommand, claudeCommand) {
   return execFileSync("osascript", [OPEN_APPLESCRIPT_PATH, cdCommand, claudeCommand], {
     encoding: "utf8",
-    timeout: OSASCRIPT_TIMEOUT_MS,
+    timeout: OPEN_TERMINAL_TIMEOUT_MS,
   });
 }
 

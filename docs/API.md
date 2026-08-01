@@ -1463,7 +1463,7 @@ Each session entry carries `ended_at` (`null` while still active/waiting) straig
 POST /api/projects/:id/open-terminal
 ```
 
-macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view): picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first. The top-level project list itself (`client/src/components/OpenTerminalModal.tsx`) is sorted client-side: once more than 3 projects exist and at least one has session history, a "Most used" section promotes the top 3 by `session_count` (ties broken alphabetically) above an "All projects" section holding the rest in the server's alphabetical order; with 3 or fewer projects, or none used yet, it's shown as one plain alphabetical list. The same picker also carries an optional effort-name field across the project/folder navigation, mirroring `POST /api/sessions/:id/open-terminal`'s `name` body param below.
+macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the shared `client/src/components/OpenTerminalModal.tsx` project/session picker, reachable from two places: the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view) and the sidebar's "New session…" icon button next to the Projects nav row (expanded sidebar only). Either entry point opens the same picker: picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first. The top-level project list itself is sorted client-side: once more than 3 projects exist and at least one has session history, a "Most used" section promotes the top 3 by `session_count` (ties broken alphabetically) above an "All projects" section holding the rest in the server's alphabetical order; with 3 or fewer projects, or none used yet, it's shown as one plain alphabetical list. The same picker also carries an optional effort-name field across the project/folder navigation, mirroring `POST /api/sessions/:id/open-terminal`'s `name` body param below.
 
 **Path Parameters:**
 
@@ -1666,7 +1666,7 @@ Spawned `claude` processes fire the dashboard's hooks like any other CLI session
 The `/api/usage/*` namespace captures the current Claude account's rate-limit standing by driving the `claude` CLI's own `/status` and `/usage` TUI panels inside a detached tmux session and persisting the parsed result (`usage_captures` table). Same same-origin guard as `/api/run` (shared via `server/lib/origin-guard.js`).
 
 ```http
-GET    /api/usage                     Capture history, newest first — ?limit= (default 50, max 500); also returns { capturing }
+GET    /api/usage[?accountId=]        Capture history, newest first — ?limit= (default 50, max 500), ?accountId= scopes to one named account; also returns { capturing }
 GET    /api/usage/:id                 One capture's full row, incl. raw captured /status and /usage pane text
 POST   /api/usage/capture             Launch claude in tmux, drive /status then /usage, persist the parsed result — Body: { cwd? }
 ```
@@ -1674,6 +1674,19 @@ POST   /api/usage/capture             Launch claude in tmux, drive /status then 
 `POST /api/usage/capture` blocks for the duration of the tmux round-trip (roughly 10-15s: boot wait + panel render waits) rather than returning a pollable handle — a single-user local dashboard has no benefit from async polling for something this short and bounded. Returns `409` if a capture is already in flight (only one runs at a time).
 
 Every capture is persisted regardless of parse success: `status` is `"ok"` (key fields parsed), `"partial"` (captured but some/all structured fields didn't match — e.g. a CLI version reformatted the panel), or `"error"` (the capture itself failed — missing `tmux`/`claude` on `PATH`, spawn error, timeout). Structured fields include account info (email, org, login method, CLI version, model — from `/status`) and session cost/duration/lines-changed/token counts plus the session-window (5h) and weekly rate-limit percentages with their reset times and a per-model weekly breakdown (from `/usage`). `raw_status_text`/`raw_usage_text` are always stored so a parse gap degrades to a raw-text fallback in the UI instead of losing data. No WebSocket message — the client just awaits the `POST` response.
+
+### Accounts
+
+The `/api/accounts/*` namespace is a second, multi-account capture path alongside the tmux/TUI one above. Each account is just a `{ label, configDir }` pair — `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into. This dashboard never sees or stores a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` reads that credential live from the CLI's own storage (macOS Keychain, or a `.credentials.json` file on other platforms — see `server/lib/claude-cli-credentials.js`) and, if usable, fetches usage directly from `api.anthropic.com` (`server/lib/usage-fetch-oauth.js`), persisting the result into the same `usage_captures` table with `account_id` set. Same same-origin guard as `/api/usage` and `/api/run` since this makes a real outbound network call with a live token.
+
+```http
+GET    /api/accounts                  List accounts + each one's latest known session/weekly rate-limit %
+POST   /api/accounts                  Add an account — Body: { label, configDir }
+DELETE /api/accounts/:id              Remove an account (its past captures keep their now-orphaned account_id)
+POST   /api/accounts/:id/capture      Read the account's CLI credential and fetch + persist a fresh usage snapshot
+```
+
+`POST /:id/capture` never returns a `500` for "not logged in yet": if the credential isn't usable (no login found, an expired token, or an unreadable/invalid stored credential), it responds `200` with `{ account, status: "not_found"|"expired"|"invalid", message }` instead — an expected, actionable state. On success it returns `201` with the freshly persisted `usage_captures` row (`status: "ok"`), or `201` with `status: "error"` if the credential was valid but the usage fetch itself failed (e.g. a revoked token). This app never attempts to refresh an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login; an expired login is reported as account status `needs_login`, fixed by running `CLAUDE_CONFIG_DIR=<dir> claude` once to re-authenticate.
 
 ---
 

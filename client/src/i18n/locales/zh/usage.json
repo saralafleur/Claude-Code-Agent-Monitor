@@ -35,5 +35,37 @@
   "history": {
     "title": "历史记录",
     "empty": "暂无更早的捕获。"
+  },
+  "accounts": {
+    "title": "账户",
+    "refreshAll": "全部刷新",
+    "refreshingAll": "正在刷新…",
+    "addAccount": "添加账户",
+    "addLabelPlaceholder": "标签，例如：工作",
+    "configDirPlaceholder": "CLAUDE_CONFIG_DIR，例如：~/.claude-accounts/work",
+    "adding": "正在添加…",
+    "addSubmit": "添加",
+    "addCancel": "取消",
+    "addFailed": "添加账户失败。",
+    "remove": "删除",
+    "removeConfirm": "确认删除？",
+    "empty": "尚未添加任何账户。请先用 CLAUDE_CONFIG_DIR=<dir> claude 登录该账户的 CLI，然后在此添加。",
+    "loadFailed": "加载账户失败。",
+    "captured": "捕获于 {{when}}",
+    "emptyHistory": "该账户尚无捕获记录",
+    "status": {
+      "idle": "尚未捕获",
+      "ok": "正常",
+      "needsLogin": "需要登录",
+      "error": "错误"
+    },
+    "calendar": {
+      "title": "每周重置倒计时",
+      "subtitle": "距离每个账户的每周窗口重置还有多少天。"
+    },
+    "sessionTimeline": {
+      "title": "会话重置时刻",
+      "subtitle": "未来 24 小时内，每个账户的会话窗口将在一天中的什么时刻重置。"
+    }
   }
 }

@@ -401,6 +401,12 @@ vi.mock("../../lib/api", async (importOriginal) => {
         get: r({}),
         capture: r({}),
       },
+      accounts: {
+        list: r({ accounts: [] }),
+        add: r({ account: {} }),
+        remove: r({ ok: true }),
+        capture: r({}),
+      },
       alerts: {
         list: r({ alerts: [], total: 0, unacked: 0, limit: 50, offset: 0 }),
         ack: r({ alert: {} }),

@@ -23,12 +23,18 @@ router.use(sameOriginGuard);
 
 /**
  * Capture history, most recent first. `?limit=<n>` caps results (default 50,
- * max 500). Also reports whether a capture is currently in flight so the UI
- * can disable the "Capture now" button instead of racing a 409.
+ * max 500). `?accountId=<id>` scopes to one named account (see
+ * server/routes/accounts.js); omitted, this returns the legacy/global
+ * history exactly as before. Also reports whether a capture is currently in
+ * flight so the UI can disable the "Capture now" button instead of racing a 409.
  */
 router.get("/", (req, res) => {
   const limit = Number.parseInt(String(req.query.limit || "50"), 10);
-  const items = usageCapturesDb.listCaptures({ limit: Number.isFinite(limit) ? limit : 50 });
+  const accountId = typeof req.query.accountId === "string" ? req.query.accountId : undefined;
+  const items = usageCapturesDb.listCaptures({
+    limit: Number.isFinite(limit) ? limit : 50,
+    accountId,
+  });
   res.json({ items, capturing: usageCapture.isCapturing() });
 });
 

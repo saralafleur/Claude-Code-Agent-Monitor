@@ -82,6 +82,7 @@ const plansRouter = require("./routes/plans");
 const focusReportRouter = require("./routes/focus-report");
 const monitorsRouter = require("./routes/monitors");
 const usageRouter = require("./routes/usage");
+const accountsRouter = require("./routes/accounts");
 
 function createApp() {
   const app = express();
@@ -109,6 +110,7 @@ function createApp() {
   app.use("/api/cc-config", ccConfigRouter);
   app.use("/api/run", runRouter);
   app.use("/api/usage", usageRouter);
+  app.use("/api/accounts", accountsRouter);
   app.use("/api/alerts", alertsRouter);
   app.use("/api/webhooks", webhooksRouter);
   app.use("/api/remote-sources", remoteSourcesRouter);

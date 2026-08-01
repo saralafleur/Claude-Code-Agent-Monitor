@@ -754,11 +754,24 @@ HTTP surface for the Usage page's `/status` + `/usage` account-standing captures
 
 | Method   | Path                  | Description |
 | -------- | --------------------- | ----------- |
-| `GET`    | `/api/usage`          | Capture history, newest first. `?limit=` (default 50, max 500). Also returns `capturing: boolean` |
+| `GET`    | `/api/usage`          | Capture history, newest first. `?limit=` (default 50, max 500), `?accountId=` scopes to one named account (see Accounts below). Also returns `capturing: boolean` |
 | `GET`    | `/api/usage/:id`      | One capture's full row, incl. raw captured `/status`/`/usage` pane text |
 | `POST`   | `/api/usage/capture`  | Launch `claude` in a detached tmux session, drive `/status` then `/usage`, capture both panes, and persist the best-effort parsed result. Optional body `{ cwd? }`. Blocks for the tmux round-trip (~10-15s) instead of exposing a pollable handle. `409` if a capture is already running |
 
 Every capture persists regardless of parse success (`status`: `ok`/`partial`/`error`); `raw_status_text`/`raw_usage_text` are always stored so a CLI-version format change degrades to a raw-text fallback in the UI instead of losing data. No WebSocket message — the client just awaits the `POST` response.
+
+### Accounts (`/api/accounts`)
+
+Named Claude accounts — a second, multi-account capture path alongside the tmux/TUI one above, sharing the same `usage_captures` table (scoped by `account_id`). An account is just `{ label, configDir }`: `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into. This server never sees a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` reads that credential live via `lib/claude-cli-credentials.js` (macOS Keychain, or a `.credentials.json` file elsewhere) and, if usable, fetches usage via `lib/usage-fetch-oauth.js` (a minimal request straight to Anthropic's own API, reading rate-limit percentages off the response headers). Same same-origin guard as `/api/usage`.
+
+| Method   | Path                        | Description |
+| -------- | --------------------------- | ----------- |
+| `GET`    | `/api/accounts`             | List accounts + each one's latest known session/weekly rate-limit % |
+| `POST`   | `/api/accounts`             | Add an account. Body: `{ label, configDir }`. `400` if `configDir` doesn't exist, `409` if already registered |
+| `DELETE` | `/api/accounts/:id`         | Remove an account (its past captures keep their now-orphaned `account_id`) |
+| `POST`   | `/api/accounts/:id/capture` | Read the credential and fetch + persist a fresh capture scoped to this account. `200` with `{ account, status, message }` (not a `500`) when the credential isn't usable yet (no login, expired, invalid) |
+
+This server never refreshes an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login. An expired/missing login surfaces as account status `needs_login`, resolved by running `CLAUDE_CONFIG_DIR=<dir> claude` once to (re-)authenticate that profile.
 
 WebSocket message types added: `run_stream` (parsed stream-json envelope, including `stream_event` deltas from `--include-partial-messages`), `run_status` (status transitions), `run_input_ack` (stdin write confirmed), and `cc_config_changed` (broadcast by `lib/cc-watcher.js` on `fs.watch` events under `~/.claude/` and by `routes/cc-config.js` after every successful PUT/DELETE — debounced at 500 ms, payload `{ source: "dashboard"|"fs", action?, scope?, type?, name?, paths? }`).
 

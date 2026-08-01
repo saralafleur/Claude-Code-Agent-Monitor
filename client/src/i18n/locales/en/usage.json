@@ -35,5 +35,37 @@
   "history": {
     "title": "History",
     "empty": "No earlier captures yet."
+  },
+  "accounts": {
+    "title": "Accounts",
+    "refreshAll": "Refresh all",
+    "refreshingAll": "Refreshing…",
+    "addAccount": "Add account",
+    "addLabelPlaceholder": "Label, e.g. Work",
+    "configDirPlaceholder": "CLAUDE_CONFIG_DIR, e.g. ~/.claude-accounts/work",
+    "adding": "Adding…",
+    "addSubmit": "Add",
+    "addCancel": "Cancel",
+    "addFailed": "Failed to add account.",
+    "remove": "Remove",
+    "removeConfirm": "Confirm remove?",
+    "empty": "No accounts added yet. Log the CLI into an account with CLAUDE_CONFIG_DIR=<dir> claude, then add it here.",
+    "loadFailed": "Failed to load accounts.",
+    "captured": "Captured {{when}}",
+    "emptyHistory": "No captures yet for this account",
+    "status": {
+      "idle": "Not captured yet",
+      "ok": "OK",
+      "needsLogin": "Needs login",
+      "error": "Error"
+    },
+    "calendar": {
+      "title": "Weekly reset countdown",
+      "subtitle": "How many days until each account's weekly window resets."
+    },
+    "sessionTimeline": {
+      "title": "Session reset times",
+      "subtitle": "What time of day each account's session window resets, over the next 24h."
+    }
   }
 }

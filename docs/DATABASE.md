@@ -829,6 +829,110 @@ CREATE INDEX idx_focus_summary_access_log_key ON focus_summary_access_log(cache_
 
 ---
 
+### usage_captures
+
+One row per Usage page capture — either the legacy path (`account_id` NULL: `server/lib/usage-capture.js` drives `claude` in a detached tmux session and screen-scrapes its `/status`/`/usage` TUI panels) or the multi-account path (`account_id` set: `server/lib/usage-fetch-oauth.js` fetches usage directly from Anthropic's API using a named account's CLI-stored OAuth credential — see `accounts` below). Both paths write the exact same row shape. The `*_json` columns hold the parts of `/usage` most likely to change shape between CLI versions (contributing-factor breakdowns, skills/subagents tables), and `raw_status_text`/`raw_usage_text` keep the full captured TUI panes (legacy path only) so a parser gap never silently loses data — only ever a NULL field.
+
+```sql
+CREATE TABLE usage_captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cwd TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok','partial','error')),
+    error_message TEXT,
+    account_email TEXT,
+    account_org TEXT,
+    login_method TEXT,
+    cli_version TEXT,
+    model TEXT,
+    session_cost_usd REAL,
+    session_duration_api_s REAL,
+    session_duration_wall_s REAL,
+    lines_added INTEGER,
+    lines_removed INTEGER,
+    session_input_tokens INTEGER,
+    session_output_tokens INTEGER,
+    session_cache_read_tokens INTEGER,
+    session_cache_write_tokens INTEGER,
+    session_window_pct REAL,
+    session_window_reset_raw TEXT,
+    week_window_pct REAL,
+    week_reset_raw TEXT,
+    week_pct_by_model_json TEXT,
+    contributing_factors_json TEXT,
+    skills_json TEXT,
+    subagents_json TEXT,
+    raw_status_text TEXT,
+    raw_usage_text TEXT,
+    account_id TEXT
+);
+```
+
+**Columns (selected — the token/duration/lines/JSON-breakdown columns are internal detail, see `server/lib/usage-capture.js`):**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, autoincrement |
+| `captured_at` | TEXT | NO | ISO 8601 timestamp of this capture |
+| `cwd` | TEXT | NO | Legacy path: the working directory `claude` was launched in. Multi-account path: the account's `config_dir` |
+| `status` | TEXT | NO | `ok` (key fields parsed), `partial` (legacy path only — captured but some fields didn't match), or `error` (capture/fetch itself failed) |
+| `error_message` | TEXT | YES | Failure detail when `status = 'error'`, else NULL |
+| `account_email` / `account_org` | TEXT | YES | Display info — from `/status` (legacy) or the config dir's `.claude.json` (multi-account) |
+| `session_window_pct` / `session_window_reset_raw` | REAL / TEXT | YES | Rolling 5-hour rate-limit window: percentage used + reset time |
+| `week_window_pct` / `week_reset_raw` | REAL / TEXT | YES | Weekly (7-day) rate-limit window: percentage used + reset time |
+| `account_id` | TEXT | YES | NULL for the legacy single-account path; otherwise the `accounts.id` this capture belongs to (no FK constraint — an account can be deleted while its history is kept) |
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_usage_captures_account_id ON usage_captures(account_id);
+```
+
+Managed through `/api/usage/*` (legacy capture path) and `/api/accounts/:id/capture` (multi-account path); see [docs/API.md → Usage](./API.md#usage) and [docs/API.md → Accounts](./API.md#accounts).
+
+---
+
+### accounts
+
+Named Claude accounts for the multi-account Usage feature. Each row just points at a `CLAUDE_CONFIG_DIR` the user has already run `claude login` into — **no secret is ever stored here**: `label` and `config_dir` are the only inputs the user provides, and the live OAuth credential is read fresh from the CLI's own storage (`server/lib/claude-cli-credentials.js` — the macOS Keychain, or a `.credentials.json` file on other platforms) at capture time, never persisted by this app. (Not to be confused with dashboard *users* — this app still has no multi-user login system; these are named external Claude accounts this one dashboard tracks usage for.)
+
+```sql
+CREATE TABLE accounts (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    config_dir TEXT NOT NULL UNIQUE,
+    account_email TEXT,
+    account_org TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'idle'
+        CHECK(status IN ('idle','ok','needs_login','error')),
+    last_error TEXT,
+    last_capture_id INTEGER,
+    last_capture_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | TEXT | NO | Primary key (`acct_<random hex>`) |
+| `label` | TEXT | NO | Human-readable name the user picks |
+| `config_dir` | TEXT | NO | The `CLAUDE_CONFIG_DIR` this account was logged into. Unique — one account per config dir |
+| `account_email` / `account_org` | TEXT | YES | Cached display metadata, refreshed from the config dir's `.claude.json` on each capture |
+| `enabled` | INTEGER | NO | Reserved for a future "pause this account" toggle; not currently read (default `1`) |
+| `status` | TEXT | NO | `idle` (never captured), `ok`, `needs_login` (no/expired CLI login for this config dir), or `error` (the usage fetch itself failed) |
+| `last_error` | TEXT | YES | Message from the last failed credential read or usage fetch, or NULL |
+| `last_capture_id` | INTEGER | YES | The `usage_captures.id` of this account's most recent capture, or NULL |
+| `last_capture_at` | TEXT | YES | ISO 8601 timestamp of that capture, or NULL |
+| `created_at` / `updated_at` | TEXT | NO | ISO 8601 timestamps |
+
+Managed through the `/api/accounts/*` routes. See [docs/API.md → Accounts](./API.md#accounts).
+
+---
+
 ## Indexes
 
 ### sessions Indexes

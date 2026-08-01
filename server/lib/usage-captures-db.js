@@ -20,7 +20,7 @@ const insertStmt = db.prepare(`
     session_cache_read_tokens, session_cache_write_tokens,
     session_window_pct, session_window_reset_raw, week_window_pct, week_reset_raw,
     week_pct_by_model_json, contributing_factors_json, skills_json, subagents_json,
-    raw_status_text, raw_usage_text
+    raw_status_text, raw_usage_text, account_id
   ) VALUES (
     @cwd, @status, @error_message,
     @account_email, @account_org, @login_method, @cli_version, @model,
@@ -30,7 +30,7 @@ const insertStmt = db.prepare(`
     @session_cache_read_tokens, @session_cache_write_tokens,
     @session_window_pct, @session_window_reset_raw, @week_window_pct, @week_reset_raw,
     @week_pct_by_model_json, @contributing_factors_json, @skills_json, @subagents_json,
-    @raw_status_text, @raw_usage_text
+    @raw_status_text, @raw_usage_text, @account_id
   )
 `);
 
@@ -41,8 +41,21 @@ const listStmt = db.prepare(`
   SELECT id, captured_at, cwd, status, error_message,
          account_email, account_org, login_method, cli_version, model,
          session_cost_usd, session_window_pct, session_window_reset_raw,
-         week_window_pct, week_reset_raw
+         week_window_pct, week_reset_raw, account_id
   FROM usage_captures
+  ORDER BY captured_at DESC
+  LIMIT @limit
+`);
+
+// Same shape as listStmt, scoped to one account (used by the multi-account
+// Usage view; the legacy/global view keeps using listStmt with no filter).
+const listByAccountStmt = db.prepare(`
+  SELECT id, captured_at, cwd, status, error_message,
+         account_email, account_org, login_method, cli_version, model,
+         session_cost_usd, session_window_pct, session_window_reset_raw,
+         week_window_pct, week_reset_raw, account_id
+  FROM usage_captures
+  WHERE account_id = @account_id
   ORDER BY captured_at DESC
   LIMIT @limit
 `);
@@ -85,13 +98,17 @@ function recordCapture(fields = {}) {
     subagents_json: fields.subagentsJson ?? null,
     raw_status_text: fields.rawStatusText ?? null,
     raw_usage_text: fields.rawUsageText ?? null,
+    account_id: fields.accountId ?? null,
   };
   const info = insertStmt.run(row);
   return getStmt.get({ id: info.lastInsertRowid });
 }
 
-function listCaptures({ limit = 50 } = {}) {
+/** `accountId` scopes to one named account (multi-account Usage view);
+ *  omitted, it returns the legacy global/all-accounts history unchanged. */
+function listCaptures({ limit = 50, accountId } = {}) {
   const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)));
+  if (accountId) return listByAccountStmt.all({ limit: safeLimit, account_id: accountId });
   return listStmt.all({ limit: safeLimit });
 }
 

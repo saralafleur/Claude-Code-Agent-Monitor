@@ -1705,11 +1705,15 @@ export const api = {
      * GET /api/usage - capture history, newest first.
      *
      * @param limit Max rows to return (default 50).
+     * @param accountId Optional — scope to one named account (see
+     *   `api.accounts`). Omitted, returns the legacy/global history.
      * @returns `{ items, capturing }` — {@link UsageCaptureSummary} rows plus
      *   whether a capture is currently in flight (to disable "Capture now").
      */
-    list: (limit = 50) =>
-      request<{ items: UsageCaptureSummary[]; capturing: boolean }>(`/usage?limit=${limit}`),
+    list: (limit = 50, accountId?: string) =>
+      request<{ items: UsageCaptureSummary[]; capturing: boolean }>(
+        `/usage?limit=${limit}${accountId ? `&accountId=${encodeURIComponent(accountId)}` : ""}`
+      ),
     /**
      * GET /api/usage/:id - one capture, including its full raw pane text.
      * @param id The capture's numeric id.
@@ -1734,6 +1738,51 @@ export const api = {
         method: "POST",
         body: JSON.stringify(cwd ? { cwd } : {}),
       }),
+  },
+
+  // ──────────────────────────────── Accounts API ───────────────────────────────
+  /** Named Claude accounts for multi-account usage tracking (see
+   *  server/routes/accounts.js) - each just points at a `CLAUDE_CONFIG_DIR`
+   *  the user has already run `claude login` into; no secret is ever sent to
+   *  or stored by this dashboard. */
+  accounts: {
+    /**
+     * GET /api/accounts - every configured account plus its latest known
+     * session/weekly percentages.
+     * @returns `{ accounts }` — {@link Account} rows.
+     */
+    list: () => request<{ accounts: Account[] }>("/accounts"),
+    /**
+     * POST /api/accounts - add an account.
+     * @param label A short display name the user picks.
+     * @param configDir The `CLAUDE_CONFIG_DIR` this account was logged into.
+     * @returns `{ account }` — the freshly created row.
+     */
+    add: (label: string, configDir: string) =>
+      request<{ account: Account }>("/accounts", {
+        method: "POST",
+        body: JSON.stringify({ label, configDir }),
+      }),
+    /**
+     * DELETE /api/accounts/:id - remove an account. Its past captures are
+     * kept (just no longer attributable to a live account row).
+     */
+    remove: (id: string) =>
+      request<{ ok: true }>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    /**
+     * POST /api/accounts/:id/capture - read this account's CLI-stored OAuth
+     * credential and fetch a fresh usage snapshot.
+     *
+     * Returns either a freshly persisted {@link UsageCapture} (credential was
+     * usable), or `{ account, status, message }` when the credential isn't
+     * usable yet (no login, expired, or invalid) - an expected, actionable
+     * state rather than a failure.
+     */
+    capture: (id: string) =>
+      request<UsageCapture | { account: Account; status: string; message: string }>(
+        `/accounts/${encodeURIComponent(id)}/capture`,
+        { method: "POST" }
+      ),
   },
 
   // ────────────────────────────────── Alerts API ──────────────────────────────
@@ -2802,6 +2851,9 @@ export interface UsageCaptureSummary {
   session_window_reset_raw: string | null;
   week_window_pct: number | null;
   week_reset_raw: string | null;
+  /** Which named account this capture belongs to (see `api.accounts`), or
+   *  null for the legacy/global tmux-capture path. */
+  account_id: string | null;
 }
 
 /**
@@ -2831,6 +2883,38 @@ export interface UsageCapture extends UsageCaptureSummary {
   subagents_json: string | null;
   raw_status_text: string | null;
   raw_usage_text: string | null;
+}
+
+/** A credential outcome from server/lib/claude-cli-credentials.js, surfaced
+ *  as an account's status (see server/routes/accounts.js). */
+export type AccountStatus = "idle" | "ok" | "needs_login" | "error";
+
+/**
+ * One named Claude account for multi-account usage tracking (see
+ * server/routes/accounts.js). Never carries a secret — `config_dir` is just
+ * the `CLAUDE_CONFIG_DIR` path the user typed; the OAuth credential itself
+ * is read fresh from the CLI's own storage at capture time and never sent
+ * to or stored by this dashboard.
+ */
+export interface Account {
+  id: string;
+  label: string;
+  config_dir: string;
+  account_email: string | null;
+  account_org: string | null;
+  enabled: boolean;
+  status: AccountStatus;
+  last_error: string | null;
+  last_capture_id: number | null;
+  last_capture_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Latest known percentages/resets, pulled from this account's most
+   *  recent usage_captures row - null until the first successful capture. */
+  latest_session_window_pct: number | null;
+  latest_session_window_reset_raw: string | null;
+  latest_week_window_pct: number | null;
+  latest_week_reset_raw: string | null;
 }
 
 /** One suggested working directory for the Run page's cwd picker. */

@@ -335,7 +335,31 @@ db.exec(`
     skills_json TEXT,
     subagents_json TEXT,
     raw_status_text TEXT,
-    raw_usage_text TEXT
+    raw_usage_text TEXT,
+    account_id TEXT
+  );
+
+  -- Named Claude accounts for multi-account usage tracking: each row points
+  -- at a CLAUDE_CONFIG_DIR the user has already run 'claude login' into.
+  -- No access/refresh token is ever stored here — config_dir is just the
+  -- path the user typed, and the live OAuth credential is read fresh from
+  -- the OS keychain (or, on Linux, that dir's .credentials.json) at capture
+  -- time by server/lib/claude-cli-credentials.js. account_email/account_org
+  -- are cached display metadata only, refreshed from that dir's
+  -- .claude.json on each capture.
+  CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    config_dir TEXT NOT NULL UNIQUE,
+    account_email TEXT,
+    account_org TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'idle' CHECK(status IN ('idle','ok','needs_login','error')),
+    last_error TEXT,
+    last_capture_id INTEGER,
+    last_capture_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   );
 
   CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id);
@@ -1438,6 +1462,18 @@ try {
   db.prepare("ALTER TABLE usage_captures ADD COLUMN week_window_pct REAL").run();
 }
 
+// Migrate: add `account_id` to usage_captures for multi-account usage
+// tracking (see the `accounts` table above). Additive + nullable: every
+// capture made before this feature existed, and every capture still made
+// via the legacy single-account tmux/TUI path, keeps account_id = NULL —
+// the original single-account Usage view is unaffected.
+try {
+  db.prepare("SELECT account_id FROM usage_captures LIMIT 1").get();
+} catch {
+  db.prepare("ALTER TABLE usage_captures ADD COLUMN account_id TEXT").run();
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_usage_captures_account_id ON usage_captures(account_id)");
+
 const stmts = {
   getSession: db.prepare("SELECT * FROM sessions WHERE id = ?"),
   listSessions: db.prepare(
@@ -1522,6 +1558,29 @@ const stmts = {
   ),
   setRemoteSourceSyncResult: db.prepare(
     `UPDATE remote_sources SET status = ?, last_error = ?, last_sync_at = ?, last_sync_counts = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
+  ),
+
+  // ── Accounts (named Claude accounts for multi-account usage tracking) ──────
+  listAccounts: db.prepare("SELECT * FROM accounts ORDER BY created_at ASC"),
+  getAccount: db.prepare("SELECT * FROM accounts WHERE id = ?"),
+  getAccountByConfigDir: db.prepare("SELECT * FROM accounts WHERE config_dir = ?"),
+  insertAccount: db.prepare(
+    `INSERT INTO accounts (id, label, config_dir, enabled) VALUES (?, ?, ?, ?)`
+  ),
+  deleteAccount: db.prepare("DELETE FROM accounts WHERE id = ?"),
+  setAccountCredentialStatus: db.prepare(
+    `UPDATE accounts SET status = ?, last_error = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
+  ),
+  setAccountCaptureResult: db.prepare(
+    `UPDATE accounts SET
+       status = ?,
+       last_error = ?,
+       last_capture_id = ?,
+       last_capture_at = ?,
+       account_email = COALESCE(?, account_email),
+       account_org = COALESCE(?, account_org),
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = ?`
   ),
 
   // ── Dashboard layout (global Kanban Board monitor swimlanes) ────────────────

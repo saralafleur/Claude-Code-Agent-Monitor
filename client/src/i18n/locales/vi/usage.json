@@ -35,5 +35,37 @@
   "history": {
     "title": "Lịch sử",
     "empty": "Chưa có lần ghi lại trước đó."
+  },
+  "accounts": {
+    "title": "Tài khoản",
+    "refreshAll": "Làm mới tất cả",
+    "refreshingAll": "Đang làm mới…",
+    "addAccount": "Thêm tài khoản",
+    "addLabelPlaceholder": "Nhãn, ví dụ: Công việc",
+    "configDirPlaceholder": "CLAUDE_CONFIG_DIR, ví dụ: ~/.claude-accounts/work",
+    "adding": "Đang thêm…",
+    "addSubmit": "Thêm",
+    "addCancel": "Hủy",
+    "addFailed": "Không thể thêm tài khoản.",
+    "remove": "Xóa",
+    "removeConfirm": "Xác nhận xóa?",
+    "empty": "Chưa có tài khoản nào được thêm. Đăng nhập CLI vào một tài khoản bằng CLAUDE_CONFIG_DIR=<dir> claude, sau đó thêm tại đây.",
+    "loadFailed": "Không thể tải danh sách tài khoản.",
+    "captured": "Đã ghi lại {{when}}",
+    "emptyHistory": "Chưa có lần ghi lại nào cho tài khoản này",
+    "status": {
+      "idle": "Chưa ghi lại",
+      "ok": "OK",
+      "needsLogin": "Cần đăng nhập",
+      "error": "Lỗi"
+    },
+    "calendar": {
+      "title": "Đếm ngược đến lúc đặt lại hàng tuần",
+      "subtitle": "Còn bao nhiêu ngày nữa đến khi cửa sổ hàng tuần của mỗi tài khoản được đặt lại."
+    },
+    "sessionTimeline": {
+      "title": "Thời điểm đặt lại phiên",
+      "subtitle": "Thời điểm trong ngày mà cửa sổ phiên của mỗi tài khoản được đặt lại, trong 24 giờ tới."
+    }
   }
 }

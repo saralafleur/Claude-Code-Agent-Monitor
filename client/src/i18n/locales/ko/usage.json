@@ -35,5 +35,37 @@
   "history": {
     "title": "기록",
     "empty": "이전 캡처가 없습니다."
+  },
+  "accounts": {
+    "title": "계정",
+    "refreshAll": "모두 새로고침",
+    "refreshingAll": "새로고침 중…",
+    "addAccount": "계정 추가",
+    "addLabelPlaceholder": "레이블, 예: 회사",
+    "configDirPlaceholder": "CLAUDE_CONFIG_DIR, 예: ~/.claude-accounts/work",
+    "adding": "추가 중…",
+    "addSubmit": "추가",
+    "addCancel": "취소",
+    "addFailed": "계정을 추가하지 못했습니다.",
+    "remove": "삭제",
+    "removeConfirm": "삭제할까요?",
+    "empty": "아직 추가된 계정이 없습니다. CLAUDE_CONFIG_DIR=<dir> claude 명령으로 CLI에 계정을 로그인한 후 여기에 추가하세요.",
+    "loadFailed": "계정을 불러오지 못했습니다.",
+    "captured": "{{when}} 캡처됨",
+    "emptyHistory": "이 계정의 캡처가 아직 없습니다",
+    "status": {
+      "idle": "아직 캡처되지 않음",
+      "ok": "정상",
+      "needsLogin": "로그인 필요",
+      "error": "오류"
+    },
+    "calendar": {
+      "title": "주간 리셋 카운트다운",
+      "subtitle": "각 계정의 주간 윈도우가 리셋되기까지 남은 일수입니다."
+    },
+    "sessionTimeline": {
+      "title": "세션 리셋 시각",
+      "subtitle": "앞으로 24시간 동안 각 계정의 세션 윈도우가 리셋되는 시각입니다."
+    }
   }
 }
