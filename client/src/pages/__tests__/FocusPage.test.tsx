@@ -347,9 +347,21 @@ describe("FocusPage", () => {
   it("renders stat tiles matching FocusReportBody's on-item/off-plan formula", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("On declared item")).toBeTruthy());
-    // active_ms.item (1h) / totals.active_ms (~1.333h) rounds to 75%.
-    expect(screen.getByText("75%")).toBeTruthy();
-    expect(screen.getByText("25%")).toBeTruthy();
+    // Derived from this file's own local fixture (not a hand-picked literal)
+    // so this stays a real smoke check on THIS page's render rather than an
+    // independent 75%/25% pin that could silently drift from FocusReportBody's
+    // formula. The canonical DERIVED-DUAL-VIEW parity source of truth is
+    // `FocusReportModal.test.tsx`'s "[FocusPage extension of the standing
+    // template]" test, which renders FocusPage and FocusReportModal from the
+    // SAME shared fixture object and asserts they agree — extend that test,
+    // not this one, for any future cross-view percentage/total assertion.
+    const report = makeNonEmptyReport();
+    const onItemPct = Math.round(
+      (report.totals.by_kind.item.active_ms / report.totals.active_ms) * 100
+    );
+    const offPlanPct = Math.max(0, 100 - onItemPct);
+    expect(screen.getByText(`${onItemPct}%`)).toBeTruthy();
+    expect(screen.getByText(`${offPlanPct}%`)).toBeTruthy();
   });
 
   it("renders the activity card's item and detour rows end-to-end, with the inferred reason", async () => {

@@ -118,9 +118,16 @@ function parseData(raw) {
 function buildActivityDigest(dbModule, sessionId) {
   const rows = dbModule.db
     .prepare(
+      // `ORDER BY id ASC` (insertion order) is NOT reliably chronological —
+      // see server/lib/focus-report.js's b3a2cc9 fix comment. A session
+      // with heavy Workflow-tool activity can bulk-insert events out of
+      // created_at order (server/lib/workflow-ingest.js); sorting by
+      // created_at (with id as a tiebreak, matching this codebase's own
+      // established ordering convention) before LIMIT ensures both the
+      // *order* and the *selected subset* are chronologically correct.
       `SELECT event_type, tool_name, data FROM events
        WHERE session_id = ? AND event_type IN ('UserPromptSubmit', 'PreToolUse')
-       ORDER BY id ASC LIMIT ?`
+       ORDER BY created_at ASC, id ASC LIMIT ?`
     )
     .all(sessionId, MAX_DIGEST_EVENTS);
 

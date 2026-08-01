@@ -116,6 +116,30 @@ function addBash(sessionId, command) {
   addEvent(sessionId, "PreToolUse", "Bash", { tool_name: "Bash", tool_input: { command } });
 }
 
+// Inserts an event with an explicit created_at, independent of insertion/id
+// order — needed to construct fixtures where id order contradicts
+// created_at order (the row-id-as-chronology-proxy regression cases below).
+// Column order confirmed off server/db.js's insertEventAt: session_id,
+// agent_id, event_type, tool_name, summary, data, created_at.
+function addEventAt(sessionId, eventType, toolName, data, createdAtIso) {
+  stmts.insertEventAt.run(
+    sessionId,
+    null,
+    eventType,
+    toolName,
+    null,
+    data ? JSON.stringify(data) : null,
+    createdAtIso
+  );
+}
+
+// Fixed epoch, minute-granular helper — mirrors focus-report.test.js's own
+// t() convention so these fixtures are exact and independent of wall clock.
+const EPOCH = new Date("2026-01-01T00:00:00.000Z").getTime();
+function t(minutesFromEpoch) {
+  return new Date(EPOCH + minutesFromEpoch * 60_000).toISOString();
+}
+
 const HOUR_AGO = () => new Date(Date.now() - 60 * 60_000).toISOString();
 
 db.exec("DELETE FROM plans");
@@ -177,6 +201,60 @@ describe("buildActivityDigest", () => {
     seedSession(id);
     addEvent(id, "PreToolUse", "Read", { tool_name: "Read", tool_input: {} });
     assert.equal(buildActivityDigest(dbModule, id), null);
+  });
+
+  // row-id-as-chronology-proxy regression (3rd recorded instance on this
+  // codebase, after 6e9a443 and b3a2cc9) — buildActivityDigest's query must
+  // order by created_at, not id/insertion order, and that sort must happen
+  // BEFORE any SQL LIMIT is applied.
+  it("orders prompts by created_at, not by id/insertion order", () => {
+    const id = nextId("sess");
+    seedSession(id);
+    // Inserted (id ascends) in this order, but created_at contradicts it.
+    addEventAt(id, "UserPromptSubmit", null, { prompt: "third chronologically" }, t(30)); // id 1
+    addEventAt(id, "UserPromptSubmit", null, { prompt: "first chronologically" }, t(0)); // id 2
+    addEventAt(id, "UserPromptSubmit", null, { prompt: "second chronologically" }, t(10)); // id 3
+
+    const digest = buildActivityDigest(dbModule, id);
+    assert.deepEqual(digest.prompts, [
+      "first chronologically",
+      "second chronologically",
+      "third chronologically",
+    ]);
+  });
+
+  // Trap-defeating case: the LIMIT must not be allowed to drop the
+  // chronologically-correct row before any JS-level sort could ever see it.
+  // A JS-level .sort() applied after .all() (the b3a2cc9-style fix, reapplied
+  // naively) would NOT pass this case, since the SQL LIMIT has already
+  // discarded the target row by the time JS runs.
+  it("selects the chronologically-correct subset before LIMIT, not an id-ordered subset (trap-defeating LIMIT case)", () => {
+    const id = nextId("sess");
+    seedSession(id);
+
+    // 800 filler Bash events, each with a created_at LATER than the target
+    // below, inserted FIRST so they land at id 1..800. Transaction-wrapped
+    // for speed.
+    const insertFillers = db.transaction(() => {
+      for (let i = 0; i < 800; i += 1) {
+        addEventAt(
+          id,
+          "PreToolUse",
+          "Bash",
+          { tool_name: "Bash", tool_input: { command: `cmd-${i}` } },
+          t(1000 + i)
+        );
+      }
+    });
+    insertFillers();
+
+    // One target event, chronologically earliest, inserted LAST so it lands
+    // at id 801 — past the SQL LIMIT 800 boundary under `ORDER BY id ASC`.
+    addEventAt(id, "UserPromptSubmit", null, { prompt: "TARGET should survive the LIMIT" }, t(0));
+
+    const digest = buildActivityDigest(dbModule, id);
+    assert.equal(digest.prompts.length, 1);
+    assert.match(digest.prompts[0], /TARGET should survive the LIMIT/);
   });
 });
 
