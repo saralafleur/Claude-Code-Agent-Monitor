@@ -184,6 +184,11 @@ function LatestCaptureCard({ detail }: { detail: UsageCapture }) {
           <div>
             <p className="text-xs text-gray-400 font-medium mb-1">{t("latest.weeklyByModel")}</p>
             <div className="space-y-2">
+              <PctBar
+                label={t("latest.allModels")}
+                pct={detail.week_window_pct}
+                resetRaw={detail.week_reset_raw}
+              />
               {Object.entries(weekByModel).map(([model, pct]) => (
                 <PctBar key={model} label={model} pct={pct} resetRaw={detail.week_reset_raw} />
               ))}

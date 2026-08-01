@@ -21,6 +21,7 @@
     "sessionWindow": "세션 윈도우 (5시간)",
     "weekly": "주간 윈도우",
     "weeklyByModel": "모델별 주간 윈도우",
+    "allModels": "전체 모델",
     "inputTokens": "입력 토큰",
     "outputTokens": "출력 토큰",
     "cacheRead": "캐시 읽기",

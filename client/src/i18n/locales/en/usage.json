@@ -21,6 +21,7 @@
     "sessionWindow": "Session window (5h)",
     "weekly": "Weekly window",
     "weeklyByModel": "Weekly window by model",
+    "allModels": "All models",
     "inputTokens": "Input tokens",
     "outputTokens": "Output tokens",
     "cacheRead": "Cache read",

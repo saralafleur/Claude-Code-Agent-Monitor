@@ -21,6 +21,7 @@
     "sessionWindow": "会话窗口（5 小时）",
     "weekly": "每周窗口",
     "weeklyByModel": "每周窗口（按模型）",
+    "allModels": "所有模型",
     "inputTokens": "输入 tokens",
     "outputTokens": "输出 tokens",
     "cacheRead": "缓存读取",

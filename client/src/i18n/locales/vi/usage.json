@@ -21,6 +21,7 @@
     "sessionWindow": "Cửa sổ phiên (5 giờ)",
     "weekly": "Cửa sổ hàng tuần",
     "weeklyByModel": "Cửa sổ hàng tuần theo mô hình",
+    "allModels": "Tất cả mô hình",
     "inputTokens": "Token đầu vào",
     "outputTokens": "Token đầu ra",
     "cacheRead": "Đọc cache",
