@@ -1696,6 +1696,46 @@ export const api = {
       request<{ ok: true }>(`/run/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
 
+  // ────────────────────────────────── Usage API ───────────────────────────────
+  /** Manual `/status` + `/usage` panel captures for the Usage page (see
+   *  server/lib/usage-capture.js) - reads history from the `usage_captures`
+   *  table and can trigger a fresh capture on demand. */
+  usage: {
+    /**
+     * GET /api/usage - capture history, newest first.
+     *
+     * @param limit Max rows to return (default 50).
+     * @returns `{ items, capturing }` — {@link UsageCaptureSummary} rows plus
+     *   whether a capture is currently in flight (to disable "Capture now").
+     */
+    list: (limit = 50) =>
+      request<{ items: UsageCaptureSummary[]; capturing: boolean }>(`/usage?limit=${limit}`),
+    /**
+     * GET /api/usage/:id - one capture, including its full raw pane text.
+     * @param id The capture's numeric id.
+     * @returns {@link UsageCapture} — the full row.
+     */
+    get: (id: number) => request<UsageCapture>(`/usage/${id}`),
+    /**
+     * POST /api/usage/capture - launch `claude` in a detached tmux session,
+     * drive `/status` then `/usage`, and persist the parsed result.
+     *
+     * Takes roughly 10-15s (tmux boot + panel render waits); the request
+     * stays open for the duration rather than returning a pollable handle,
+     * since this is a single-user local action with no benefit from async
+     * polling. Rejects with an error if a capture is already running.
+     *
+     * @param cwd Optional working directory to launch `claude` in (defaults
+     *   to the dashboard server's own cwd).
+     * @returns {@link UsageCapture} — the freshly recorded capture.
+     */
+    capture: (cwd?: string) =>
+      request<UsageCapture>("/usage/capture", {
+        method: "POST",
+        body: JSON.stringify(cwd ? { cwd } : {}),
+      }),
+  },
+
   // ────────────────────────────────── Alerts API ──────────────────────────────
   /** Alert rule CRUD plus the fired-alert feed and acknowledgement. */
   alerts: {
@@ -2736,6 +2776,61 @@ export interface DashboardRunHistoryItem {
    *  the UI can offer live actions like "send message"/"kill"); false once
    *  the handle has been reaped and only the DB row remains. */
   isLive: boolean;
+}
+
+/** Parse/capture outcome for one `usage_captures` row (see server/db.js). */
+export type UsageCaptureStatus = "ok" | "partial" | "error";
+
+/**
+ * Summary fields returned by GET /api/usage (the history list). Omits the
+ * raw pane text and the volatile JSON breakdown columns — fetch a single
+ * capture via `api.usage.get` for those.
+ */
+export interface UsageCaptureSummary {
+  id: number;
+  captured_at: string;
+  cwd: string;
+  status: UsageCaptureStatus;
+  error_message: string | null;
+  account_email: string | null;
+  account_org: string | null;
+  login_method: string | null;
+  cli_version: string | null;
+  model: string | null;
+  session_cost_usd: number | null;
+  session_window_pct: number | null;
+  session_window_reset_raw: string | null;
+  week_window_pct: number | null;
+  week_reset_raw: string | null;
+}
+
+/**
+ * Full row from GET /api/usage/:id - everything {@link UsageCaptureSummary}
+ * has, plus token/duration/lines-changed detail, the per-model weekly
+ * breakdown and contributing-factors/skills/subagents sections (each stored
+ * as a JSON string since their shape can change between CLI versions), and
+ * the raw captured `/status`/`/usage` pane text as a fallback when parsing
+ * couldn't fill in the structured fields.
+ */
+export interface UsageCapture extends UsageCaptureSummary {
+  session_duration_api_s: number | null;
+  session_duration_wall_s: number | null;
+  lines_added: number | null;
+  lines_removed: number | null;
+  session_input_tokens: number | null;
+  session_output_tokens: number | null;
+  session_cache_read_tokens: number | null;
+  session_cache_write_tokens: number | null;
+  /** JSON-stringified `{ [modelName]: pct }`, or null if unparsed. */
+  week_pct_by_model_json: string | null;
+  /** JSON-stringified `string[]` of raw lines under "Contributing factors", or null. */
+  contributing_factors_json: string | null;
+  /** JSON-stringified `string[]` of raw lines under "Skills", or null. */
+  skills_json: string | null;
+  /** JSON-stringified `string[]` of raw lines under "Subagents", or null. */
+  subagents_json: string | null;
+  raw_status_text: string | null;
+  raw_usage_text: string | null;
 }
 
 /** One suggested working directory for the Run page's cwd picker. */

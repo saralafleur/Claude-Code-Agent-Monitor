@@ -298,6 +298,46 @@ db.exec(`
     ended_at TEXT
   );
 
+  -- One row per manual "Usage" page capture: launches 'claude' in a target
+  -- folder, drives its /status and /usage TUI panels via tmux, and parses
+  -- the rendered text. account_* / model come from /status; the rest from
+  -- /usage. The *_json columns hold the parts of /usage most likely to
+  -- change shape between CLI versions (contributing-factor breakdowns,
+  -- skills/subagents tables) so a format change never requires a schema
+  -- migration. raw_status_text/raw_usage_text keep the full captured panes
+  -- so a parser gap never silently loses data - only ever a null field.
+  CREATE TABLE IF NOT EXISTS usage_captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cwd TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok','partial','error')),
+    error_message TEXT,
+    account_email TEXT,
+    account_org TEXT,
+    login_method TEXT,
+    cli_version TEXT,
+    model TEXT,
+    session_cost_usd REAL,
+    session_duration_api_s REAL,
+    session_duration_wall_s REAL,
+    lines_added INTEGER,
+    lines_removed INTEGER,
+    session_input_tokens INTEGER,
+    session_output_tokens INTEGER,
+    session_cache_read_tokens INTEGER,
+    session_cache_write_tokens INTEGER,
+    session_window_pct REAL,
+    session_window_reset_raw TEXT,
+    week_window_pct REAL,
+    week_reset_raw TEXT,
+    week_pct_by_model_json TEXT,
+    contributing_factors_json TEXT,
+    skills_json TEXT,
+    subagents_json TEXT,
+    raw_status_text TEXT,
+    raw_usage_text TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id);
   CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
   CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
@@ -305,6 +345,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_usage_captures_captured_at ON usage_captures(captured_at DESC);
 
   -- Composite indexes for frequent query patterns (columns that exist at table creation time)
   CREATE INDEX IF NOT EXISTS idx_events_session_type ON events(session_id, event_type);
@@ -1383,6 +1424,19 @@ db.prepare(
     AND julianday(ended_at) < julianday(started_at)
 `
 ).run();
+
+// Migrate: add `week_window_pct` to usage_captures — the aggregate "Current
+// week (all models)" percentage, the weekly counterpart to session_window_pct.
+// The parser computed this value all along but never persisted it (only the
+// reset text and any per-model breakdown were kept), so the Usage page's
+// weekly bar always rendered empty. Additive + nullable: existing rows just
+// read back as NULL, same as any other field an older/failed capture didn't
+// fill in.
+try {
+  db.prepare("SELECT week_window_pct FROM usage_captures LIMIT 1").get();
+} catch {
+  db.prepare("ALTER TABLE usage_captures ADD COLUMN week_window_pct REAL").run();
+}
 
 const stmts = {
   getSession: db.prepare("SELECT * FROM sessions WHERE id = ?"),

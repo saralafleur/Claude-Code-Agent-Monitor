@@ -1,0 +1,38 @@
+{
+  "title": "Mức sử dụng",
+  "subtitle": "Tình trạng giới hạn tài khoản Claude của bạn, được ghi lại từ chính các bảng /status và /usage của CLI.",
+  "captureNow": "Ghi lại ngay",
+  "capturing": "Đang ghi lại…",
+  "captureFailed": "Ghi lại thất bại.",
+  "failedLoad": "Không thể tải lịch sử sử dụng.",
+  "noData": "—",
+  "resets": "Đặt lại vào {{when}}",
+  "status": {
+    "ok": "OK",
+    "partial": "Một phần",
+    "error": "Lỗi"
+  },
+  "latest": {
+    "title": "Lần ghi lại gần nhất",
+    "account": "Tài khoản",
+    "org": "Tổ chức",
+    "model": "Mô hình",
+    "sessionCost": "Chi phí phiên",
+    "sessionWindow": "Cửa sổ phiên (5 giờ)",
+    "weekly": "Cửa sổ hàng tuần",
+    "weeklyByModel": "Cửa sổ hàng tuần theo mô hình",
+    "inputTokens": "Token đầu vào",
+    "outputTokens": "Token đầu ra",
+    "cacheRead": "Đọc cache",
+    "cacheWrite": "Ghi cache",
+    "showRaw": "Hiện văn bản gốc đã ghi lại"
+  },
+  "empty": {
+    "title": "Chưa có lần ghi lại sử dụng nào",
+    "hint": "Nhấn \"Ghi lại ngay\" để khởi chạy một phiên claude ở chế độ nền, đọc các bảng /status và /usage của nó, rồi lưu kết quả tại đây."
+  },
+  "history": {
+    "title": "Lịch sử",
+    "empty": "Chưa có lần ghi lại trước đó."
+  }
+}

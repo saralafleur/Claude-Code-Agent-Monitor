@@ -1532,6 +1532,29 @@
                   </p>
                 </div>
                 <div class="feature-card">
+                  <div class="feature-icon ic-amber">📈</div>
+                  <h3 id="feat-usage">Usage</h3>
+                  <p>
+                    Captures the CLI's own <code>/status</code> and <code>/usage</code> TUI
+                    panels on demand at <code>/usage</code>, via a detached tmux session that
+                    drives a real <code>claude</code> process and scrapes its rendered pane
+                    text — no separate accounting API, so it shows exactly what the CLI itself
+                    reports. Each capture surfaces account info (email, organization, login
+                    method, CLI version, active model), the current session's cost, API and
+                    wall-clock duration, and lines added/removed, plus input, output, and
+                    cache-read/cache-write token counts. The two headline numbers are the
+                    <strong>5-hour session window</strong> and <strong>weekly window</strong>
+                    rate-limit percentages — the weekly figure broken down per model — each
+                    paired with its own reset time. Every capture is persisted with a
+                    <code>status</code> of <code>ok</code>, <code>partial</code>, or
+                    <code>error</code>, and always keeps the full raw pane text alongside the
+                    parsed fields, so a future CLI output-format change degrades to raw text
+                    instead of losing data. Only one capture runs at a time — a second request
+                    while one is in flight is rejected rather than racing the tmux session.
+                    Same-origin guard included, shared with Run Claude.
+                  </p>
+                </div>
+                <div class="feature-card">
                   <div class="feature-icon ic-cyan">⌨️</div>
                   <h3 id="feat-ccam-cli">ccam CLI</h3>
                   <p>
@@ -7203,7 +7226,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=67" defer></script>
+    <script src="i18n-content.js?v=80" defer></script>
     <script src="script.js?v=33" defer></script>
     <script>
       (function () {

@@ -1,0 +1,38 @@
+{
+  "title": "用量",
+  "subtitle": "从 CLI 自身的 /status 和 /usage 面板捕获的 Claude 账户限额状态。",
+  "captureNow": "立即捕获",
+  "capturing": "正在捕获…",
+  "captureFailed": "捕获失败。",
+  "failedLoad": "加载用量历史失败。",
+  "noData": "—",
+  "resets": "将于 {{when}} 重置",
+  "status": {
+    "ok": "正常",
+    "partial": "部分",
+    "error": "错误"
+  },
+  "latest": {
+    "title": "最新捕获",
+    "account": "账户",
+    "org": "组织",
+    "model": "模型",
+    "sessionCost": "会话费用",
+    "sessionWindow": "会话窗口（5 小时）",
+    "weekly": "每周窗口",
+    "weeklyByModel": "每周窗口（按模型）",
+    "inputTokens": "输入 tokens",
+    "outputTokens": "输出 tokens",
+    "cacheRead": "缓存读取",
+    "cacheWrite": "缓存写入",
+    "showRaw": "显示原始捕获文本"
+  },
+  "empty": {
+    "title": "尚无用量捕获",
+    "hint": "点击“立即捕获”将在后台启动一个 claude 会话，读取其 /status 和 /usage 面板，并将结果保存于此。"
+  },
+  "history": {
+    "title": "历史记录",
+    "empty": "暂无更早的捕获。"
+  }
+}

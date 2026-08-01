@@ -396,6 +396,11 @@ vi.mock("../../lib/api", async (importOriginal) => {
         send: r({ messageId: "m-1" }),
         kill: r({ ok: true }),
       },
+      usage: {
+        list: r({ items: [], capturing: false }),
+        get: r({}),
+        capture: r({}),
+      },
       alerts: {
         list: r({ alerts: [], total: 0, unacked: 0, limit: 50, offset: 0 }),
         ack: r({ alert: {} }),
@@ -485,6 +490,7 @@ import { Analytics } from "../Analytics";
 import { Workflows } from "../Workflows";
 import { CcConfig } from "../CcConfig";
 import { Run } from "../Run";
+import { Usage } from "../Usage";
 import { Settings } from "../Settings";
 import { NotFound } from "../NotFound";
 
@@ -600,6 +606,10 @@ describe("screen snapshots", () => {
   });
   it("Run", async () => {
     await snapshot(<Run />, "/run");
+  });
+
+  it("Usage", async () => {
+    await snapshot(<Usage />, "/usage");
   });
   it("Settings", async () => {
     await snapshot(<Settings />, "/settings");

@@ -1661,6 +1661,20 @@ DELETE /api/run/:id                   Stop (SIGTERM → SIGKILL after 5 s)
 
 Spawned `claude` processes fire the dashboard's hooks like any other CLI session, so they show up in `/api/sessions`, the analytics, the Kanban board, and the Workflows page automatically — the Run page itself just owns the live streaming UX.
 
+### Usage
+
+The `/api/usage/*` namespace captures the current Claude account's rate-limit standing by driving the `claude` CLI's own `/status` and `/usage` TUI panels inside a detached tmux session and persisting the parsed result (`usage_captures` table). Same same-origin guard as `/api/run` (shared via `server/lib/origin-guard.js`).
+
+```http
+GET    /api/usage                     Capture history, newest first — ?limit= (default 50, max 500); also returns { capturing }
+GET    /api/usage/:id                 One capture's full row, incl. raw captured /status and /usage pane text
+POST   /api/usage/capture             Launch claude in tmux, drive /status then /usage, persist the parsed result — Body: { cwd? }
+```
+
+`POST /api/usage/capture` blocks for the duration of the tmux round-trip (roughly 10-15s: boot wait + panel render waits) rather than returning a pollable handle — a single-user local dashboard has no benefit from async polling for something this short and bounded. Returns `409` if a capture is already in flight (only one runs at a time).
+
+Every capture is persisted regardless of parse success: `status` is `"ok"` (key fields parsed), `"partial"` (captured but some/all structured fields didn't match — e.g. a CLI version reformatted the panel), or `"error"` (the capture itself failed — missing `tmux`/`claude` on `PATH`, spawn error, timeout). Structured fields include account info (email, org, login method, CLI version, model — from `/status`) and session cost/duration/lines-changed/token counts plus the session-window (5h) and weekly rate-limit percentages with their reset times and a per-model weekly breakdown (from `/usage`). `raw_status_text`/`raw_usage_text` are always stored so a parse gap degrades to a raw-text fallback in the UI instead of losing data. No WebSocket message — the client just awaits the `POST` response.
+
 ---
 
 ## WebSocket API

@@ -1,0 +1,38 @@
+{
+  "title": "사용량",
+  "subtitle": "CLI 자체의 /status 및 /usage 패널에서 캡처한 Claude 계정의 사용 한도 현황입니다.",
+  "captureNow": "지금 캡처",
+  "capturing": "캡처 중…",
+  "captureFailed": "캡처에 실패했습니다.",
+  "failedLoad": "사용량 기록을 불러오지 못했습니다.",
+  "noData": "—",
+  "resets": "{{when}}에 초기화",
+  "status": {
+    "ok": "정상",
+    "partial": "부분",
+    "error": "오류"
+  },
+  "latest": {
+    "title": "최근 캡처",
+    "account": "계정",
+    "org": "조직",
+    "model": "모델",
+    "sessionCost": "세션 비용",
+    "sessionWindow": "세션 윈도우 (5시간)",
+    "weekly": "주간 윈도우",
+    "weeklyByModel": "모델별 주간 윈도우",
+    "inputTokens": "입력 토큰",
+    "outputTokens": "출력 토큰",
+    "cacheRead": "캐시 읽기",
+    "cacheWrite": "캐시 쓰기",
+    "showRaw": "캡처된 원본 텍스트 보기"
+  },
+  "empty": {
+    "title": "아직 캡처된 사용량이 없습니다",
+    "hint": "\"지금 캡처\"를 클릭하면 백그라운드에서 claude 세션을 실행해 /status와 /usage 패널을 읽고 그 결과를 여기에 저장합니다."
+  },
+  "history": {
+    "title": "기록",
+    "empty": "이전 캡처가 없습니다."
+  }
+}

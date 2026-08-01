@@ -110,6 +110,7 @@ const NAV_KEYS = [
   { to: "/activity", icon: Activity, key: "nav:activityFeed" },
   { to: "/analytics", icon: BarChart3, key: "nav:analytics" },
   { to: "/workflows", icon: Workflow, key: "nav:workflows" },
+  { to: "/usage", icon: Gauge, key: "nav:usage" },
   { to: "/cc-config", icon: Boxes, key: "nav:ccConfig" },
   { to: "/run", icon: Play, key: "nav:run" },
   { to: "/settings", icon: Settings, key: "nav:settings" },

@@ -748,6 +748,18 @@ HTTP surface for spawning and supervising `claude` subprocesses from the dashboa
 | `GET`    | `/api/run/:id`                | Handle state. `?envelopes=1` includes the in-memory envelope log for re-attach |
 | `DELETE` | `/api/run/:id`                | Stop (SIGTERM → SIGKILL after 5 s) |
 
+### Usage (`/api/usage`)
+
+HTTP surface for the Usage page's `/status` + `/usage` account-standing captures (`lib/usage-capture.js`). Same loopback same-origin guard as `/api/run` (`lib/origin-guard.js`, shared by both routers).
+
+| Method   | Path                  | Description |
+| -------- | --------------------- | ----------- |
+| `GET`    | `/api/usage`          | Capture history, newest first. `?limit=` (default 50, max 500). Also returns `capturing: boolean` |
+| `GET`    | `/api/usage/:id`      | One capture's full row, incl. raw captured `/status`/`/usage` pane text |
+| `POST`   | `/api/usage/capture`  | Launch `claude` in a detached tmux session, drive `/status` then `/usage`, capture both panes, and persist the best-effort parsed result. Optional body `{ cwd? }`. Blocks for the tmux round-trip (~10-15s) instead of exposing a pollable handle. `409` if a capture is already running |
+
+Every capture persists regardless of parse success (`status`: `ok`/`partial`/`error`); `raw_status_text`/`raw_usage_text` are always stored so a CLI-version format change degrades to a raw-text fallback in the UI instead of losing data. No WebSocket message — the client just awaits the `POST` response.
+
 WebSocket message types added: `run_stream` (parsed stream-json envelope, including `stream_event` deltas from `--include-partial-messages`), `run_status` (status transitions), `run_input_ack` (stdin write confirmed), and `cc_config_changed` (broadcast by `lib/cc-watcher.js` on `fs.watch` events under `~/.claude/` and by `routes/cc-config.js` after every successful PUT/DELETE — debounced at 500 ms, payload `{ source: "dashboard"|"fs", action?, scope?, type?, name?, paths? }`).
 
 ### Import History

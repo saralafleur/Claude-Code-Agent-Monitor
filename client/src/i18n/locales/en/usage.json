@@ -1,0 +1,38 @@
+{
+  "title": "Usage",
+  "subtitle": "Your Claude account's rate-limit standing, captured from the CLI's own /status and /usage panels.",
+  "captureNow": "Capture now",
+  "capturing": "Capturing…",
+  "captureFailed": "Capture failed.",
+  "failedLoad": "Failed to load usage history.",
+  "noData": "—",
+  "resets": "Resets {{when}}",
+  "status": {
+    "ok": "OK",
+    "partial": "Partial",
+    "error": "Error"
+  },
+  "latest": {
+    "title": "Latest capture",
+    "account": "Account",
+    "org": "Organization",
+    "model": "Model",
+    "sessionCost": "Session cost",
+    "sessionWindow": "Session window (5h)",
+    "weekly": "Weekly window",
+    "weeklyByModel": "Weekly window by model",
+    "inputTokens": "Input tokens",
+    "outputTokens": "Output tokens",
+    "cacheRead": "Cache read",
+    "cacheWrite": "Cache write",
+    "showRaw": "Show raw captured text"
+  },
+  "empty": {
+    "title": "No usage captures yet",
+    "hint": "Click \"Capture now\" to launch a claude session in the background, read its /status and /usage panels, and save the result here."
+  },
+  "history": {
+    "title": "History",
+    "empty": "No earlier captures yet."
+  }
+}
