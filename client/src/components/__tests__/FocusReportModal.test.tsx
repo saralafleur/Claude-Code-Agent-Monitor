@@ -21,11 +21,41 @@ import { FocusReportModal } from "../FocusReportModal";
 // split parity check on the new route is the server-side half).
 import { FocusReportBody } from "../FocusReportBody";
 import { CONCURRENCY_PRIMARY_KEY } from "../ConcurrencyStatTile";
+// FocusPage - the 4th DERIVED-DUAL-VIEW FocusReport consumer, added to this
+// file's cross-view parity chain by the "[FocusPage extension]" test below.
+import { FocusPage } from "../../pages/FocusPage";
+import { formatMs } from "../../lib/format";
 import type { FocusReport } from "../../lib/types";
 
-const focusReportMock = vi.fn();
+const focusReportMock = vi.fn(); // api.projects.focusReport - FocusReportModal
+// Additional endpoints FocusPage itself calls (distinct from
+// api.projects.focusReport above) - only exercised by the "[FocusPage
+// extension]" parity test below; every other test in this file leaves them
+// unused (mocked defaults are irrelevant to those tests since FocusPage is
+// never rendered by them).
+const topLevelFocusReportMock = vi.fn(); // api.focusReport
+const focusReportSummaryMock = vi.fn();
+const focusReportSummaryConfigMock = vi.fn();
+const projectsListMock = vi.fn();
+const sessionsListMock = vi.fn();
 vi.mock("../../lib/api", () => ({
-  api: { projects: { focusReport: (...args: unknown[]) => focusReportMock(...args) } },
+  api: {
+    projects: {
+      focusReport: (...args: unknown[]) => focusReportMock(...args),
+      list: (...args: unknown[]) => projectsListMock(...args),
+    },
+    sessions: { list: (...args: unknown[]) => sessionsListMock(...args) },
+    focusReport: (...args: unknown[]) => topLevelFocusReportMock(...args),
+    focusReportSummary: (...args: unknown[]) => focusReportSummaryMock(...args),
+    focusReportSummaryConfig: (...args: unknown[]) => focusReportSummaryConfigMock(...args),
+  },
+}));
+// FocusPage's live "currently active" status reads this store directly
+// (its real GET /api/focus hydrate has no mock here) - stub it inert,
+// matching FocusPage.test.tsx's own default (no live sessions needed for
+// this parity check).
+vi.mock("../../lib/focusStore", () => ({
+  useFocusMap: () => new Map(),
 }));
 
 function makeReport(overrides: Partial<FocusReport> = {}): FocusReport {
@@ -647,7 +677,7 @@ describe("FocusReportModal", () => {
     }
   });
 
-  it("[standing template] List and Calendar views render the same wall-clock/agent-time numbers for the same segment, and each renders internally consistent idle-stripe geometry (List: proportional to the real span; Calendar: proportional to its quarter-hour-snapped box) — extend THIS test, not a view-local one, for any future FocusReportSegment field either view renders", async () => {
+  it("[standing template] List and Calendar views render the same wall-clock/agent-time numbers for the same segment, and each renders internally consistent idle-stripe geometry (List: proportional to the real span; Calendar: proportional to its quarter-hour-snapped box) — extend THIS test, not a view-local one, for any future FocusReportSegment field either view renders (see also the '[board-mode extension]' and '[FocusPage extension]' tests below, for FocusReportBody's board-shaped render and FocusPage)", async () => {
     vi.useFakeTimers();
     try {
       const NOW = new Date("2026-07-26T15:00:00.000Z");
@@ -734,7 +764,7 @@ describe("FocusReportModal", () => {
     }
   });
 
-  it("[board-mode extension of the standing template] FocusReportBody renders modal-shaped and board-shaped props with identical stat-tile numbers and idle-stripe geometry for the same segment, but only the board-shaped render suppresses day-nav and shows a project label — extend THIS test, not a page-local one, for any future FocusReportBody consumer", async () => {
+  it("[board-mode extension of the standing template] FocusReportBody renders modal-shaped and board-shaped props with identical stat-tile numbers and idle-stripe geometry for the same segment, but only the board-shaped render suppresses day-nav and shows a project label — extend THIS test, not a page-local one, for any future FocusReportBody consumer (see also the '[FocusPage extension]' test below for FocusPage, the 4th independent FocusReport-rendering consumer)", async () => {
     vi.useFakeTimers();
     try {
       const NOW = new Date("2026-07-26T15:00:00.000Z");
@@ -854,6 +884,205 @@ describe("FocusReportModal", () => {
       expect(boardStripes).toHaveLength(1);
       expect(parseFloat((boardStripes[0] as HTMLElement).style.top)).toBeCloseTo(modalTop);
       expect(parseFloat((boardStripes[0] as HTMLElement).style.height)).toBeCloseTo(modalHeight);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("[FocusPage extension of the standing template] FocusPage renders identical on-item percentage, active/idle totals, and (once zoomed to the same window) windowed totals as FocusReportModal/FocusReportBody for the same fixture — extend THIS test, not a page-local one, for any future FocusReport consumer", async () => {
+    vi.useFakeTimers();
+    try {
+      const NOW = new Date("2026-07-26T15:00:00.000Z");
+      vi.setSystemTime(NOW);
+
+      // One shared fixture object, fed by REFERENCE to BOTH mocked
+      // endpoints below (api.projects.focusReport for FocusReportModal,
+      // api.focusReport for FocusPage) - never two separately-constructed
+      // "equivalent" fixtures, per this build's single-source-of-truth
+      // guardrail. Two sessions so a live 4h zoom (see below) genuinely
+      // narrows the visible set, not just the numbers: "Early" sits well
+      // before the live [11:00, 17:00) window, "Recent" sits inside it.
+      const report = makeReport({
+        sessions: [
+          {
+            session_id: "sess-early",
+            name: "Early",
+            cwd: "/repo",
+            ended_at: "2026-07-26T07:00:00.000Z",
+            segments: [
+              {
+                kind: "item",
+                item_number: 4,
+                label: "Migrate auth",
+                start: "2026-07-26T06:00:00.000Z",
+                end: "2026-07-26T07:00:00.000Z",
+                wall_ms: 60 * 60_000,
+                active_ms: 60 * 60_000,
+                idle_ms: 0,
+                inferred: false,
+                inferred_reason: null,
+                chunks: [
+                  {
+                    start: "2026-07-26T06:00:00.000Z",
+                    end: "2026-07-26T07:00:00.000Z",
+                    active: true,
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            session_id: "sess-recent",
+            name: "Recent",
+            cwd: "/repo",
+            ended_at: "2026-07-26T12:30:00.000Z",
+            segments: [
+              {
+                kind: "detour",
+                item_number: null,
+                label: "Quick check",
+                start: "2026-07-26T12:00:00.000Z",
+                end: "2026-07-26T12:30:00.000Z",
+                wall_ms: 30 * 60_000,
+                active_ms: 30 * 60_000,
+                idle_ms: 0,
+                inferred: false,
+                inferred_reason: null,
+                chunks: [
+                  {
+                    start: "2026-07-26T12:00:00.000Z",
+                    end: "2026-07-26T12:30:00.000Z",
+                    active: true,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        wall_clock_ms: 90 * 60_000,
+        concurrency_ratio: 1,
+        totals: {
+          wall_ms: 90 * 60_000,
+          active_ms: 90 * 60_000,
+          idle_ms: 0,
+          by_kind: {
+            item: { wall_ms: 60 * 60_000, active_ms: 60 * 60_000, idle_ms: 0 },
+            detour: { wall_ms: 30 * 60_000, active_ms: 30 * 60_000, idle_ms: 0 },
+            feature: { wall_ms: 0, active_ms: 0, idle_ms: 0 },
+            bug: { wall_ms: 0, active_ms: 0, idle_ms: 0 },
+          },
+        },
+      });
+
+      // Same object reference to both endpoints - see comment above.
+      focusReportMock.mockResolvedValue(report);
+      topLevelFocusReportMock.mockResolvedValue(report);
+      projectsListMock.mockResolvedValue({
+        projects: [],
+        unassigned: { cwds: [], session_count: 0, active_count: 0, last_activity: null },
+      });
+      sessionsListMock.mockResolvedValue({ sessions: [], total: 0, limit: 10000, offset: 0 });
+      focusReportSummaryMock.mockResolvedValue({ summary: null });
+      focusReportSummaryConfigMock.mockResolvedValue({ model: "sonnet" });
+
+      // --- Render FocusReportModal, switch to Calendar view, unzoom to 24h
+      // (the modal's Calendar view defaults to a 4h live zoom - expand to
+      // the full day first, exactly like the two standing-template tests
+      // above, so this test's own unwindowed comparison isn't accidentally
+      // pre-narrowed).
+      const { container: modalContainer } = renderModal();
+      await act(async () => {
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+      });
+      fireEvent.click(within(modalContainer).getByTitle("Calendar"));
+      fireEvent.click(within(modalContainer).getByText("24h"));
+
+      // --- Render FocusPage, in the SAME test, a second real component
+      // tree mounted alongside the modal's (both containers coexist in the
+      // same test's DOM, matching how the board-mode test above mounts two
+      // FocusReportBody trees side by side and diffs their containers).
+      const { container: pageContainer } = render(
+        <MemoryRouter>
+          <FocusPage />
+        </MemoryRouter>
+      );
+      await act(async () => {
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+      });
+      // FocusPage's own default hour-window is already 24h/unzoomed - this
+      // click is a no-op confirm, not a required narrowing; still assert
+      // the default really is unzoomed, not accidentally narrower than the
+      // modal's explicit click above.
+      fireEvent.click(within(pageContainer).getByText("24h"));
+      expect(within(pageContainer).getByText("24h")).toHaveAttribute("aria-pressed", "true");
+
+      function activeTileText(container: HTMLElement, expectedMs: number): string | null {
+        const tile = within(container)
+          .getByText("Total active agent time")
+          .closest("div") as HTMLElement;
+        return within(tile).getByText(formatMs(expectedMs)).textContent;
+      }
+      function idleTileText(container: HTMLElement, expectedMs: number): string | null {
+        const tile = within(container)
+          .getByText("Total idle agent time")
+          .closest("div") as HTMLElement;
+        return within(tile).getByText(formatMs(expectedMs)).textContent;
+      }
+
+      // --- (a) Unwindowed (24h) parity: identical active/idle totals in
+      // both containers, read independently via within(...) scoping.
+      expect(activeTileText(pageContainer, report.totals.active_ms)).toBe(
+        activeTileText(modalContainer, report.totals.active_ms)
+      );
+      expect(idleTileText(pageContainer, report.totals.idle_ms)).toBe(
+        idleTileText(modalContainer, report.totals.idle_ms)
+      );
+
+      // --- (b) Identical on-item / off-plan percentage, computed from the
+      // shared fixture's own totals (never a hardcoded literal) - this is
+      // the assertion that REPLACES FocusPage.test.tsx's former
+      // independently-hardcoded 75%/25% assertion as the parity
+      // source-of-truth (see the redirect comment left in that file).
+      const onItemPct = Math.round(
+        (report.totals.by_kind.item.active_ms / report.totals.active_ms) * 100
+      );
+      const offPlanPct = Math.max(0, 100 - onItemPct);
+      expect(within(modalContainer).getByText(`${onItemPct}%`)).toBeInTheDocument();
+      expect(within(pageContainer).getByText(`${onItemPct}%`)).toBeInTheDocument();
+      expect(within(modalContainer).getByText(`${offPlanPct}%`)).toBeInTheDocument();
+      expect(within(pageContainer).getByText(`${offPlanPct}%`)).toBeInTheDocument();
+
+      // --- (c) Now zoom BOTH trees to the SAME live 4h window (same
+      // useHourWindowZoom hook, same fake NOW) - the assertion that
+      // actually exercises DERIVED-DUAL-VIEW's risk for a WINDOWED value,
+      // not just the raw report.totals echoed verbatim by both (a weaker
+      // check that could pass even if the two consumers' own windowing math
+      // had silently diverged, since report.totals itself never changes
+      // with the zoom).
+      fireEvent.click(within(modalContainer).getByText("4h"));
+      fireEvent.click(within(pageContainer).getByText("4h"));
+
+      // Only "Recent" (12:00-12:30, a 30m-active detour) falls inside the
+      // live 4h window ([11:00, 17:00) at this fake "now") - "Early" (06:00-
+      // 07:00) falls entirely outside it and drops out, so these windowed
+      // numbers genuinely differ from the unwindowed ones asserted in (a)/(b)
+      // above (proof this is really re-deriving a windowed subset, not just
+      // re-displaying the same report.totals both times).
+      const windowedActiveMs = 30 * 60_000;
+      const windowedIdleMs = 0;
+      const windowedOnItemPct = 0; // only a detour segment is in-window
+      const windowedOffPlanPct = 100;
+
+      expect(activeTileText(pageContainer, windowedActiveMs)).toBe(
+        activeTileText(modalContainer, windowedActiveMs)
+      );
+      expect(idleTileText(pageContainer, windowedIdleMs)).toBe(
+        idleTileText(modalContainer, windowedIdleMs)
+      );
+      expect(within(modalContainer).getByText(`${windowedOnItemPct}%`)).toBeInTheDocument();
+      expect(within(pageContainer).getByText(`${windowedOnItemPct}%`)).toBeInTheDocument();
+      expect(within(modalContainer).getByText(`${windowedOffPlanPct}%`)).toBeInTheDocument();
+      expect(within(pageContainer).getByText(`${windowedOffPlanPct}%`)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

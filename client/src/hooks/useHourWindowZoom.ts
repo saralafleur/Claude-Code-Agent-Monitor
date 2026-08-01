@@ -122,14 +122,31 @@ export function useHourWindowZoom(
     windowAnchorMode === "live" && isToday ? "live" : "custom";
   const isLiveZoom = zoomable && effectiveAnchorMode === "live";
 
-  // Forces a re-render every ZOOM_REFRESH_MS while live-zoomed so the window
-  // keeps re-anchoring to the real current time instead of freezing at
-  // whatever moment it was last (re)computed. A "custom"-anchored window
-  // needs no such refresh - its start time doesn't move on its own.
-  const [, forceRefresh] = useState(0);
+  // Stabilizes the live-zoom "now" reading to the same ZOOM_REFRESH_MS
+  // cadence this file already documents as intended - a render caused by
+  // anything OTHER than the interval tick (e.g. a parent re-render) reads
+  // the same `nowMs` value it read last time, producing bit-identical
+  // `windowStartMs`/`windowEndMs`. Reading `Date.now()` directly inline
+  // instead (the prior "forceRefresh" bump-counter pattern) recomputed a
+  // fresh value on every render, which fed `windowStartMs`/`windowEndMs`
+  // into `FocusCalendarView.tsx`'s effect dependency array and triggered a
+  // render cascade (see PROJECT-CONTEXT.md's render-stability guidance).
+  // A "custom"-anchored window needs no such refresh - its start time
+  // doesn't move on its own.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     if (!isLiveZoom) return;
-    const id = setInterval(() => forceRefresh((n) => n + 1), ZOOM_REFRESH_MS);
+    // Eager resync on the rising edge (false -> true): without this, a
+    // false->true transition of isLiveZoom (e.g. clicking "Live" after a
+    // custom pick, or navigating back to today while zoomed) would keep
+    // showing whatever `nowMs` was last set to - stale for up to
+    // ZOOM_REFRESH_MS - even though this window claims to follow the
+    // current time. Runs once per isLiveZoom transition (this effect's own
+    // dependency array), not once per render, so it doesn't reintroduce the
+    // render-cascade the ZOOM_REFRESH_MS-cadence `nowMs` state was
+    // introduced to fix (see the comment above this state).
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), ZOOM_REFRESH_MS);
     return () => clearInterval(id);
   }, [isLiveZoom]);
 
@@ -143,8 +160,8 @@ export function useHourWindowZoom(
     windowStartMs = dayStart;
     windowEndMs = dayEnd;
   } else if (isLiveZoom) {
-    windowStartMs = Math.max(dayStart, Date.now() - hourWindow * HOUR_MS);
-    windowEndMs = Math.min(dayEnd, Date.now() + FUTURE_PAD_MS);
+    windowStartMs = Math.max(dayStart, nowMs - hourWindow * HOUR_MS);
+    windowEndMs = Math.min(dayEnd, nowMs + FUTURE_PAD_MS);
   } else {
     // Clamped so the window never starts before midnight or spills past it.
     windowStartMs = Math.min(Math.max(dayStart + customOffsetMs, dayStart), maxWindowStartMs);
@@ -181,7 +198,14 @@ export function useHourWindowZoom(
   // Whether the window ACTUALLY on screen right now starts after the real
   // current time - only possible on today's own view (a past/future day's
   // "now" comparison would be meaningless) - regardless of how that start
-  // was picked (a quick-start preset is the only way to pick one).
+  // was picked (a quick-start preset is the only way to pick one). Reads
+  // Date.now() directly (not `nowMs`) on purpose: `nowMs` only advances on
+  // the ZOOM_REFRESH_MS tick while `isLiveZoom`, so a "custom"-anchored
+  // window on today (picked via a quick-start preset) would otherwise see a
+  // `nowMs` frozen at mount time and never re-evaluate this boundary as real
+  // time passes. This value doesn't feed any effect dependency array, so a
+  // fresh per-render read here doesn't reintroduce the render-cascade this
+  // hook's live-zoom windowing math was fixed against.
   const windowIsFuture = isToday && windowStartMs > Date.now();
 
   return {

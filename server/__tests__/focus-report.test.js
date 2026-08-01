@@ -1097,3 +1097,58 @@ describe("mergeIntervals", () => {
     assert.equal(totalMs, 0);
   });
 });
+
+// Backfill regression for 60af828 (already shipped): activeIntervals()'s
+// per-point gap-credit walk used to be flattened into
+// sessionActiveIntervalsMs via `push(...intervals)`, which throws
+// `RangeError: Maximum call stack size exceeded` once `intervals.length`
+// passes V8's ~65,536 spread-as-arguments ceiling. The fix (a plain
+// loop-push) is already live on this branch - this is should-add coverage
+// closing the test-debt gap at the scale the original bug lived at, not a
+// regression test for a currently-live bug.
+describe("buildSessionFocusReport - high interval volume", () => {
+  it("does not throw RangeError and stays arithmetically sane past the 65,536-interval spread-as-arguments ceiling", () => {
+    const id = nextId("sess");
+    seedSession(id, CWD);
+    // One open Focus segment spanning a wide window - never closed, so its
+    // end is `ended_at` (below), comfortably containing every synthetic
+    // event minute.
+    focus(id, 0, "set", { verb: "set", item_number: 1, item_text_snapshot: "First item" });
+
+    // 70,000 plain events, one every 2 real seconds, starting just after the
+    // segment's own start - each qualifies as an "interior point" for
+    // activeIntervals()'s per-point walk, so this alone produces 70,001
+    // gaps/intervals (well past the 65,536 ceiling the original bug lived
+    // at). Bulk-inserted inside one transaction for speed.
+    const EVENT_COUNT = 70_000;
+    const insertMany = db.transaction(() => {
+      for (let i = 0; i < EVENT_COUNT; i++) {
+        const iso = new Date(Date.UTC(2026, 0, 1, 0, 0, 0) + (i + 1) * 2_000).toISOString();
+        insertPlainEventRaw.run(id, "PostToolUse", iso);
+      }
+    });
+    insertMany();
+
+    // 2 days after the epoch - comfortably past the last synthetic event
+    // (~38.9 hours in), so the segment stays open across the whole run.
+    const endedAt = t(60 * 24 * 2);
+
+    let report;
+    assert.doesNotThrow(() => {
+      report = buildSessionFocusReport(dbModule, {
+        id,
+        name: "Report Test",
+        cwd: CWD,
+        ended_at: endedAt,
+      });
+    });
+
+    assert.equal(report.segments.length, 1);
+    const seg = report.segments[0];
+    // Arithmetically sane, not just "didn't throw" - a silent partial
+    // result (e.g. a truncated interval list) would be a worse regression
+    // than a clean crash.
+    assert.ok(seg.active_ms <= seg.wall_ms);
+    assert.equal(seg.active_ms + seg.idle_ms, seg.wall_ms);
+  });
+});
