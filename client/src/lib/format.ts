@@ -516,6 +516,42 @@ export function fmt(n: number): string {
 }
 
 /**
+ * Parse a shorthand large-integer string into a raw number.
+ * @param raw User-typed text: plain digits (optionally comma-grouped), or a
+ *   decimal number followed by a `k`/`m`/`b` suffix (case-insensitive) -
+ *   `"500k"` -> 500000, `"1.2m"` -> 1200000, `"1,000,000"` -> 1000000.
+ * @returns The parsed integer (rounded), or `null` if `raw` doesn't match
+ *   that shape (empty, non-numeric, unrecognized suffix).
+ * @remarks Built for editable large-magnitude integer fields (e.g. a token
+ *   threshold) where typing every digit of `100000000` invites a miscounted
+ *   zero. {@link fmtTokensFull} is the display-side complement.
+ * @example parseTokenShorthand("500k") // 500000   parseTokenShorthand("1.2m") // 1200000
+ */
+export function parseTokenShorthand(raw: string): number | null {
+  const trimmed = raw.trim().toLowerCase().replace(/,/g, "");
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([kmb])?$/);
+  if (!match) return null;
+  const base = Number(match[1]);
+  if (!Number.isFinite(base)) return null;
+  const multiplier =
+    match[2] === "k" ? 1_000 : match[2] === "m" ? 1_000_000 : match[2] === "b" ? 1_000_000_000 : 1;
+  return Math.round(base * multiplier);
+}
+
+/**
+ * Format a raw integer with locale-aware digit grouping (no suffix, no unit).
+ * @param n A token count or other large integer.
+ * @returns E.g. `"100,000,000"` (en-US) - the round-trip complement to
+ *   {@link parseTokenShorthand}, so a saved value re-populates an editable
+ *   field formatted rather than as a bare digit string.
+ */
+export function fmtTokensFull(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString(getCurrentLocale());
+}
+
+/**
  * Format dollar amounts with K/M suffixes.
  * @param n A dollar amount (e.g. accumulated API spend).
  * @returns A compact currency string with two decimals: `"$1.23M"`, `"$4.56K"`, or

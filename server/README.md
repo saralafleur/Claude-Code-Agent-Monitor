@@ -642,6 +642,19 @@ The Usage page's global green/yellow/orange/red color thresholds (`routes/color-
 
 Every `PUT` broadcasts `color_thresholds_updated` with the full resulting config over `/ws`, so a change made from one connected computer shows up live on every other one — no reload needed.
 
+### Coach's Playbook
+
+The Coach's Playbook (`routes/playbook.js` + `routes/coach.js`, `/api/playbook/*` + `/api/coach/*`) — a rule-based system that watches usage patterns and surfaces recommendations. A **practice** is a named, built-in check (`lib/playbook/practices.js`; v1 ships exactly one, `session-token-ceiling`); its config (enabled + thresholds) is a single **global** setting, same no-accounts/server-shared model as Monitors and Color Thresholds, persisted in `playbook_practice_config`. A detected occurrence of a practice firing for a scope is an **Observation** (`coach_observations`), produced by a background scheduler (`lib/playbook/engine.js`, mirrors `lib/reconciliation.js`'s tick shape — boot delay, `setInterval`, a `running` re-entrancy guard) that evaluates every enabled practice against every active session every `DASHBOARD_PLAYBOOK_MS` (default 5 min; `DASHBOARD_PLAYBOOK_MODE=off` to disable), deduped so a practice+scope with an already-`open` Observation never re-fires.
+
+| Method | Path                                       | Description |
+| ------ | ------------------------------------------ | ----------- |
+| `GET`  | `/api/playbook/practices`                  | Every catalog practice merged with its current config (or catalog defaults if never touched) |
+| `PUT`  | `/api/playbook/practices/:id/config`       | Patch `{ enabled?, config? }`; `404 UNKNOWN_PRACTICE` / `400 INVALID_CONFIG` on an unknown field or an out-of-range value |
+| `GET`  | `/api/coach/observations?status=`          | Most recent first; `status` optionally narrows to one of open/acknowledged/dismissed/resolved |
+| `POST` | `/api/coach/observations/:id/respond`      | Body `{ response }`, one of acknowledged/dismissed/resolved; `404 NOT_FOUND` / `400 INVALID_RESPONSE` |
+
+`PUT /api/playbook/practices/:id/config` broadcasts `playbook_practice_config_updated`; the engine's own tick broadcasts `coach_observation_created` when a practice fires; `POST .../respond` broadcasts `coach_observation_updated` — see [docs/API.md](../docs/API.md#playbook) for full request/response shapes.
+
 ### Projects
 
 A user-named grouping of one or more session working directories (`routes/projects.js`, `/api/projects*`). A project claims one or more folders; a folder belongs to at most one project. There is **no `project_id` column on `sessions`** — membership is derived by joining `sessions.cwd` against `project_paths.cwd` at query time, so a session created before its folder was ever mapped retroactively belongs to that project the instant the mapping is added. `GET /api/projects` aggregates `session_count`/`active_count`/`last_activity` per project (and for an `unassigned` bucket of cwds with sessions but no project) in a single grouped query rather than N+1 per-project lookups.

@@ -401,6 +401,42 @@ vi.mock("../../lib/api", async (importOriginal) => {
         get: r({}),
         capture: r({}),
       },
+      // Coach's Playbook (CoachPage's Feed + PlaybookPage's editor) - empty
+      // observations list + the single v1 practice at its catalog defaults.
+      playbook: {
+        listPractices: r({
+          practices: [
+            {
+              id: "session-token-ceiling",
+              category: "context-management",
+              scope: "session",
+              kind: "risk",
+              defaultSeverity: "warning",
+              fields: [
+                { key: "thresholdTokens", type: "number", default: 100_000_000, min: 1_000_000 },
+              ],
+              enabled: true,
+              config: { thresholdTokens: 100_000_000 },
+            },
+          ],
+        }),
+        updatePracticeConfig: r({
+          id: "session-token-ceiling",
+          category: "context-management",
+          scope: "session",
+          kind: "risk",
+          defaultSeverity: "warning",
+          fields: [
+            { key: "thresholdTokens", type: "number", default: 100_000_000, min: 1_000_000 },
+          ],
+          enabled: true,
+          config: { thresholdTokens: 100_000_000 },
+        }),
+      },
+      coach: {
+        listObservations: r({ observations: [] }),
+        respondToObservation: r({}),
+      },
       accounts: {
         list: r({ accounts: [] }),
         add: r({ account: {} }),
@@ -505,6 +541,7 @@ import { CcConfig } from "../CcConfig";
 import { Run } from "../Run";
 import { Usage } from "../Usage";
 import { CoachPage } from "../CoachPage";
+import { PlaybookPage } from "../PlaybookPage";
 import { Settings } from "../Settings";
 import { NotFound } from "../NotFound";
 
@@ -634,6 +671,9 @@ describe("screen snapshots", () => {
   // placement (Sidebar.tsx NAV_GROUPS).
   it("Coach", async () => {
     await snapshot(<CoachPage />, "/coach");
+  });
+  it("Playbook", async () => {
+    await snapshot(<PlaybookPage />, "/coach/playbook");
   });
   it("Settings", async () => {
     await snapshot(<Settings />, "/settings");

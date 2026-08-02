@@ -20,6 +20,8 @@ Complete REST API and WebSocket documentation for Agent Dashboard.
   - [Projects](#projects)
   - [Plans & Focus](#plans--focus)
   - [Portfolio](#portfolio)
+  - [Playbook](#playbook)
+  - [Coach](#coach)
 - [WebSocket API](#websocket-api)
 - [Error Handling](#error-handling)
 - [Rate Limiting](#rate-limiting)
@@ -1769,6 +1771,102 @@ POST   /api/accounts/:id/login-terminal    Open a Terminal.app window running CL
 
 ---
 
+### Playbook
+
+The `/api/playbook/*` namespace exposes the Coach's Playbook — the catalog of rule-based **practices** the Coach engine (`server/lib/playbook/engine.js`) evaluates on a tick, plus each practice's user-editable config. Practice config is **server-shared**, not per-user: this app has no accounts, so one setting applies to every connected computer, and a change from one client is pushed live to every other connected client over the [`playbook_practice_config_updated`](#playbook_practice_config_updated) WebSocket message.
+
+**Practice shape:**
+
+```json
+{
+  "id": "session-token-ceiling",
+  "category": "context-management",
+  "scope": "session",
+  "kind": "risk",
+  "defaultSeverity": "warning",
+  "fields": [
+    { "key": "thresholdTokens", "type": "number", "default": 100000000, "min": 1000000 }
+  ],
+  "enabled": true,
+  "config": { "thresholdTokens": 100000000 }
+}
+```
+
+`scope` (`session`/`project`/`global`) is what one Observation from the practice is scoped to — v1's engine only evaluates `session`-scoped practices against currently-active sessions. `fields` describes the practice's own config schema; v1 only has `type: "number"` fields (a threshold), each with a `default` and a `min` floor. `config` is the practice's current values, keyed by each field's `key` — a key not yet configured falls back to that field's `default`. v1 ships exactly one practice: `session-token-ceiling`, which flags a session whose total token usage crosses `thresholdTokens`.
+
+#### List Practices
+
+```http
+GET /api/playbook/practices
+```
+
+Returns every catalog practice merged with its stored config (or catalog defaults, if never configured):
+
+```json
+{ "practices": [ /* Practice[] */ ] }
+```
+
+#### Update a Practice's Config
+
+```http
+PUT /api/playbook/practices/:id/config
+```
+
+**Request Body:** `{ "enabled"?: boolean, "config"?: { [fieldKey]: number } }` — both optional and independent; an omitted field keeps its current stored value. `config` is itself a patch: only the keys supplied are overwritten, not the whole object. Persists the change, broadcasts [`playbook_practice_config_updated`](#playbook_practice_config_updated) with the merged practice, and returns that same practice.
+
+**Error Responses:** `404` `{ "error": { "code": "UNKNOWN_PRACTICE", "message" } }` for an `:id` not in the catalog. `400` `{ "error": { "code": "INVALID_CONFIG", "message" } }` for a `config` key that isn't one of the practice's own `fields[].key`, a value that isn't a finite number, or a value below that field's `min`.
+
+---
+
+### Coach
+
+The `/api/coach/*` namespace exposes the Coach's Feed — **Observations** the Playbook engine records each time an enabled practice's condition fires. `coach_observation_created` (a brand-new Observation) is broadcast by the engine itself on the tick that produces it; this router only ever broadcasts state a human explicitly changed, via [`coach_observation_updated`](#coach_observation_updated).
+
+**Observation shape:**
+
+```json
+{
+  "id": 42,
+  "practice_id": "session-token-ceiling",
+  "scope_type": "session",
+  "scope_id": "5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11",
+  "kind": "risk",
+  "severity": "warning",
+  "values_json": "{\"totalTokens\":150000000,\"thresholdTokens\":100000000}",
+  "status": "open",
+  "detected_at": "2026-07-24T18:41:55.117Z",
+  "responded_at": null
+}
+```
+
+`scope_type` (`session`/`project`/`global`) says what `scope_id` identifies; `scope_id` is `null` for a `global`-scoped Observation. `values_json` is a **JSON-encoded string**, not a nested object — callers `JSON.parse` it to read the practice-specific numbers that triggered detection. `status` starts `"open"` and moves to `"acknowledged"`/`"dismissed"`/`"resolved"` via the respond endpoint below; `responded_at` is `null` until it does.
+
+#### List Observations
+
+```http
+GET /api/coach/observations?status=
+```
+
+Returns Observations, most recent (`detected_at`) first, capped at 100 rows:
+
+```json
+{ "observations": [ /* Observation[] */ ] }
+```
+
+`status` is optional and narrows to one of `open`/`acknowledged`/`dismissed`/`resolved`; omit for all statuses. **Error Response (400):** `{ "error": { "code": "INVALID_STATUS", "message" } }` for any other value.
+
+#### Respond to an Observation
+
+```http
+POST /api/coach/observations/:id/respond
+```
+
+**Request Body:** `{ "response": "acknowledged" | "dismissed" | "resolved" }` (required). Records the response, moves `status` accordingly, broadcasts [`coach_observation_updated`](#coach_observation_updated) with the full updated row, and returns that same row.
+
+**Error Responses:** `400` `{ "error": { "code": "INVALID_RESPONSE", "message" } }` for a `response` outside the three allowed values. `404` `{ "error": { "code": "NOT_FOUND", "message" } }` for an unknown `:id`.
+
+---
+
 ## WebSocket API
 
 ### Connection
@@ -2021,6 +2119,23 @@ Broadcast whenever a layer-4 `detour_dispositions` row changes: the classifier r
 
 ```json
 { "type": "detour_disposition", "data": { "id": 40, "cwd": "/Users/sara/CODE-LOCAL/SARA/Claude-Code-Agent-Monitor", "disposition": "fold_in", "write_status": "written", "resolved_item_id": "a1b2c3d4" } }
+```
+
+#### playbook_practice_config_updated
+
+Broadcast whenever `PUT /api/playbook/practices/:id/config` changes a practice's `enabled`/`config` — from any connected client/computer. Carries the full merged practice (see [Playbook](#playbook)).
+
+```json
+{ "type": "playbook_practice_config_updated", "data": { "id": "session-token-ceiling", "category": "context-management", "scope": "session", "kind": "risk", "defaultSeverity": "warning", "fields": [{ "key": "thresholdTokens", "type": "number", "default": 100000000, "min": 1000000 }], "enabled": true, "config": { "thresholdTokens": 150000000 } } }
+```
+
+#### coach_observation_created / coach_observation_updated
+
+`coach_observation_created` is broadcast by the Playbook engine itself on the tick that detects a new Observation (not from a route). `coach_observation_updated` is broadcast whenever `POST /api/coach/observations/:id/respond` records a user's response. Both carry the full Observation row (see [Coach](#coach)).
+
+```json
+{ "type": "coach_observation_created", "data": { "id": 42, "practice_id": "session-token-ceiling", "scope_type": "session", "scope_id": "5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11", "kind": "risk", "severity": "warning", "values_json": "{\"totalTokens\":150000000,\"thresholdTokens\":100000000}", "status": "open", "detected_at": "2026-07-24T18:41:55.117Z", "responded_at": null } }
+{ "type": "coach_observation_updated", "data": { "id": 42, "practice_id": "session-token-ceiling", "scope_type": "session", "scope_id": "5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11", "kind": "risk", "severity": "warning", "values_json": "{\"totalTokens\":150000000,\"thresholdTokens\":100000000}", "status": "acknowledged", "detected_at": "2026-07-24T18:41:55.117Z", "responded_at": "2026-07-24T19:02:10.000Z" } }
 ```
 
 ### Event Flow

@@ -14,10 +14,10 @@
  * code-block renderer used in the Conversation tab — the badge alone tells
  * you the session is blocked on you, not what it's blocked ON, which is
  * what you need to decide whether to act now. The popup never resizes the
- * card itself or reflows its neighbors. The "open new terminal" button
- * opens a small anchored popover prompting for an optional effort name
- * (passed through as `claude -n <name>`) before actually launching -
- * Enter or its own "Open" button submits, Escape/outside-click cancels.
+ * card itself or reflows its neighbors. Launching a brand-new `claude`
+ * CLI session lives in the sidebar and the Kanban board header now, not
+ * on the individual card - this card only offers "jump to terminal" for
+ * locating an already-running local session's existing terminal.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -71,7 +71,7 @@
  *
  * ----------------------------------------------------------------------------- */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -83,7 +83,6 @@ import {
   Cpu,
   MessageSquare,
   Terminal,
-  SquareTerminal,
   Loader2,
   Check,
   X,
@@ -350,81 +349,6 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
       });
   }
 
-  // "Open new terminal" — sibling action to "Jump to terminal" above, but
-  // starts a brand-new `claude` instance in the session's cwd instead of
-  // locating the existing one. Doesn't require the session to still be
-  // active/have a resolved pid (unlike canFocusTerminal) since it's opening
-  // a fresh process, not locating a running one — only a known local cwd.
-  const canOpenTerminal = (session.source === "local" || !session.source) && !!session.cwd;
-  const [openTerminalState, setOpenTerminalState] = useState<
-    "idle" | "pending" | "success" | "error"
-  >("idle");
-  const [openTerminalError, setOpenTerminalError] = useState<string | null>(null);
-  const openTerminalResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Click opens a small anchored popover prompting for an optional effort
-  // name (passed through as `claude -n <name>` so the fresh session starts
-  // already titled) rather than firing immediately - the popover's own
-  // "Open" button / Enter key is what actually calls the API.
-  const openTerminalBtnRef = useRef<HTMLButtonElement | null>(null);
-  const [showNamePopover, setShowNamePopover] = useState(false);
-  const [namePopoverRect, setNamePopoverRect] = useState<DOMRect | null>(null);
-  const [nameDraft, setNameDraft] = useState("");
-  const namePopoverRef = useRef<HTMLDivElement | null>(null);
-
-  function handleOpenTerminal(name?: string) {
-    if (openTerminalState === "pending") return;
-    if (openTerminalResetTimerRef.current) clearTimeout(openTerminalResetTimerRef.current);
-    setOpenTerminalState("pending");
-    setOpenTerminalError(null);
-    const call = name
-      ? api.sessions.openTerminal(session.id, name)
-      : api.sessions.openTerminal(session.id);
-    call
-      .then(() => setOpenTerminalState("success"))
-      .catch((err: unknown) => {
-        setOpenTerminalError(err instanceof Error ? err.message : t("session.openTerminalError"));
-        setOpenTerminalState("error");
-      })
-      .finally(() => {
-        openTerminalResetTimerRef.current = setTimeout(() => setOpenTerminalState("idle"), 2000);
-      });
-  }
-
-  function handleOpenTerminalButtonClick(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (openTerminalState === "pending") return;
-    if (showNamePopover) {
-      setShowNamePopover(false);
-      return;
-    }
-    if (openTerminalBtnRef.current) {
-      setNamePopoverRect(openTerminalBtnRef.current.getBoundingClientRect());
-    }
-    setNameDraft("");
-    setShowNamePopover(true);
-  }
-
-  function submitOpenTerminal() {
-    setShowNamePopover(false);
-    handleOpenTerminal(nameDraft.trim() || undefined);
-  }
-
-  // Closes the popover on an outside click (mirrors the escape-to-cancel
-  // keydown handler on the input itself) without opening a terminal - only
-  // the popover's own submit path should ever call handleOpenTerminal.
-  useEffect(() => {
-    if (!showNamePopover) return;
-    function handleDocMouseDown(e: MouseEvent) {
-      const target = e.target as Node;
-      if (namePopoverRef.current?.contains(target)) return;
-      if (openTerminalBtnRef.current?.contains(target)) return;
-      setShowNamePopover(false);
-    }
-    document.addEventListener("mousedown", handleDocMouseDown);
-    return () => document.removeEventListener("mousedown", handleDocMouseDown);
-  }, [showNamePopover]);
-
   // Only the bottom hover bar (rendered when isWaiting) opens the preview
   // popup now - the card at large no longer does, since that read as too
   // intrusive for a card the user was merely scanning past.
@@ -506,37 +430,6 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
           {/* compact: cards are narrow — inline reason chip would squeeze the
               title, so the reason stays hover-tooltip-only here. */}
           <SessionStatusBadge status={status} reason={sessionAwaitingReason(session)} compact />
-          {canOpenTerminal && (
-            <button
-              ref={openTerminalBtnRef}
-              type="button"
-              onClick={handleOpenTerminalButtonClick}
-              disabled={openTerminalState === "pending"}
-              title={
-                openTerminalState === "error"
-                  ? (openTerminalError ?? undefined)
-                  : t("session.openTerminal")
-              }
-              aria-label={t("session.openTerminal")}
-              className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 transition-colors ${
-                openTerminalState === "success"
-                  ? "bg-emerald-500/15 text-emerald-500"
-                  : openTerminalState === "error"
-                    ? "bg-red-500/15 text-red-500"
-                    : "bg-accent/15 text-accent hover:bg-accent/25"
-              }`}
-            >
-              {openTerminalState === "pending" ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : openTerminalState === "success" ? (
-                <Check className="w-3.5 h-3.5" />
-              ) : openTerminalState === "error" ? (
-                <X className="w-3.5 h-3.5" />
-              ) : (
-                <SquareTerminal className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
           {canFocusTerminal && (
             <button
               type="button"
@@ -840,57 +733,6 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                 </p>
               )}
             </div>
-          </div>,
-          document.body
-        )}
-
-      {showNamePopover &&
-        namePopoverRect &&
-        createPortal(
-          <div
-            ref={namePopoverRef}
-            role="dialog"
-            aria-label={t("session.openTerminal")}
-            onClick={(e) => e.stopPropagation()}
-            style={computeFocusPopupStyle(namePopoverRect)}
-            className="flex flex-col gap-2 rounded-lg border border-border bg-surface-2 shadow-2xl p-3 animate-fade-in"
-          >
-            <label
-              htmlFor={`open-terminal-name-${session.id}`}
-              className="text-[10px] font-semibold uppercase tracking-wider text-gray-500"
-            >
-              {t("session.openTerminalNameLabel")}
-            </label>
-            <input
-              id={`open-terminal-name-${session.id}`}
-              type="text"
-              autoFocus
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submitOpenTerminal();
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  setShowNamePopover(false);
-                }
-              }}
-              placeholder={t("session.openTerminalNamePlaceholder")}
-              className="input w-full text-sm"
-            />
-            <button
-              type="button"
-              onClick={submitOpenTerminal}
-              className="btn-primary w-full justify-center text-xs py-1.5"
-            >
-              <SquareTerminal className="w-3.5 h-3.5" />
-              {t("session.openTerminal")}
-            </button>
           </div>,
           document.body
         )}

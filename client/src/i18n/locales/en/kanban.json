@@ -64,10 +64,6 @@
     "expensiveModel": "Running on a premium model (Opus/Fable) - higher cost per token",
     "focusTerminal": "Jump to terminal",
     "focusTerminalError": "Failed to jump to terminal",
-    "openTerminal": "Open new terminal here",
-    "openTerminalError": "Failed to open a new terminal",
-    "openTerminalNameLabel": "Effort name (optional)",
-    "openTerminalNamePlaceholder": "e.g. Fix desktop freeze",
     "tokens": {
       "in": "In",
       "out": "Out",

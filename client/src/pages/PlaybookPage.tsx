@@ -30,8 +30,19 @@ import { Compass } from "lucide-react";
 import { usePlaybookPractices, playbookStore } from "../lib/playbookStore";
 import { CoachTabs } from "../components/coach/CoachTabs";
 import { ObservationCard } from "../components/coach/ObservationCard";
+import { parseTokenShorthand, fmtTokensFull } from "../lib/format";
 
 const PRACTICE_ID = "session-token-ceiling";
+
+// Common ceilings, offered as one-click chips next to the free-text field.
+const TOKEN_PRESETS = [
+  { value: 500_000, label: "500K" },
+  { value: 1_000_000, label: "1M" },
+  { value: 5_000_000, label: "5M" },
+  { value: 10_000_000, label: "10M" },
+  { value: 50_000_000, label: "50M" },
+  { value: 100_000_000, label: "100M" },
+];
 
 export function PlaybookPage() {
   const { t } = useTranslation("coach");
@@ -40,14 +51,17 @@ export function PlaybookPage() {
 
   const [enabled, setEnabled] = useState(true);
   const [draft, setDraft] = useState<Record<string, number>>({});
+  const [thresholdText, setThresholdText] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedPulse, setSavedPulse] = useState(false);
   const seeded = useRef(false);
 
   useEffect(() => {
-    if (practice && !seeded.current) {
+    const seedField = practice?.fields[0];
+    if (practice && seedField && !seeded.current) {
       setEnabled(practice.enabled);
       setDraft(practice.config);
+      setThresholdText(fmtTokensFull(practice.config[seedField.key] ?? seedField.default));
       seeded.current = true;
     }
   }, [practice]);
@@ -64,7 +78,8 @@ export function PlaybookPage() {
 
   const draftValue = draft[field.key] ?? field.default;
   const isDirty = enabled !== practice.enabled || draftValue !== practice.config[field.key];
-  const isValid = Number.isFinite(draftValue) && draftValue >= field.min;
+  const parsedThreshold = parseTokenShorthand(thresholdText);
+  const isValid = parsedThreshold !== null && parsedThreshold >= field.min;
 
   const handleSave = async () => {
     setSaving(true);
@@ -77,8 +92,13 @@ export function PlaybookPage() {
     }
   };
 
+  const applyThreshold = (value: number) => {
+    setDraft({ [field.key]: value });
+    setThresholdText(fmtTokensFull(value));
+  };
+
   const handleReset = () => {
-    setDraft({ [field.key]: field.default });
+    applyThreshold(field.default);
   };
 
   return (
@@ -130,20 +150,46 @@ export function PlaybookPage() {
           <div className="flex items-stretch border border-border rounded-lg overflow-hidden bg-surface-3 max-w-xs">
             <input
               id="threshold-field"
-              type="number"
-              min={field.min}
-              step={1_000_000}
-              value={draftValue}
-              onChange={(e) => setDraft({ [field.key]: Number(e.target.value) })}
+              type="text"
+              inputMode="decimal"
+              placeholder={t("practices.sessionTokenCeiling.hint")}
+              value={thresholdText}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setThresholdText(raw);
+                const parsed = parseTokenShorthand(raw);
+                if (parsed !== null) setDraft({ [field.key]: parsed });
+              }}
+              onBlur={() => {
+                if (parsedThreshold !== null) setThresholdText(fmtTokensFull(parsedThreshold));
+              }}
               className="flex-1 min-w-0 bg-transparent border-none text-gray-100 font-mono text-sm px-2.5 py-1.5 tabular-nums focus:outline-none"
             />
             <span className="flex items-center px-2.5 text-[11px] text-gray-500 bg-surface-4 border-l border-border">
               {t("practices.sessionTokenCeiling.unit")}
             </span>
           </div>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {TOKEN_PRESETS.map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => applyThreshold(preset.value)}
+                className={`text-[11px] font-mono px-2 py-1 rounded-md border transition-colors ${
+                  draftValue === preset.value
+                    ? "border-accent bg-accent/10 text-accent"
+                    : "border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
           {!isValid && (
             <p className="text-[11px] text-red-400 mt-1.5">
-              {t("playbook.minError", { min: field.min.toLocaleString() })}
+              {parsedThreshold === null
+                ? t("playbook.parseError")
+                : t("playbook.minError", { min: field.min.toLocaleString() })}
             </p>
           )}
         </div>

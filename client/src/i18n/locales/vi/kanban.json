@@ -64,10 +64,6 @@
     "expensiveModel": "Đang chạy mô hình cao cấp (Opus/Fable) - chi phí mỗi token cao hơn",
     "focusTerminal": "Chuyển đến terminal",
     "focusTerminalError": "Không thể chuyển đến terminal",
-    "openTerminal": "Mở terminal mới tại đây",
-    "openTerminalError": "Không thể mở terminal mới",
-    "openTerminalNameLabel": "Tên công việc (tùy chọn)",
-    "openTerminalNamePlaceholder": "vd: Sửa lỗi treo máy tính để bàn",
     "tokens": {
       "in": "Vào",
       "out": "Ra",

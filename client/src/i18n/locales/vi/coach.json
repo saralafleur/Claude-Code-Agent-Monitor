@@ -42,13 +42,15 @@
     "saving": "Đang lưu…",
     "saved": "Đã lưu",
     "resetDefault": "Đặt lại mặc định",
-    "minError": "Phải lớn hơn hoặc bằng {{min}}"
+    "minError": "Phải lớn hơn hoặc bằng {{min}}",
+    "parseError": "Nhập một số, ví dụ 500k hoặc 1.2m"
   },
   "practices": {
     "sessionTokenCeiling": {
       "name": "Giới hạn Token của phiên",
       "description": "Cảnh báo khi tổng lượng token sử dụng trong một phiên vượt quá giới hạn, trước khi chất lượng giảm sút hoặc cửa sổ ngữ cảnh trở nên không đáng tin cậy.",
       "fieldLabel": "Ngưỡng",
+      "hint": "vd. 500k hoặc 1.2m",
       "unit": "tokens",
       "message": "Ngữ cảnh của phiên đang trở nên lớn ({{tokens}} tokens)",
       "recommendation": "Hãy dùng /compact hoặc /clear trước khi tiếp tục — sao chép lại ngữ cảnh hiện tại của bạn trước."

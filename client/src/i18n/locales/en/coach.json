@@ -42,13 +42,15 @@
     "saving": "Saving…",
     "saved": "Saved",
     "resetDefault": "Reset to default",
-    "minError": "Must be at least {{min}}"
+    "minError": "Must be at least {{min}}",
+    "parseError": "Enter a number, like 500k or 1.2m"
   },
   "practices": {
     "sessionTokenCeiling": {
       "name": "Session Token Ceiling",
       "description": "Flags when a single session's total token usage crosses a ceiling, before quality degrades or the context window becomes unreliable.",
       "fieldLabel": "Threshold",
+      "hint": "e.g. 500k or 1.2m",
       "unit": "tokens",
       "message": "Session context is becoming large ({{tokens}} tokens)",
       "recommendation": "Compact or clear the session before continuing — copy your current context first."

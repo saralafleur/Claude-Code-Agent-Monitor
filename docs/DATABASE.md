@@ -615,6 +615,50 @@ Managed through the `/api/color-thresholds` route (`GET`/`PUT`); every `PUT` is 
 
 ---
 
+### playbook_practice_config / coach_observations
+
+The Coach's Playbook. `playbook_practice_config` holds each practice's user-editable, server-shared config (a practice with no row is enabled with its catalog-defined defaults — `server/lib/playbook/practices.js` — so shipping a new practice never needs a migration or seed). `coach_observations` holds what the Playbook engine (`server/lib/playbook/engine.js`) actually detected.
+
+```sql
+CREATE TABLE IF NOT EXISTS playbook_practice_config (
+    practice_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    config TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS coach_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    practice_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('session','project','global')),
+    scope_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('risk','info','good')),
+    severity TEXT NOT NULL,
+    values_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','acknowledged','dismissed','resolved')),
+    detected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_coach_observations_open
+    ON coach_observations (practice_id, scope_type, scope_id, status);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `playbook_practice_config.practice_id` | TEXT | NO | Primary key; matches a catalog practice's `id` (e.g. `session-token-ceiling`) |
+| `playbook_practice_config.enabled` | INTEGER | NO | `0`/`1` — a disabled practice is never evaluated by the engine |
+| `playbook_practice_config.config` | TEXT | NO | JSON blob of `{ fieldKey: number }` overrides, validated against that practice's own `fields` schema at the route layer, not here |
+| `coach_observations.scope_type` / `scope_id` | TEXT | scope_id: YES | What the practice fired for — `session`/`project`/`global` and the matching id (`session_id` in v1; `scope_id` is `NULL` for a future global-scoped practice) |
+| `coach_observations.kind` | TEXT | NO | `risk`/`info`/`good` — separate from `severity` so the Coach can recognize positive patterns, not just flag problems |
+| `coach_observations.values_json` | TEXT | NO | JSON payload a client-side i18n template (keyed by `practice_id`) interpolates into display copy — this app has no server-side i18n, so no English text lives on the row |
+| `coach_observations.status` | TEXT | NO | `open`/`acknowledged`/`dismissed`/`resolved`; the `idx_coach_observations_open` index is the engine's dedup lookup — a practice+scope with an already-`open` row never re-fires |
+
+Managed through `/api/playbook/practices[/:id/config]` and `/api/coach/observations[/:id/respond]`; writes broadcast `playbook_practice_config_updated` / `coach_observation_created` / `coach_observation_updated` over the WebSocket. See [docs/API.md → Playbook](./API.md#playbook) and [→ Coach](./API.md#coach).
+
+---
+
 ### projects / project_paths
 
 A user-named grouping of one or more session working directories. `sessions` carries **no** `project_id` column — project membership is derived by joining `sessions.cwd` against `project_paths.cwd` at query time, so a session (existing or newly imported) retroactively belongs to a project the instant its folder is mapped, with no backfill required. A folder belongs to at most one project (`project_paths.cwd` is `UNIQUE`); a project may claim many folders.

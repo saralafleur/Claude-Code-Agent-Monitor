@@ -42,13 +42,15 @@
     "saving": "正在保存…",
     "saved": "已保存",
     "resetDefault": "恢复默认值",
-    "minError": "不能小于 {{min}}"
+    "minError": "不能小于 {{min}}",
+    "parseError": "请输入数字，例如 500k 或 1.2m"
   },
   "practices": {
     "sessionTokenCeiling": {
       "name": "会话 Token 上限",
       "description": "当单个会话的 Token 总用量超过设定上限时发出提示，避免质量下降或上下文窗口变得不可靠。",
       "fieldLabel": "阈值",
+      "hint": "例如 500k 或 1.2m",
       "unit": "tokens",
       "message": "会话上下文正在变大（{{tokens}} tokens）",
       "recommendation": "建议在继续之前先执行 /compact 或 /clear——请先复制保存当前上下文。"

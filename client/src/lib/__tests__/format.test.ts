@@ -22,6 +22,8 @@ import {
   formatModelName,
   isExpensiveModel,
   pathTail,
+  parseTokenShorthand,
+  fmtTokensFull,
 } from "../format";
 
 describe("formatMs", () => {
@@ -272,6 +274,44 @@ describe("fmt", () => {
   it("should format billions with B suffix", () => {
     expect(fmt(1_000_000_000)).toBe("1.0B");
     expect(fmt(2_500_000_000)).toBe("2.5B");
+  });
+});
+
+describe("parseTokenShorthand", () => {
+  it("parses plain digit strings, ignoring comma grouping", () => {
+    expect(parseTokenShorthand("500000")).toBe(500_000);
+    expect(parseTokenShorthand("1,000,000")).toBe(1_000_000);
+  });
+
+  it("parses k/m/b suffixes case-insensitively, including decimals", () => {
+    expect(parseTokenShorthand("500k")).toBe(500_000);
+    expect(parseTokenShorthand("500K")).toBe(500_000);
+    expect(parseTokenShorthand("1.2m")).toBe(1_200_000);
+    expect(parseTokenShorthand("2b")).toBe(2_000_000_000);
+  });
+
+  it("rounds fractional results", () => {
+    expect(parseTokenShorthand("1.234m")).toBe(1_234_000);
+  });
+
+  it("returns null for empty or unparseable input", () => {
+    expect(parseTokenShorthand("")).toBeNull();
+    expect(parseTokenShorthand("   ")).toBeNull();
+    expect(parseTokenShorthand("not a number")).toBeNull();
+    expect(parseTokenShorthand("500x")).toBeNull();
+  });
+});
+
+describe("fmtTokensFull", () => {
+  it("formats a raw integer with comma grouping and no suffix", () => {
+    expect(fmtTokensFull(100_000_000)).toBe("100,000,000");
+    expect(fmtTokensFull(500_000)).toBe("500,000");
+    expect(fmtTokensFull(999)).toBe("999");
+  });
+
+  it("returns '0' for non-finite input", () => {
+    expect(fmtTokensFull(NaN)).toBe("0");
+    expect(fmtTokensFull(Infinity)).toBe("0");
   });
 });
 

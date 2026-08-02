@@ -216,6 +216,7 @@ client/
 │   │   ├── focusStore.ts   # Module-level session-focus store (bulk hydrate GET /api/focus + live session_focus WS merges)
 │   │   ├── monitorGroups.ts # Kanban Board's global monitor-layout store (bulk hydrate GET /api/monitors + live monitors_updated WS merges); mirrors focusStore.ts's pattern
 │   │   ├── colorThresholds.ts # Usage page's global green/yellow/orange/red color-threshold store, two scopes (session, weekly) - bulk hydrate GET /api/color-thresholds + live color_thresholds_updated WS merges; mirrors monitorGroups.ts's pattern
+│   │   ├── playbookStore.ts # Coach's Playbook practice-config store (a list, not a singleton) - bulk hydrate GET /api/playbook/practices + live playbook_practice_config_updated WS merges per practice id; mirrors colorThresholds.ts's pattern
 │   │   ├── format.ts       # Formatters (formatTime, timeAgo, fmtCost)
 │   │   ├── calendarLanes.ts # Swimlane lane-assignment for FocusCalendarView (greedy interval scheduling)
 │   │   ├── calendarWindow.ts # Shared startOfDay/DAY_MS day-boundary math (FocusCalendarView, TimePeriodPicker, FocusCalendarBoard)
@@ -425,6 +426,9 @@ Server broadcasts these event types over WebSocket:
 | `session_focus` | Focus wire shape: `{ session_id, cwd, item_number, item_text, note, detour_stack, since, drift, drift_reason, updated_at }` | Applied focus declarations (hook or API) + the focus drift audit — merged into `lib/focusStore.ts` |
 | `monitors_updated` | `{ monitors, monitorMap, collapsedProjects }` — the full resulting global Kanban Board monitor layout | `PUT /api/monitors`, from any connected computer — merged into `lib/monitorGroups.ts`'s store on top of the `GET /api/monitors` hydrate |
 | `color_thresholds_updated` | `{ session: {yellowAt,orangeAt,redAt}, weekly: {yellowAt,orangeAt,redAt} }` — the full resulting global Usage-page color thresholds | `PUT /api/color-thresholds`, from any connected computer — merged into `lib/colorThresholds.ts`'s store on top of the `GET /api/color-thresholds` hydrate |
+| `playbook_practice_config_updated` | `{ id, category, scope, kind, defaultSeverity, fields, enabled, config }` — the full resulting merged practice | `PUT /api/playbook/practices/:id/config`, from any connected computer — merged into `lib/playbookStore.ts`'s store on top of the `GET /api/playbook/practices` hydrate |
+| `coach_observation_created` | `{ id, practice_id, scope_type, scope_id, kind, severity, values_json, status, detected_at, responded_at }` — a new Coach Observation | The Playbook engine's own tick (`server/lib/playbook/engine.js`) when a practice fires — `CoachPage.tsx` prepends it to the Feed |
+| `coach_observation_updated` | Same Observation shape as above | `POST /api/coach/observations/:id/respond` — `CoachPage.tsx` removes it from the (open-only) Feed once its status leaves `open` |
 | `decision_queue_updated` | The full updated `decision_queue` row (layer 6) | A reconciliation tick enqueuing a `pace_alert`/`detour_volume`/`detour_disposition`/`writeback_*` row, or `POST /api/decision-queue/:id/resolve` — `ProjectManager.tsx` treats this as a debounced reload signal, not a merge-in-place |
 | `detour_disposition` | The full updated `detour_dispositions` row (layer 4) | The classifier recording a new detour, or `POST /api/detours/:id/resolve` — same debounced-reload treatment on `ProjectManager.tsx` as `decision_queue_updated` above |
 

@@ -64,10 +64,6 @@
     "expensiveModel": "正在使用高级模型(Opus/Fable)- 每个 token 成本更高",
     "focusTerminal": "跳转到终端",
     "focusTerminalError": "跳转到终端失败",
-    "openTerminal": "在此打开新终端",
-    "openTerminalError": "打开新终端失败",
-    "openTerminalNameLabel": "任务名称(可选)",
-    "openTerminalNamePlaceholder": "例如:修复桌面端卡死",
     "tokens": {
       "in": "输入",
       "out": "输出",

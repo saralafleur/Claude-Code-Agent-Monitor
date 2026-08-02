@@ -64,10 +64,6 @@
     "expensiveModel": "프리미엄 모델(Opus/Fable) 사용 중 - 토큰당 비용이 더 높습니다",
     "focusTerminal": "터미널로 이동",
     "focusTerminalError": "터미널로 이동하지 못했습니다",
-    "openTerminal": "여기에서 새 터미널 열기",
-    "openTerminalError": "새 터미널을 열지 못했습니다",
-    "openTerminalNameLabel": "작업 이름 (선택 사항)",
-    "openTerminalNamePlaceholder": "예: 데스크톱 멈춤 현상 수정",
     "tokens": {
       "in": "입력",
       "out": "출력",
