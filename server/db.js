@@ -1257,6 +1257,70 @@ db.exec(`
 `);
 db.prepare("INSERT OR IGNORE INTO dashboard_layout (id) VALUES (1)").run();
 
+// Global usage-percentage color thresholds: a single server-shared row (same
+// singleton-row convention as dashboard_layout above — no user accounts, so
+// one setting applies to every connected client) controlling where the
+// green→yellow→orange→red bands fall for every percentage-driven color in
+// the Usage page (session/weekly rate-limit bars, the session-reset marker,
+// the "capped by weekly" callout). Two independent scopes, since the
+// session (5h) window and the weekly window are separate quotas that
+// shouldn't have to share one ramp — `session_*` columns color anything
+// driven by `latest_session_window_pct`, `weekly_*` anything driven by
+// `latest_week_window_pct`. Each `*_yellow_at`/`*_orange_at`/`*_red_at` is
+// the percentage that band STARTS at; below `*_yellow_at` is always green.
+// See server/routes/color-thresholds.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS color_thresholds (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    session_yellow_at REAL NOT NULL DEFAULT 50,
+    session_orange_at REAL NOT NULL DEFAULT 80,
+    session_red_at REAL NOT NULL DEFAULT 100,
+    weekly_yellow_at REAL NOT NULL DEFAULT 50,
+    weekly_orange_at REAL NOT NULL DEFAULT 80,
+    weekly_red_at REAL NOT NULL DEFAULT 100,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+`);
+db.prepare("INSERT OR IGNORE INTO color_thresholds (id) VALUES (1)").run();
+
+// Migrate: color_thresholds started life (same day, pre-release) as one
+// shared yellow_at/orange_at/red_at set before splitting into independent
+// session_*/weekly_* scopes — `CREATE TABLE IF NOT EXISTS` above is a no-op
+// on a DB that already created the old shape (this effort's own dev DB hit
+// exactly that, per PROJECT-CONTEXT.md 9.5). Detected via PRAGMA table_info
+// (same idiom as detour_dispositions.project_id above); the old single set
+// backfills BOTH new scopes with whatever value was already configured
+// (same historical value for session and weekly, since they weren't
+// distinguished yet), after which the old columns are dropped outright
+// rather than left as vestigial dead weight — this table has never shipped
+// in a release, so there's no "existing user's saved value" story an ADD
+// COLUMN-only migration would need to preserve beyond this backfill.
+const colorThresholdsColumns = db.prepare("PRAGMA table_info(color_thresholds)").all();
+if (
+  colorThresholdsColumns.some((col) => col.name === "yellow_at") &&
+  !colorThresholdsColumns.some((col) => col.name === "session_yellow_at")
+) {
+  db.exec(`
+    ALTER TABLE color_thresholds ADD COLUMN session_yellow_at REAL NOT NULL DEFAULT 50;
+    ALTER TABLE color_thresholds ADD COLUMN session_orange_at REAL NOT NULL DEFAULT 80;
+    ALTER TABLE color_thresholds ADD COLUMN session_red_at REAL NOT NULL DEFAULT 100;
+    ALTER TABLE color_thresholds ADD COLUMN weekly_yellow_at REAL NOT NULL DEFAULT 50;
+    ALTER TABLE color_thresholds ADD COLUMN weekly_orange_at REAL NOT NULL DEFAULT 80;
+    ALTER TABLE color_thresholds ADD COLUMN weekly_red_at REAL NOT NULL DEFAULT 100;
+  `);
+  db.prepare(
+    `UPDATE color_thresholds SET
+       session_yellow_at = yellow_at, session_orange_at = orange_at, session_red_at = red_at,
+       weekly_yellow_at = yellow_at, weekly_orange_at = orange_at, weekly_red_at = red_at
+     WHERE id = 1`
+  ).run();
+  db.exec(`
+    ALTER TABLE color_thresholds DROP COLUMN yellow_at;
+    ALTER TABLE color_thresholds DROP COLUMN orange_at;
+    ALTER TABLE color_thresholds DROP COLUMN red_at;
+  `);
+}
+
 // Focus-summary access log: one row per focus-window-summary cache
 // resolution (hit or miss), fed from server/lib/focus-summary.js at each
 // readCachedSummary / upsertFocusSummary decision point. This is what makes
@@ -1699,6 +1763,21 @@ const stmts = {
        monitors = COALESCE(?, monitors),
        monitor_map = COALESCE(?, monitor_map),
        collapsed_projects = COALESCE(?, collapsed_projects),
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = 1`
+  ),
+
+  // ── Color thresholds (global Usage-page green/yellow/orange/red bands,
+  //    independently configurable for the session vs weekly window) ────────
+  getColorThresholds: db.prepare("SELECT * FROM color_thresholds WHERE id = 1"),
+  updateColorThresholds: db.prepare(
+    `UPDATE color_thresholds SET
+       session_yellow_at = COALESCE(?, session_yellow_at),
+       session_orange_at = COALESCE(?, session_orange_at),
+       session_red_at = COALESCE(?, session_red_at),
+       weekly_yellow_at = COALESCE(?, weekly_yellow_at),
+       weekly_orange_at = COALESCE(?, weekly_orange_at),
+       weekly_red_at = COALESCE(?, weekly_red_at),
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = 1`
   ),

@@ -98,11 +98,9 @@ router.post("/items/target", (req, res) => {
     return res.status(400).json({ error: { code: "INVALID_INPUT", message: "cwd is required" } });
   }
   if (!Number.isInteger(itemNumber) || itemNumber <= 0) {
-    return res
-      .status(400)
-      .json({
-        error: { code: "INVALID_INPUT", message: "item_number must be a positive integer" },
-      });
+    return res.status(400).json({
+      error: { code: "INVALID_INPUT", message: "item_number must be a positive integer" },
+    });
   }
   if (targetDate !== null && targetDate !== undefined) {
     if (typeof targetDate !== "string" || !isValidTargetDateString(targetDate)) {

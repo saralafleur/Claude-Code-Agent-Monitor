@@ -69,6 +69,22 @@
       "subtitle": "What time of day each account's session window resets, over the next 24h.",
       "cappedByWeekly": "Capped by weekly ({{pct}}% left)",
       "weeklyResetsIn": "Weekly resets in {{when}}"
+    },
+    "colorThresholds": {
+      "title": "Color thresholds",
+      "subtitle": "Configure where the green → yellow → orange → red usage colors switch over, applied across this page.",
+      "scope": {
+        "session": "Session window (5h)",
+        "weekly": "Weekly window"
+      },
+      "yellowLabel": "Yellow starts at",
+      "orangeLabel": "Orange starts at",
+      "redLabel": "Red starts at",
+      "save": "Save",
+      "saving": "Saving…",
+      "saveFailed": "Failed to save thresholds.",
+      "resetDefaults": "Reset to defaults",
+      "validationError": "Each threshold must be higher than the last (yellow < orange < red)."
     }
   }
 }

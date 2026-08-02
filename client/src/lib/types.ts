@@ -2212,6 +2212,30 @@ export interface MonitorLayoutPayload {
   collapsedProjects: Record<string, boolean>;
 }
 
+/** One scope's green/yellow/orange/red color bands (see
+ *  {@link ColorThresholdsConfig}). Each field is the percentage its band
+ *  STARTS at (inclusive) - below `yellowAt` always renders green. Must
+ *  satisfy `yellowAt < orangeAt < redAt`. */
+export interface ColorThresholds {
+  /** Percentage at which the yellow band begins. */
+  yellowAt: number;
+  /** Percentage at which the orange band begins. */
+  orangeAt: number;
+  /** Percentage at which the red band begins. */
+  redAt: number;
+}
+
+/** The Usage page's global color thresholds: GET/PUT /api/color-thresholds's
+ *  response shape, and the payload of `color_thresholds_updated` WebSocket
+ *  pushes. Two independent scopes - the session (5h) window and the weekly
+ *  window are separate quotas, each with its own bands. */
+export interface ColorThresholdsConfig {
+  /** Bands for anything driven by `latest_session_window_pct`. */
+  session: ColorThresholds;
+  /** Bands for anything driven by `latest_week_window_pct`. */
+  weekly: ColorThresholds;
+}
+
 /**
  * Envelope for every message the server pushes over the dashboard WebSocket
  * (see `server/websocket.js` `broadcast()`). Consumed by {@link eventBus} and
@@ -2231,7 +2255,7 @@ export interface WSMessage {
    *  cc_config_changed → CcConfigChangedPayload; alert_triggered/alert_updated
    *  → AlertEvent; workflow_upserted → WorkflowRun; plan_updated →
    *  PlanUpdatedPayload; session_focus → SessionFocus; monitors_updated →
-   *  MonitorLayoutPayload. */
+   *  MonitorLayoutPayload; color_thresholds_updated → ColorThresholdsConfig. */
   type:
     | "session_created"
     | "session_updated"
@@ -2251,7 +2275,8 @@ export interface WSMessage {
     | "remote_source.status"
     | "plan_updated"
     | "session_focus"
-    | "monitors_updated";
+    | "monitors_updated"
+    | "color_thresholds_updated";
   /** The message body, whose concrete shape is selected by `type` above. */
   data:
     | Session
@@ -2269,7 +2294,8 @@ export interface WSMessage {
     | RemoteSourceStatusPayload
     | PlanUpdatedPayload
     | SessionFocus
-    | MonitorLayoutPayload;
+    | MonitorLayoutPayload
+    | ColorThresholdsConfig;
   /** ISO timestamp the server broadcast this message (not necessarily the
    *  same instant the underlying event occurred). */
   timestamp: string;

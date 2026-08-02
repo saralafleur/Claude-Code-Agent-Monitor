@@ -1563,6 +1563,20 @@
                     already running <code>CLAUDE_CONFIG_DIR=&lt;dir&gt; claude</code> —
                     re-authenticating is just a login walk-through and closing the window.
                   </p>
+                  <p>
+                    A <strong>Session reset times</strong> panel plots every
+                    account's next session-window reset across the next 24h,
+                    tinting the reset marker's right half toward the weekly
+                    window's own color once the weekly window — not the
+                    session — is the real constraint, paired with a
+                    <strong>Capped by weekly</strong> callout naming it
+                    explicitly. A <strong>Weekly reset countdown</strong>
+                    panel does the same for the weekly window's calendar-day
+                    reset. A <strong>Color thresholds</strong> card lets you
+                    configure exactly where each green/yellow/orange/red band
+                    starts, independently for the session and weekly scopes —
+                    shared live across every connected computer.
+                  </p>
                 </div>
                 <div class="feature-card">
                   <div class="feature-icon ic-cyan">⌨️</div>
@@ -3931,7 +3945,7 @@ npm run mcp:start:repl         # interactive CLI with tab completion</code></pre
   type:      "session_created" | "session_updated" |
              "agent_created"   | "agent_updated"   | "new_event" |
              "plan_updated"    | "session_focus"   | "monitors_updated" |
-             "project_updated";
+             "color_thresholds_updated" | "project_updated";
   data:      Session | Agent | DashboardEvent | ProjectPriorityUpdatedPayload;
   timestamp: string;  // ISO 8601
 }</code></pre>
@@ -7236,7 +7250,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=82" defer></script>
+    <script src="i18n-content.js?v=83" defer></script>
     <script src="script.js?v=33" defer></script>
     <script>
       (function () {

@@ -31,7 +31,7 @@
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Gauge,
@@ -59,6 +59,7 @@ import type {
   Account,
   AccountStatus,
 } from "../lib/api";
+import type { ColorThresholds, ColorThresholdsConfig } from "../lib/types";
 import {
   formatDateTimeFull,
   timeAgo,
@@ -66,6 +67,11 @@ import {
   formatMs,
   formatMsLong,
 } from "../lib/format";
+import {
+  useColorThresholds,
+  colorThresholdsStore,
+  DEFAULT_COLOR_THRESHOLDS_CONFIG,
+} from "../lib/colorThresholds";
 
 function formatCost(cost: number | null): string {
   if (cost == null || !Number.isFinite(cost)) return "—";
@@ -81,46 +87,89 @@ function formatTokenCount(n: number | null): string {
   return String(n);
 }
 
-function pctBarColor(pct: number): string {
-  if (pct >= 90) return "bg-red-500";
-  if (pct >= 70) return "bg-amber-500";
-  return "bg-emerald-500";
-}
+export type ColorBand = "green" | "yellow" | "orange" | "red";
+
+const BAND_BG_CLASS: Record<ColorBand, string> = {
+  green: "bg-emerald-500",
+  yellow: "bg-yellow-500",
+  orange: "bg-orange-500",
+  red: "bg-red-500",
+};
+const BAND_TEXT_CLASS: Record<ColorBand, string> = {
+  green: "text-emerald-400",
+  yellow: "text-yellow-400",
+  orange: "text-orange-400",
+  red: "text-red-400",
+};
 
 /**
- * Finer-grained color scale for the session timeline's weekly countdown
- * bar: green below 50%, yellow from 50%, orange from 80%, red only at a
- * fully-exhausted 100% - a four-stage ramp instead of `pctBarColor`'s
- * three, so the bar visibly climbs in urgency as the weekly window fills
- * up rather than jumping straight from "fine" to "red."
+ * The single source of truth for "what color does this percentage render
+ * as" across the whole Usage page - every bar, marker, and callout below
+ * goes through this instead of hand-rolling its own band cutoffs, so the
+ * user-configurable thresholds (see the "Color thresholds" card and
+ * client/src/lib/colorThresholds.ts) apply everywhere at once. Green below
+ * `yellowAt`; yellow/orange/red take over at their own threshold.
  */
-function weeklyPctColor(pct: number | null): string {
+function colorBand(pct: number, thresholds: ColorThresholds): ColorBand {
+  if (pct >= thresholds.redAt) return "red";
+  if (pct >= thresholds.orangeAt) return "orange";
+  if (pct >= thresholds.yellowAt) return "yellow";
+  return "green";
+}
+
+function pctBarColor(pct: number, thresholds: ColorThresholds): string {
+  return BAND_BG_CLASS[colorBand(pct, thresholds)];
+}
+
+/** Same band as `pctBarColor`, `null`-safe (renders as neutral gray when
+ *  there's no data yet, e.g. a not-yet-captured account). */
+function weeklyPctColor(pct: number | null, thresholds: ColorThresholds): string {
   if (pct == null) return "bg-surface-3";
-  if (pct >= 100) return "bg-red-500";
-  if (pct >= 80) return "bg-orange-500";
-  if (pct >= 50) return "bg-yellow-500";
-  return "bg-emerald-500";
+  return BAND_BG_CLASS[colorBand(pct, thresholds)];
+}
+
+/** Text-color counterpart of `weeklyPctColor`, same bands. */
+function pctTextColor(pct: number | null, thresholds: ColorThresholds): string {
+  if (pct == null) return "text-gray-400";
+  return BAND_TEXT_CLASS[colorBand(pct, thresholds)];
 }
 
 /**
  * Color for the session marker in the session timeline: normally just
- * `pctBarColor(pct)`, but forced red once the SAME account's weekly window
- * is fully exhausted (100%) - a fresh session window doesn't actually let
- * any work through if the weekly cap is the one blocking it, so the
- * session indicator shouldn't read as "fine" in that case.
+ * `pctBarColor(pct, sessionThresholds)`, but forced red once the SAME
+ * account's weekly window is fully exhausted (at or past the WEEKLY scope's
+ * own `redAt`) - a fresh session window doesn't actually let any work
+ * through if the weekly cap is the one blocking it, so the session
+ * indicator shouldn't read as "fine" in that case.
  */
-function sessionMarkerColor(pct: number, weeklyPct: number | null): string {
-  if (weeklyPct != null && weeklyPct >= 100) return "bg-red-500";
-  return pctBarColor(pct);
+function sessionMarkerColor(
+  pct: number,
+  weeklyPct: number | null,
+  sessionThresholds: ColorThresholds,
+  weeklyThresholds: ColorThresholds
+): string {
+  if (weeklyPct != null && weeklyPct >= weeklyThresholds.redAt) return BAND_BG_CLASS.red;
+  return pctBarColor(pct, sessionThresholds);
 }
 
-/** Text-color counterpart of `weeklyPctColor`, same four-stage thresholds. */
-function weeklyPctTextColor(pct: number | null): string {
-  if (pct == null) return "text-gray-400";
-  if (pct >= 100) return "text-red-400";
-  if (pct >= 80) return "text-orange-400";
-  if (pct >= 50) return "text-yellow-400";
-  return "text-emerald-400";
+/**
+ * Color for the right half of the session marker line: same as the left
+ * half in the common case, but once the weekly window is at least in its
+ * own "orange" band it takes over the right half - so a fresh-looking
+ * session marker still visibly tints toward the weekly window's own
+ * urgency color instead of reading as uniformly fine when the weekly
+ * window is the thing about to run out.
+ */
+function sessionMarkerRightColor(
+  pct: number,
+  weeklyPct: number | null,
+  sessionThresholds: ColorThresholds,
+  weeklyThresholds: ColorThresholds
+): string {
+  if (weeklyPct != null && weeklyPct >= weeklyThresholds.orangeAt) {
+    return weeklyPctColor(weeklyPct, weeklyThresholds);
+  }
+  return sessionMarkerColor(pct, weeklyPct, sessionThresholds, weeklyThresholds);
 }
 
 function StatusBadge({ status }: { status: UsageCaptureStatus }) {
@@ -543,6 +592,7 @@ function daysUntil(from: Date, to: Date): number {
  */
 function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
   const { t } = useTranslation("usage");
+  const { weekly: thresholds } = useColorThresholds();
   if (accounts.length === 0) return null;
 
   const today = new Date();
@@ -622,7 +672,7 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
                     <span className="text-xs text-gray-300 truncate">{account.label}</span>
                     {pct != null && (
                       <span
-                        className={`text-[11px] font-mono flex-shrink-0 ${weeklyPctTextColor(pct)}`}
+                        className={`text-[11px] font-mono flex-shrink-0 ${pctTextColor(pct, thresholds)}`}
                       >
                         {pct}%
                       </span>
@@ -640,7 +690,7 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
                     </div>
                     {pct != null && spanDays != null && (
                       <div
-                        className={`absolute top-0.5 h-8 rounded ${weeklyPctColor(pct)}`}
+                        className={`absolute top-0.5 h-8 rounded ${weeklyPctColor(pct, thresholds)}`}
                         style={{ left: 0, width: `${visibleDays * RESET_CALENDAR_DAY_PX - 2}px` }}
                         title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
                       />
@@ -696,6 +746,7 @@ const SESSION_TIMELINE_LANE_MIN_PX = 112;
  */
 function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
   const { t } = useTranslation("usage");
+  const { session: sessionThresholds, weekly: weeklyThresholds } = useColorThresholds();
   if (accounts.length === 0) return null;
 
   const now = new Date();
@@ -757,7 +808,11 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
     // so a viewer glancing only at the session bar would be misled into
     // thinking there's plenty of room left this session.
     const weeklyPct = account.latest_week_window_pct;
-    const cappedByWeekly = weeklyPct != null && weeklyPct >= 80 && pct != null && pct < 50;
+    const cappedByWeekly =
+      weeklyPct != null &&
+      weeklyPct >= weeklyThresholds.orangeAt &&
+      pct != null &&
+      pct < sessionThresholds.yellowAt;
 
     return {
       account,
@@ -836,10 +891,17 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
                     ))}
                     {pct != null && hoursUntil != null && (
                       <div
-                        className={`absolute left-1 right-1 h-1 rounded ${sessionMarkerColor(pct, weeklyPct)}`}
+                        className="absolute left-1 right-1 h-1 rounded overflow-hidden flex"
                         style={{ top: `${hoursUntil * SESSION_TIMELINE_HOUR_PX - 2}px` }}
                         title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
-                      />
+                      >
+                        <div
+                          className={`flex-1 ${sessionMarkerColor(pct, weeklyPct, sessionThresholds, weeklyThresholds)}`}
+                        />
+                        <div
+                          className={`flex-1 ${sessionMarkerRightColor(pct, weeklyPct, sessionThresholds, weeklyThresholds)}`}
+                        />
+                      </div>
                     )}
                     {countdown && (
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-1">
@@ -850,7 +912,7 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
                     )}
                   </div>
                   <div
-                    className={`self-start rounded ${weeklyPctColor(weeklyPct)}`}
+                    className={`self-start rounded ${weeklyPctColor(weeklyPct, weeklyThresholds)}`}
                     style={{
                       flex: "1 1 0%",
                       height: `${weeklyHoursUntil * SESSION_TIMELINE_HOUR_PX}px`,
@@ -865,7 +927,7 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
                 )}
                 {cappedByWeekly && (
                   <p
-                    className={`text-[10px] font-semibold mt-0.5 text-center ${weeklyPctTextColor(weeklyPct)}`}
+                    className={`text-[10px] font-semibold mt-0.5 text-center ${pctTextColor(weeklyPct, weeklyThresholds)}`}
                   >
                     {t("accounts.sessionTimeline.cappedByWeekly", {
                       pct: Math.max(0, 100 - (weeklyPct ?? 100)),
@@ -886,16 +948,194 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
   );
 }
 
+function scopeIsValid(s: ColorThresholds): boolean {
+  return s.yellowAt < s.orangeAt && s.orangeAt < s.redAt;
+}
+
+function scopesEqual(a: ColorThresholds, b: ColorThresholds): boolean {
+  return a.yellowAt === b.yellowAt && a.orangeAt === b.orangeAt && a.redAt === b.redAt;
+}
+
+/**
+ * One scope's (session or weekly) three inputs + live preview strip, used
+ * twice by {@link ColorThresholdsCard} - session listed first, then weekly,
+ * since they're independent settings rather than one shared ramp.
+ */
+function ColorThresholdsScopeFields({
+  scopeLabel,
+  value,
+  onChange,
+}: {
+  scopeLabel: string;
+  value: ColorThresholds;
+  onChange: (field: keyof ColorThresholds, next: number) => void;
+}) {
+  const { t } = useTranslation("usage");
+  const fields: Array<{ field: keyof ColorThresholds; dot: string; label: string }> = [
+    { field: "yellowAt", dot: "bg-yellow-500", label: t("accounts.colorThresholds.yellowLabel") },
+    { field: "orangeAt", dot: "bg-orange-500", label: t("accounts.colorThresholds.orangeLabel") },
+    { field: "redAt", dot: "bg-red-500", label: t("accounts.colorThresholds.redLabel") },
+  ];
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">
+        {scopeLabel}
+      </h3>
+      <div className="h-2 rounded-full overflow-hidden flex border border-border mb-3">
+        <div className="bg-emerald-500" style={{ flex: Math.max(0, value.yellowAt) }} />
+        <div
+          className="bg-yellow-500"
+          style={{ flex: Math.max(0, value.orangeAt - value.yellowAt) }}
+        />
+        <div
+          className="bg-orange-500"
+          style={{ flex: Math.max(0, value.redAt - value.orangeAt) }}
+        />
+        <div className="bg-red-500" style={{ flex: Math.max(0, 100 - value.redAt) }} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {fields.map(({ field, dot, label }) => (
+          <label key={field} className="text-xs text-gray-400">
+            <span className="flex items-center gap-1.5 mb-1">
+              <span className={`inline-block w-2 h-2 rounded-full ${dot}`} />
+              {label}
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={1000}
+              value={value[field]}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                const next = Number(e.target.value);
+                if (Number.isFinite(next)) onChange(field, next);
+              }}
+              className="input w-full"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Global settings card for the green/yellow/orange/red bands every
+ * percentage-driven color on this page (`colorBand` and its callers above)
+ * reads from - editable here, persisted server-side via
+ * client/src/lib/colorThresholds.ts, and shared live across every connected
+ * client. Two independent scopes, session then weekly (they're separate
+ * quotas, not one shared ramp - see `ColorThresholdsConfig`). Edits are
+ * staged in local `draft` state so a mid-edit keystroke doesn't trigger a
+ * save on every render; only "Save" (once both scopes are valid) actually
+ * persists.
+ */
+function ColorThresholdsCard() {
+  const { t } = useTranslation("usage");
+  const thresholds = useColorThresholds();
+  const [draft, setDraft] = useState<ColorThresholdsConfig>(thresholds);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // A live push (another tab, another computer) should win over an untouched
+  // draft - but not clobber an edit in progress, so only resync while the
+  // draft still matches what was last saved/loaded.
+  const [lastSynced, setLastSynced] = useState<ColorThresholdsConfig>(thresholds);
+  useEffect(() => {
+    setDraft((d) => (d === lastSynced ? thresholds : d));
+    setLastSynced(thresholds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thresholds]);
+
+  const isValid = scopeIsValid(draft.session) && scopeIsValid(draft.weekly);
+  const isDirty =
+    !scopesEqual(draft.session, thresholds.session) ||
+    !scopesEqual(draft.weekly, thresholds.weekly);
+
+  const handleScopeChange =
+    (scope: "session" | "weekly") => (field: keyof ColorThresholds, next: number) => {
+      setDraft((d) => ({ ...d, [scope]: { ...d[scope], [field]: next } }));
+      setError(null);
+    };
+
+  const handleSave = async () => {
+    if (!isValid) {
+      setError(t("accounts.colorThresholds.validationError"));
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await colorThresholdsStore.save(draft);
+      setDraft(result);
+      setLastSynced(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("accounts.colorThresholds.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    setDraft(DEFAULT_COLOR_THRESHOLDS_CONFIG);
+    setError(null);
+  };
+
+  return (
+    <div className="card p-4">
+      <h2 className="text-sm font-semibold text-gray-200">{t("accounts.colorThresholds.title")}</h2>
+      <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.colorThresholds.subtitle")}</p>
+
+      <div className="space-y-4">
+        <ColorThresholdsScopeFields
+          scopeLabel={t("accounts.colorThresholds.scope.session")}
+          value={draft.session}
+          onChange={handleScopeChange("session")}
+        />
+        <ColorThresholdsScopeFields
+          scopeLabel={t("accounts.colorThresholds.scope.weekly")}
+          value={draft.weekly}
+          onChange={handleScopeChange("weekly")}
+        />
+      </div>
+
+      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+
+      <div className="flex items-center gap-2 mt-4">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !isValid || !isDirty}
+          className="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {saving ? t("accounts.colorThresholds.saving") : t("accounts.colorThresholds.save")}
+        </button>
+        <button
+          type="button"
+          onClick={handleResetDefaults}
+          disabled={saving}
+          className="btn-ghost text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {t("accounts.colorThresholds.resetDefaults")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PctBar({
   label,
   pct,
   resetRaw,
+  scope,
 }: {
   label: string;
   pct: number | null;
   resetRaw: string | null;
+  /** Which color-threshold scope this bar's percentage belongs to. */
+  scope: "session" | "weekly";
 }) {
   const { t } = useTranslation("usage");
+  const thresholds = useColorThresholds()[scope];
   return (
     <div>
       <div className="flex items-center justify-between text-xs mb-1">
@@ -905,7 +1145,7 @@ function PctBar({
       <div className="h-2 rounded-full bg-surface-2 overflow-hidden">
         <div
           className={`h-full rounded-full transition-[width] duration-300 ${
-            pct != null ? pctBarColor(pct) : "bg-surface-3"
+            pct != null ? pctBarColor(pct, thresholds) : "bg-surface-3"
           }`}
           style={{ width: `${pct != null ? Math.min(100, Math.max(2, pct)) : 0}%` }}
         />
@@ -983,6 +1223,7 @@ function LatestCaptureCard({ detail }: { detail: UsageCapture }) {
           label={t("latest.sessionWindow")}
           pct={detail.session_window_pct}
           resetRaw={detail.session_window_reset_raw}
+          scope="session"
         />
         {weekByModel && Object.keys(weekByModel).length > 0 ? (
           <div>
@@ -992,9 +1233,16 @@ function LatestCaptureCard({ detail }: { detail: UsageCapture }) {
                 label={t("latest.allModels")}
                 pct={detail.week_window_pct}
                 resetRaw={detail.week_reset_raw}
+                scope="weekly"
               />
               {Object.entries(weekByModel).map(([model, pct]) => (
-                <PctBar key={model} label={model} pct={pct} resetRaw={detail.week_reset_raw} />
+                <PctBar
+                  key={model}
+                  label={model}
+                  pct={pct}
+                  resetRaw={detail.week_reset_raw}
+                  scope="weekly"
+                />
               ))}
             </div>
           </div>
@@ -1003,6 +1251,7 @@ function LatestCaptureCard({ detail }: { detail: UsageCapture }) {
             label={t("latest.weekly")}
             pct={detail.week_window_pct}
             resetRaw={detail.week_reset_raw}
+            scope="weekly"
           />
         )}
       </div>
@@ -1227,6 +1476,8 @@ export function Usage() {
           <AccountsResetCalendar accounts={accounts} />
         </div>
       )}
+
+      {accounts.length > 0 && <ColorThresholdsCard />}
 
       {SHOW_LEGACY_CAPTURE_UI && (
         <>

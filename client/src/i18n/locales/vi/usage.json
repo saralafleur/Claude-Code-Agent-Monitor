@@ -69,6 +69,22 @@
       "subtitle": "Thời điểm trong ngày mà cửa sổ phiên của mỗi tài khoản được đặt lại, trong 24 giờ tới.",
       "cappedByWeekly": "Bị giới hạn bởi hạn mức tuần (còn {{pct}}%)",
       "weeklyResetsIn": "Hạn mức tuần đặt lại sau {{when}}"
+    },
+    "colorThresholds": {
+      "title": "Ngưỡng màu sắc",
+      "subtitle": "Cấu hình điểm chuyển màu xanh lá → vàng → cam → đỏ, áp dụng cho toàn bộ trang này.",
+      "scope": {
+        "session": "Cửa sổ phiên (5 giờ)",
+        "weekly": "Cửa sổ tuần"
+      },
+      "yellowLabel": "Vàng bắt đầu ở",
+      "orangeLabel": "Cam bắt đầu ở",
+      "redLabel": "Đỏ bắt đầu ở",
+      "save": "Lưu",
+      "saving": "Đang lưu…",
+      "saveFailed": "Lưu ngưỡng thất bại.",
+      "resetDefaults": "Đặt lại về mặc định",
+      "validationError": "Mỗi ngưỡng phải cao hơn ngưỡng trước (vàng < cam < đỏ)."
     }
   }
 }

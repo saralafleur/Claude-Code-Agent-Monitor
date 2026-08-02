@@ -411,6 +411,7 @@ import type {
   SessionTodo,
   UpdateStatusPayload,
   MonitorLayoutPayload,
+  ColorThresholdsConfig,
   WebhookDelivery,
   WebhookProvider,
   WebhookTarget,
@@ -2111,6 +2112,32 @@ export const api = {
      */
     update: (data: Partial<MonitorLayoutPayload>) =>
       request<MonitorLayoutPayload>("/monitors", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  colorThresholds: {
+    /**
+     * GET /api/color-thresholds — the Usage page's global green/yellow/
+     * orange/red color bands for both the session and weekly scopes,
+     * shared across every computer connected to this dashboard.
+     * @returns {@link ColorThresholdsConfig}.
+     */
+    get: () => request<ColorThresholdsConfig>("/color-thresholds"),
+    /**
+     * PUT /api/color-thresholds — patch either/both scopes, and within a
+     * scope any subset of its three fields. Every other connected client
+     * picks up the change live over the `color_thresholds_updated`
+     * WebSocket push, not just on next load.
+     * @param data A partial patch, e.g. `{ session: { redAt: 95 } }`.
+     * @returns The full resulting {@link ColorThresholdsConfig}.
+     */
+    update: (data: {
+      session?: Partial<ColorThresholdsConfig["session"]>;
+      weekly?: Partial<ColorThresholdsConfig["weekly"]>;
+    }) =>
+      request<ColorThresholdsConfig>("/color-thresholds", {
         method: "PUT",
         body: JSON.stringify(data),
       }),

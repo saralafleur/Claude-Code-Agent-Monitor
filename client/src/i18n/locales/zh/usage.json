@@ -69,6 +69,22 @@
       "subtitle": "未来 24 小时内，每个账户的会话窗口将在一天中的什么时刻重置。",
       "cappedByWeekly": "受周限额限制（剩余 {{pct}}%）",
       "weeklyResetsIn": "周限额将在 {{when}} 后重置"
+    },
+    "colorThresholds": {
+      "title": "颜色阈值",
+      "subtitle": "配置绿色 → 黄色 → 橙色 → 红色使用量颜色的切换点，适用于本页面全局。",
+      "scope": {
+        "session": "会话窗口（5小时）",
+        "weekly": "周窗口"
+      },
+      "yellowLabel": "黄色起始于",
+      "orangeLabel": "橙色起始于",
+      "redLabel": "红色起始于",
+      "save": "保存",
+      "saving": "保存中…",
+      "saveFailed": "保存阈值失败。",
+      "resetDefaults": "恢复默认值",
+      "validationError": "每个阈值必须高于前一个（黄色 < 橙色 < 红色）。"
     }
   }
 }

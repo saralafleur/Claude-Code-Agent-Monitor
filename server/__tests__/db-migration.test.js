@@ -214,6 +214,80 @@ const UPGRADE_CASES = [
       );
     },
   },
+  // color_thresholds' single yellow_at/orange_at/red_at set split into
+  // independent session_*/weekly_* scopes (2026-08-01, same day the table
+  // was introduced — a live reproduction of the "fresh install vs. upgraded
+  // install diverge" failure mode this file exists to catch, same as
+  // detour_dispositions.project_id above: this effort's own dev DB had
+  // already created the old shape before the split landed). One migration
+  // adds all 6 new columns, backfills both scopes from the single old value,
+  // then drops the 3 old columns — so all 6 ADD COLUMNs share the same
+  // legacySql/seed/assertions; the meta-test below just needs each
+  // table.column pair present once.
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS color_thresholds (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        yellow_at REAL NOT NULL DEFAULT 50,
+        orange_at REAL NOT NULL DEFAULT 80,
+        red_at REAL NOT NULL DEFAULT 100,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      )
+    `;
+    const seed = (legacyDb) => {
+      legacyDb
+        .prepare(
+          "INSERT OR REPLACE INTO color_thresholds (id, yellow_at, orange_at, red_at) VALUES (1, 45, 75, 95)"
+        )
+        .run();
+    };
+    const assertLegacyRow = (db) => {
+      const row = db.prepare("SELECT * FROM color_thresholds WHERE id = 1").get();
+      assert.ok(row, "color_thresholds row should exist after migration");
+      assert.equal(row.session_yellow_at, 45, "session scope should backfill from the old value");
+      assert.equal(row.session_orange_at, 75, "session scope should backfill from the old value");
+      assert.equal(row.session_red_at, 95, "session scope should backfill from the old value");
+      assert.equal(
+        row.weekly_yellow_at,
+        45,
+        "weekly scope should backfill from the same old value"
+      );
+      assert.equal(
+        row.weekly_orange_at,
+        75,
+        "weekly scope should backfill from the same old value"
+      );
+      assert.equal(row.weekly_red_at, 95, "weekly scope should backfill from the same old value");
+      assert.equal(row.yellow_at, undefined, "old yellow_at column should be dropped");
+      assert.equal(row.orange_at, undefined, "old orange_at column should be dropped");
+      assert.equal(row.red_at, undefined, "old red_at column should be dropped");
+    };
+    const assertWritable = (db) => {
+      const { stmts } = require("../db");
+      stmts.updateColorThresholds.run(60, null, null, null, null, null);
+      const row = db.prepare("SELECT session_yellow_at FROM color_thresholds WHERE id = 1").get();
+      assert.equal(
+        row.session_yellow_at,
+        60,
+        "session_yellow_at should be settable on a migrated row"
+      );
+    };
+    return [
+      "session_yellow_at",
+      "session_orange_at",
+      "session_red_at",
+      "weekly_yellow_at",
+      "weekly_orange_at",
+      "weekly_red_at",
+    ].map((column) => ({
+      table: "color_thresholds",
+      column,
+      legacySql,
+      seed,
+      assertLegacyRow,
+      assertWritable,
+    }));
+  })(),
 ];
 
 describe("Migration: plan_items.target_date", () => {
@@ -432,6 +506,99 @@ describe("Migration: detour_dispositions.project_id", () => {
       .all()
       .filter((c) => c.name === "project_id").length;
     assert.equal(count2, 1, "should still have exactly one project_id column");
+    db2.close();
+  });
+});
+
+describe("Migration: color_thresholds session/weekly split", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "color_thresholds" && uc.column === "session_yellow_at"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-color-thresholds-test-${Date.now()}.db`);
+
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+
+    // Run the legacy color_thresholds schema (single yellow_at/orange_at/red_at set).
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("splits legacy color_thresholds into session_*/weekly_* columns via ALTER TABLE", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(color_thresholds)").all();
+    for (const column of [
+      "session_yellow_at",
+      "session_orange_at",
+      "session_red_at",
+      "weekly_yellow_at",
+      "weekly_orange_at",
+      "weekly_red_at",
+    ]) {
+      assert.ok(
+        tableInfo.some((col) => col.name === column),
+        `${column} column should exist after migration`
+      );
+    }
+    assert.ok(
+      !tableInfo.some((col) => col.name === "yellow_at"),
+      "old yellow_at column should be dropped"
+    );
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate columns", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(color_thresholds)")
+      .all()
+      .filter((c) => c.name === "session_yellow_at").length;
+    assert.equal(count1, 1, "should have exactly one session_yellow_at column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(color_thresholds)")
+      .all()
+      .filter((c) => c.name === "session_yellow_at").length;
+    assert.equal(count2, 1, "should still have exactly one session_yellow_at column");
     db2.close();
   });
 });

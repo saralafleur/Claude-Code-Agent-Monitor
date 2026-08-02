@@ -214,6 +214,7 @@ client/
 │   │   ├── dataScope.ts    # Global data-scope store (app-wide ?sources= selection)
 │   │   ├── focusStore.ts   # Module-level session-focus store (bulk hydrate GET /api/focus + live session_focus WS merges)
 │   │   ├── monitorGroups.ts # Kanban Board's global monitor-layout store (bulk hydrate GET /api/monitors + live monitors_updated WS merges); mirrors focusStore.ts's pattern
+│   │   ├── colorThresholds.ts # Usage page's global green/yellow/orange/red color-threshold store, two scopes (session, weekly) - bulk hydrate GET /api/color-thresholds + live color_thresholds_updated WS merges; mirrors monitorGroups.ts's pattern
 │   │   ├── format.ts       # Formatters (formatTime, timeAgo, fmtCost)
 │   │   ├── calendarLanes.ts # Swimlane lane-assignment for FocusCalendarView (greedy interval scheduling)
 │   │   ├── calendarWindow.ts # Shared startOfDay/DAY_MS day-boundary math (FocusCalendarView, TimePeriodPicker, FocusCalendarBoard)
@@ -422,6 +423,7 @@ Server broadcasts these event types over WebSocket:
 | `plan_updated` | `{ plan, items }` — the ingested plan row plus its full item list | `AGENT-PLAN.md` poll / SessionStart ingest / `POST /api/plans/refresh`, and `focus done` declarations (the `declared_done` rollup changed) |
 | `session_focus` | Focus wire shape: `{ session_id, cwd, item_number, item_text, note, detour_stack, since, drift, drift_reason, updated_at }` | Applied focus declarations (hook or API) + the focus drift audit — merged into `lib/focusStore.ts` |
 | `monitors_updated` | `{ monitors, monitorMap, collapsedProjects }` — the full resulting global Kanban Board monitor layout | `PUT /api/monitors`, from any connected computer — merged into `lib/monitorGroups.ts`'s store on top of the `GET /api/monitors` hydrate |
+| `color_thresholds_updated` | `{ session: {yellowAt,orangeAt,redAt}, weekly: {yellowAt,orangeAt,redAt} }` — the full resulting global Usage-page color thresholds | `PUT /api/color-thresholds`, from any connected computer — merged into `lib/colorThresholds.ts`'s store on top of the `GET /api/color-thresholds` hydrate |
 
 ### EventBus Pattern
 

@@ -69,6 +69,22 @@
       "subtitle": "앞으로 24시간 동안 각 계정의 세션 윈도우가 리셋되는 시각입니다.",
       "cappedByWeekly": "주간 한도로 제한됨 ({{pct}}% 남음)",
       "weeklyResetsIn": "주간 리셋까지 {{when}}"
+    },
+    "colorThresholds": {
+      "title": "색상 임계값",
+      "subtitle": "이 페이지 전체에 적용되는 초록 → 노랑 → 주황 → 빨강 사용량 색상 전환 지점을 설정합니다.",
+      "scope": {
+        "session": "세션 윈도우 (5시간)",
+        "weekly": "주간 윈도우"
+      },
+      "yellowLabel": "노랑 시작 지점",
+      "orangeLabel": "주황 시작 지점",
+      "redLabel": "빨강 시작 지점",
+      "save": "저장",
+      "saving": "저장 중…",
+      "saveFailed": "임계값 저장에 실패했습니다.",
+      "resetDefaults": "기본값으로 재설정",
+      "validationError": "각 임계값은 이전 값보다 커야 합니다 (노랑 < 주황 < 빨강)."
     }
   }
 }

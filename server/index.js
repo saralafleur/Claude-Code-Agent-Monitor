@@ -81,6 +81,7 @@ const projectsRouter = require("./routes/projects");
 const plansRouter = require("./routes/plans");
 const focusReportRouter = require("./routes/focus-report");
 const monitorsRouter = require("./routes/monitors");
+const colorThresholdsRouter = require("./routes/color-thresholds");
 const usageRouter = require("./routes/usage");
 const accountsRouter = require("./routes/accounts");
 const detoursRouter = require("./routes/detours");
@@ -130,6 +131,10 @@ function createApp() {
   // Global Kanban Board "Projects" view monitor layout, shared across every
   // computer connected to this dashboard (see server/routes/monitors.js).
   app.use("/api/monitors", monitorsRouter);
+  // Global Usage-page green/yellow/orange/red color thresholds, shared
+  // across every computer connected to this dashboard (see
+  // server/routes/color-thresholds.js).
+  app.use("/api/color-thresholds", colorThresholdsRouter);
   app.get("/api/openapi.json", (_req, res) => {
     res.json(openApiSpec);
   });

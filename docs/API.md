@@ -1122,6 +1122,41 @@ Body is any subset of `{ monitors, monitorMap, collapsedProjects }` — only the
 
 ---
 
+### Color Thresholds
+
+The `/api/color-thresholds` namespace persists the Usage page's **global color thresholds** — the green/yellow/orange/red percentage bands used everywhere a rate-limit percentage is rendered (session/weekly bars, the session-reset marker, the "capped by weekly" callout). It is a single **global** config, not per-user: this app has no accounts, so every computer connected to the dashboard reads and writes the same thresholds, and a change from one client is pushed live to every other connected client over the [`color_thresholds_updated`](#color_thresholds_updated) WebSocket message.
+
+**ColorThresholdsConfig shape:**
+
+```json
+{
+  "session": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 },
+  "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }
+}
+```
+
+Two independent scopes — `session` (the 5h window) and `weekly` — since they're separate quotas rather than one shared ramp. Within a scope, each field is the percentage its band STARTS at (inclusive); below `yellowAt` always renders green. Must satisfy `yellowAt < orangeAt < redAt`.
+
+#### Get Color Thresholds
+
+```http
+GET /api/color-thresholds
+```
+
+Returns the current global thresholds for both scopes (defaulting to `{ yellowAt: 50, orangeAt: 80, redAt: 100 }` for each before anything has been saved).
+
+#### Update Color Thresholds
+
+```http
+PUT /api/color-thresholds
+```
+
+Body is either/both of `{ session, weekly }`; within a scope, any subset of `{ yellowAt, orangeAt, redAt }` — only the provided fields are replaced, merged onto that scope's current values. Broadcasts [`color_thresholds_updated`](#color_thresholds_updated) with the full resulting config and returns it.
+
+**Error Responses (400):** `{ "error": { "code": "INVALID_THRESHOLDS", "message" } }` when a provided field isn't a finite number in `[0, 1000]`, or when a scope's merged `yellowAt`/`orangeAt`/`redAt` would no longer be strictly increasing.
+
+---
+
 ### Projects
 
 The `/api/projects/*` namespace groups sessions by the folder(s) they run from into a user-named **project** — an organizational view alongside Sessions/Agents, not a new field on sessions. A project claims one or more working directories; a folder belongs to at most one project. Membership is derived server-side by joining `sessions.cwd` against the project's mapped folders, so nothing needs to be backfilled onto existing sessions. Mutations here are **not** broadcast over the WebSocket — like `remote_sources` config CRUD, the client just re-fetches after each change.
@@ -1921,6 +1956,14 @@ Broadcast whenever `PUT /api/monitors` changes the global Kanban Board monitor l
 
 ```json
 { "type": "monitors_updated", "data": { "monitors": [{ "id": "a1b2c3", "name": "Left Screen" }], "monitorMap": { "proj-1": "a1b2c3" }, "collapsedProjects": {} } }
+```
+
+#### color_thresholds_updated
+
+Broadcast whenever `PUT /api/color-thresholds` changes the global Usage-page color thresholds — from any connected client/computer. Carries the full resulting `{ session, weekly }` config (see [Color Thresholds](#color-thresholds)); the client merges it straight into `lib/colorThresholds.ts`'s store on top of the `GET /api/color-thresholds` hydrate, so every other connected client picks up the change live, without a reload.
+
+```json
+{ "type": "color_thresholds_updated", "data": { "session": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }, "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 } } }
 ```
 
 ### Event Flow

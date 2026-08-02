@@ -631,6 +631,17 @@ The Kanban Board's "Projects" view monitor layout (`routes/monitors.js`, `/api/m
 
 Every `PUT` broadcasts `monitors_updated` with the full resulting layout over `/ws`, so a change made from one connected computer shows up live on every other one — no reload needed.
 
+### Color Thresholds
+
+The Usage page's global green/yellow/orange/red color thresholds (`routes/color-thresholds.js`, `/api/color-thresholds`) — a single **global** config, not per-user: this app has no accounts, so every computer connected to the dashboard reads and writes the same thresholds, persisted server-side in the singleton `color_thresholds` row. Two independent scopes, `session` and `weekly`, since the session (5h) window and the weekly window are separate quotas.
+
+| Method | Path                     | Description |
+| ------ | ------------------------ | ----------- |
+| `GET`  | `/api/color-thresholds`  | Current `{ session: {yellowAt,orangeAt,redAt}, weekly: {yellowAt,orangeAt,redAt} }` |
+| `PUT`  | `/api/color-thresholds`  | Patch either/both scopes, and within a scope any subset of its three fields; `400 INVALID_THRESHOLDS` on an out-of-range value or a non-increasing ordering |
+
+Every `PUT` broadcasts `color_thresholds_updated` with the full resulting config over `/ws`, so a change made from one connected computer shows up live on every other one — no reload needed.
+
 ### Projects
 
 A user-named grouping of one or more session working directories (`routes/projects.js`, `/api/projects*`). A project claims one or more folders; a folder belongs to at most one project. There is **no `project_id` column on `sessions`** — membership is derived by joining `sessions.cwd` against `project_paths.cwd` at query time, so a session created before its folder was ever mapped retroactively belongs to that project the instant the mapping is added. `GET /api/projects` aggregates `session_count`/`active_count`/`last_activity` per project (and for an `unassigned` bucket of cwds with sessions but no project) in a single grouped query rather than N+1 per-project lookups.

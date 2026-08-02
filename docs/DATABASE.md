@@ -585,6 +585,36 @@ Managed through the `/api/monitors` route (`GET`/`PUT`); every `PUT` is broadcas
 
 ---
 
+### color_thresholds
+
+Global Usage-page color thresholds — a **singleton row** (`id` pinned to `1`, enforced by the `CHECK`), not per-user: this app has no accounts, so the row holds the one setting every computer connected to the dashboard reads and writes. Controls where the green/yellow/orange/red bands fall for every percentage-driven color on the Usage page (session/weekly rate-limit bars, the session-reset marker, the "capped by weekly" callout). Two independent scopes, `session` and `weekly`, since the session (5h) window and the weekly window are separate quotas that shouldn't have to share one ramp.
+
+```sql
+CREATE TABLE color_thresholds (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    session_yellow_at REAL NOT NULL DEFAULT 50,
+    session_orange_at REAL NOT NULL DEFAULT 80,
+    session_red_at REAL NOT NULL DEFAULT 100,
+    weekly_yellow_at REAL NOT NULL DEFAULT 50,
+    weekly_orange_at REAL NOT NULL DEFAULT 80,
+    weekly_red_at REAL NOT NULL DEFAULT 100,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, always `1` (CHECK-constrained singleton) |
+| `session_yellow_at` / `session_orange_at` / `session_red_at` | REAL | NO | Percentage each band STARTS at for the session (5h) window; below `session_yellow_at` always renders green |
+| `weekly_yellow_at` / `weekly_orange_at` / `weekly_red_at` | REAL | NO | Same, for the weekly window |
+| `updated_at` | TEXT | NO | ISO 8601 timestamp of the last edit |
+
+Managed through the `/api/color-thresholds` route (`GET`/`PUT`); every `PUT` is broadcast over the WebSocket as `color_thresholds_updated` so other connected clients pick up the change live. See [docs/API.md → Color Thresholds](./API.md#color-thresholds).
+
+---
+
 ### projects / project_paths
 
 A user-named grouping of one or more session working directories. `sessions` carries **no** `project_id` column — project membership is derived by joining `sessions.cwd` against `project_paths.cwd` at query time, so a session (existing or newly imported) retroactively belongs to a project the instant its folder is mapped, with no backfill required. A folder belongs to at most one project (`project_paths.cwd` is `UNIQUE`); a project may claim many folders.
