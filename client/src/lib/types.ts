@@ -701,14 +701,21 @@ export interface Session {
    *  Absolute dollars (e.g. `0.42`), already summed across all buckets. */
   cost?: number;
   /** Session-lifetime token totals, summed across every model/speed/tier bucket
-   *  in `token_usage`. `cache` combines cache-read and cache-write tokens (the
-   *  Kanban session card shows one "cache" figure, not the read/write split).
-   *  Only present on responses that join token usage (currently `GET
-   *  /api/sessions`); undefined ≠ zero, it means "not computed here". */
+   *  in `token_usage`. The Kanban card shows the cache read/write split plus
+   *  `effective` — the cost-weighted "input-equivalent" total (input + output +
+   *  cache reads/writes weighted by the model's real pricing rates), which
+   *  tracks `cost` instead of overstating cheap cache reads like a raw sum.
+   *  `cache` (read + write combined) is kept for backward compatibility, not
+   *  for display. Only present on responses that join token usage (currently
+   *  `GET /api/sessions`); undefined ≠ zero, it means "not computed here". */
   tokens?: {
     input: number;
     output: number;
+    /** @deprecated combined read+write figure — prefer the split fields. */
     cache: number;
+    cache_read: number;
+    cache_write: number;
+    effective: number;
   };
   /** ISO timestamp set when Claude Code is blocked waiting for the user
    * (permission prompt or "waiting for your input" notice). Cleared on the
@@ -1885,6 +1892,10 @@ export interface PlanItem {
   declared_done_at: string | null;
   /** Session id that made the declared-done claim. */
   declared_done_session: string | null;
+  /** Optional human-set `YYYY-MM-DD` pace target (layer 5), authored
+   *  out-of-band via `POST /api/plans/items/target` / `ccam focus target` -
+   *  never touched by re-ingest. Null when no target has been set. */
+  target_date: string | null;
   /** ISO timestamp of the last ingest that touched this row. */
   updated_at: string;
 }
@@ -1908,6 +1919,117 @@ export interface Plan {
   updated_at: string;
   /** Items, present on list/for-cwd/rollup responses. */
   items: PlanItem[];
+}
+
+/** The complete set of statuses `server/lib/pace.js`'s `paceStatus()` can
+ *  return (layer 5). Mirrored here for the layer-7 Project Manager page -
+ *  every value is always server-computed, never re-derived client-side
+ *  (PROJECT-CONTEXT.md §9.1 DERIVED-DUAL-VIEW). */
+export type PaceStatus = "no_target" | "on_track" | "behind" | "done";
+
+/** One item behind pace, from `GET /api/portfolio/summary`'s per-project
+ *  `pace.behind` list. */
+export interface PortfolioBehindItem {
+  /** Owning working directory. */
+  cwd: string;
+  /** The item's stable identity. */
+  item_id: string;
+  /** Display number (pace only ever applies to numbered, top-level-ish
+   *  items - a sub-item never appears here). */
+  item_number: number;
+  /** Item text. */
+  text: string;
+  /** The `YYYY-MM-DD` target date that was missed. */
+  target_date: string;
+  /** How many local calendar days past target_date, as of the request. */
+  days_overdue: number;
+}
+
+/** One project's rollup, from `GET /api/portfolio/summary`. Computed fresh
+ *  from `pace.js` on every request - never cached, never a copy of
+ *  `decision_queue`'s historical rows. */
+export interface PortfolioProjectSummary {
+  /** The {@link Project.id} this rollup covers. */
+  project_id: string;
+  /** Objective/milestone completion across every mapped cwd's plan items
+   *  (top-level and sub-items alike). */
+  milestones: { done: number; total: number };
+  pace: {
+    /** Count of numbered items in each {@link PaceStatus} bucket. */
+    counts: Record<PaceStatus, number>;
+    /** Only the `behind` items, worst-overdue first. */
+    behind: PortfolioBehindItem[];
+  };
+}
+
+/** Layer-6 reconciliation output kinds, from `decision_queue.kind`'s SQL
+ *  CHECK constraint. */
+export type DecisionQueueKind =
+  | "pace_alert"
+  | "detour_volume"
+  | "detour_disposition"
+  | "writeback_conflict"
+  | "writeback_failed";
+
+/** One row from `GET /api/decision-queue` — a layer-6 reconciliation
+ *  verdict (or a layer-4 write-back failure) awaiting a human look. */
+export interface DecisionQueueItem {
+  /** Row id — the argument to `POST /api/decision-queue/:id/resolve`. */
+  id: number;
+  /** The cwd this row concerns; null for a cwd-less row (rare). */
+  cwd: string | null;
+  /** The project_id stamped at write time; null when the cwd wasn't mapped
+   *  to a project yet. */
+  project_id: string | null;
+  kind: DecisionQueueKind;
+  /** For `detour_disposition`/`writeback_*` kinds, the linked
+   *  {@link DetourDisposition.id}; null otherwise. */
+  ref_id: number | null;
+  /** The plan item this row concerns, when applicable. */
+  item_id: string | null;
+  /** Human-readable one-liner explaining why this row exists. */
+  message: string;
+  /** Structured facts backing `message` (shape varies by `kind` — e.g.
+   *  `{ days_overdue }` for pace_alert, `{ ratio, detourCount,
+   *  totalClassified }` for detour_volume, `{ verdict }` for a
+   *  needs-review detour_disposition). */
+  payload: Record<string, unknown> | null;
+  status: "pending" | "resolved" | "dismissed";
+  created_at: string;
+  resolved_at: string | null;
+}
+
+/** Layer-4 detour disposition lifecycle values, from `detour_dispositions
+ *  .disposition`'s SQL CHECK constraint. */
+export type DetourDispositionValue = "pending" | "fold_in" | "new_item" | "deliberate" | "discard";
+
+/** One durable detour record, from `GET /api/detours`. Distinct from
+ *  {@link DetourFrame} (an in-flight session-level focus-stack entry) - this
+ *  is the layer-4 disposition audit row a detour resolves into. */
+export interface DetourDisposition {
+  id: number;
+  cwd: string;
+  project_id: string | null;
+  session_id: string | null;
+  source: "inferred" | "declared";
+  label: string | null;
+  item_id: string | null;
+  disposition: DetourDispositionValue;
+  decided_by: "rule" | "llm" | "human" | null;
+  confidence: number | null;
+  reason: string | null;
+  note: string | null;
+  /** What a rule/LLM proposed appending to `AGENT-PLAN.md`, before
+   *  `plan-writeback.js`'s sanitizer runs. */
+  proposed_text: string | null;
+  proposed_acceptance: string | null;
+  proposed_detail: string | null;
+  proposed_parent_item_id: string | null;
+  write_status: "none" | "pending" | "written" | "failed" | "conflict";
+  write_error: string | null;
+  resolved_item_id: string | null;
+  created_at: string;
+  resolved_at: string | null;
 }
 
 /** Classifies a {@link DetourFrame} pushed via `ccam focus bug`/`feature`
@@ -2236,6 +2358,54 @@ export interface ColorThresholdsConfig {
   weekly: ColorThresholds;
 }
 
+/** One user-adjustable numeric field on a {@link PlaybookPractice} (e.g. the
+ *  session-token-ceiling practice's `thresholdTokens`). Purely descriptive -
+ *  the server validates against this same shape, the client renders a
+ *  labeled number input from it. */
+export interface PlaybookPracticeField {
+  key: string;
+  type: "number";
+  default: number;
+  min: number;
+}
+
+/** The Coach's Playbook: one practice's catalog definition merged with its
+ *  current (server-shared) config - GET /api/playbook/practices's response
+ *  shape (one array entry), and the payload of
+ *  `playbook_practice_config_updated` WebSocket pushes. See library
+ *  knowledge `product/coach/coach-playbook-vocabulary.md` for the full
+ *  vocabulary this type implements. */
+export interface PlaybookPractice {
+  id: string;
+  category: string;
+  scope: "session" | "project" | "global";
+  kind: "risk" | "info" | "good";
+  defaultSeverity: string;
+  fields: PlaybookPracticeField[];
+  enabled: boolean;
+  /** Current values keyed by each field's `key` (defaults merged with any stored override). */
+  config: Record<string, number>;
+}
+
+/** A detected occurrence of a Playbook practice firing for a scope - the
+ *  Coach Feed's unit. `values` is the raw payload a client-side i18n
+ *  template (keyed by `practice_id`) interpolates into display copy; this
+ *  app has no server-side i18n, so no English text lives on the row itself.
+ *  Payload of `coach_observation_created`/`coach_observation_updated`
+ *  WebSocket pushes, and GET /api/coach/observations's list items. */
+export interface CoachObservation {
+  id: number;
+  practice_id: string;
+  scope_type: "session" | "project" | "global";
+  scope_id: string | null;
+  kind: "risk" | "info" | "good";
+  severity: string;
+  values_json: string;
+  status: "open" | "acknowledged" | "dismissed" | "resolved";
+  detected_at: string;
+  responded_at: string | null;
+}
+
 /**
  * Envelope for every message the server pushes over the dashboard WebSocket
  * (see `server/websocket.js` `broadcast()`). Consumed by {@link eventBus} and
@@ -2255,7 +2425,10 @@ export interface WSMessage {
    *  cc_config_changed → CcConfigChangedPayload; alert_triggered/alert_updated
    *  → AlertEvent; workflow_upserted → WorkflowRun; plan_updated →
    *  PlanUpdatedPayload; session_focus → SessionFocus; monitors_updated →
-   *  MonitorLayoutPayload; color_thresholds_updated → ColorThresholdsConfig. */
+   *  MonitorLayoutPayload; color_thresholds_updated → ColorThresholdsConfig;
+   *  decision_queue_updated → DecisionQueueItem; detour_disposition →
+   *  DetourDisposition; playbook_practice_config_updated → PlaybookPractice;
+   *  coach_observation_created/coach_observation_updated → CoachObservation. */
   type:
     | "session_created"
     | "session_updated"
@@ -2276,7 +2449,12 @@ export interface WSMessage {
     | "plan_updated"
     | "session_focus"
     | "monitors_updated"
-    | "color_thresholds_updated";
+    | "color_thresholds_updated"
+    | "decision_queue_updated"
+    | "detour_disposition"
+    | "playbook_practice_config_updated"
+    | "coach_observation_created"
+    | "coach_observation_updated";
   /** The message body, whose concrete shape is selected by `type` above. */
   data:
     | Session
@@ -2295,7 +2473,11 @@ export interface WSMessage {
     | PlanUpdatedPayload
     | SessionFocus
     | MonitorLayoutPayload
-    | ColorThresholdsConfig;
+    | ColorThresholdsConfig
+    | DecisionQueueItem
+    | DetourDisposition
+    | PlaybookPractice
+    | CoachObservation;
   /** ISO timestamp the server broadcast this message (not necessarily the
    *  same instant the underlying event occurred). */
   timestamp: string;

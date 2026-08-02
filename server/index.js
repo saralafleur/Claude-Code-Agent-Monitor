@@ -82,10 +82,13 @@ const plansRouter = require("./routes/plans");
 const focusReportRouter = require("./routes/focus-report");
 const monitorsRouter = require("./routes/monitors");
 const colorThresholdsRouter = require("./routes/color-thresholds");
+const playbookRouter = require("./routes/playbook");
+const coachRouter = require("./routes/coach");
 const usageRouter = require("./routes/usage");
 const accountsRouter = require("./routes/accounts");
 const detoursRouter = require("./routes/detours");
 const decisionQueueRouter = require("./routes/decision-queue");
+const portfolioRouter = require("./routes/portfolio");
 
 function createApp() {
   const app = express();
@@ -124,6 +127,8 @@ function createApp() {
   // Layer 4 detour dispositions + layer 6 reconciliation decision queue.
   app.use("/api/detours", detoursRouter);
   app.use("/api/decision-queue", decisionQueueRouter);
+  // Layer 7 portfolio rollup read model (Project Manager page).
+  app.use("/api/portfolio", portfolioRouter);
   // Cross-project aggregate focus-time report (new, this effort) - distinct
   // from the "declared focus" hydrate endpoint mounted at /api/focus above
   // and from the single-project /api/projects/:id/focus-report route.
@@ -135,6 +140,11 @@ function createApp() {
   // across every computer connected to this dashboard (see
   // server/routes/color-thresholds.js).
   app.use("/api/color-thresholds", colorThresholdsRouter);
+  // The Coach's Playbook (practices + their config) and Feed (observations
+  // the Playbook engine produces) - see server/lib/playbook/ and
+  // server/routes/playbook.js / coach.js.
+  app.use("/api/playbook", playbookRouter);
+  app.use("/api/coach", coachRouter);
   app.get("/api/openapi.json", (_req, res) => {
     res.json(openApiSpec);
   });
@@ -439,6 +449,15 @@ function startBackgroundServices() {
     startReconciliation(broadcast);
   } catch (err) {
     console.warn("reconciliation failed to start:", err.message);
+  }
+  // The Coach engine: evaluates the Playbook's enabled practices on a tick
+  // and records Observations (server/lib/playbook/engine.js). Disable with
+  // DASHBOARD_PLAYBOOK_MODE=off or DASHBOARD_PLAYBOOK_MS=0.
+  try {
+    const { startPlaybookEngine } = require("./lib/playbook/engine");
+    startPlaybookEngine(broadcast);
+  } catch (err) {
+    console.warn("playbook engine failed to start:", err.message);
   }
   // Continuous discovery of sessions under ~/.claude/projects. The one-time
   // legacy backfill above runs only once (marker-gated), so a project added

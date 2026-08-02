@@ -454,7 +454,13 @@ vi.mock("../../lib/api", async (importOriginal) => {
         focusAll: r({ focus: [] }),
         focus: r({ focus: null, item: null, plan_title: null, history: [] }),
         todos: r({ todos: null, updated_at: null }),
+        setItemTarget: r({ ok: true, item: {} }),
       },
+      // Layer-7 Project Manager page (build task 6) - GET /api/portfolio/summary
+      // and the layer-6 decision queue, both deterministically empty here.
+      portfolio: { summary: r({ projects: [] }) },
+      decisionQueue: { list: r({ queue: [] }), resolve: r({ queue: {} }) },
+      detours: { list: r({ detours: [] }), resolve: r({ write_status: "written", detour: {} }) },
     },
   };
 });
@@ -488,6 +494,7 @@ import { Projects } from "../Projects";
 // itself evidence those two pages' own rendering changed.
 import { FocusCalendarBoard } from "../FocusCalendarBoard";
 import { FocusPage } from "../FocusPage";
+import { ProjectManager } from "../ProjectManager";
 import { KanbanBoard } from "../KanbanBoard";
 import { Sessions } from "../Sessions";
 import { SessionDetail } from "../SessionDetail";
@@ -497,6 +504,7 @@ import { Workflows } from "../Workflows";
 import { CcConfig } from "../CcConfig";
 import { Run } from "../Run";
 import { Usage } from "../Usage";
+import { CoachPage } from "../CoachPage";
 import { Settings } from "../Settings";
 import { NotFound } from "../NotFound";
 
@@ -584,6 +592,11 @@ describe("screen snapshots", () => {
   it("Focus", async () => {
     await snapshot(<FocusPage />, "/focus");
   });
+  // Right after Focus, per the sidebar's own Project-Manager-right-after-
+  // Focus placement (Sidebar.tsx NAV_GROUPS).
+  it("Project Manager", async () => {
+    await snapshot(<ProjectManager />, "/project-manager");
+  });
   it("Kanban board", async () => {
     await snapshot(<KanbanBoard />, "/kanban");
   });
@@ -616,6 +629,11 @@ describe("screen snapshots", () => {
 
   it("Usage", async () => {
     await snapshot(<Usage />, "/usage");
+  });
+  // Right after Usage, per the sidebar's own Coach-right-after-Usage
+  // placement (Sidebar.tsx NAV_GROUPS).
+  it("Coach", async () => {
+    await snapshot(<CoachPage />, "/coach");
   });
   it("Settings", async () => {
     await snapshot(<Settings />, "/settings");

@@ -71,12 +71,14 @@
     "tokens": {
       "in": "Vào",
       "out": "Ra",
-      "cache": "Cache",
-      "total": "Tổng",
+      "cacheRead": "Đọc",
+      "cacheWrite": "Ghi",
+      "effective": "Hiệu dụng",
       "inTooltip": "Tổng số token đầu vào (input) của phiên này",
       "outTooltip": "Tổng số token đầu ra (output) được tạo ra trong phiên này",
-      "cacheTooltip": "Tổng số token cache (đọc + ghi) của phiên này",
-      "totalTooltip": "Tổng số token của phiên này (vào + ra + cache)"
+      "cacheReadTooltip": "Số token được đọc lại từ prompt cache. Toàn bộ phần đầu hội thoại được đọc lại ở mỗi lượt, nên con số này tăng nhanh trong các phiên dài — tính phí ~10% giá input",
+      "cacheWriteTooltip": "Ngữ cảnh mới được ghi vào prompt cache. Tính phí cao hơn — 1,25x input (bậc 5 phút) hoặc 2x (bậc 1 giờ). Đây là con số tăng lên khi ngữ cảnh thay đổi nhiều",
+      "effectiveTooltip": "Mức tiêu thụ quy đổi về input: vào + ra + cache đọc/ghi được nhân theo đúng biểu giá của model này. Biến động cùng con số chi phí $ — con số cần theo dõi"
     }
   },
   "tooltip": {
@@ -101,10 +103,6 @@
     "deleteMonitor": "Xóa màn hình",
     "collapse": "Thu gọn màn hình",
     "expand": "Mở rộng màn hình",
-    "orientationHorizontal": "Chuyển sang bố cục dọc",
-    "orientationVertical": "Chuyển sang bố cục ngang",
-    "wrapAuto": "Tự động xuống dòng",
-    "wrapCount": "Xuống dòng sau mỗi {{count}}",
     "ungrouped": "Chưa phân nhóm",
     "collapseUngrouped": "Thu gọn mục chưa phân nhóm",
     "expandUngrouped": "Mở rộng mục chưa phân nhóm",
@@ -112,11 +110,17 @@
     "emptyUngroupedHint": "Thả dự án vào đây để gỡ khỏi màn hình"
   },
   "column": {
-    "orientationHorizontal": "Chuyển sang bố cục dọc",
-    "orientationVertical": "Chuyển sang bố cục ngang",
-    "wrapAuto": "Tự động xuống dòng",
-    "wrapCount": "Xuống dòng sau mỗi {{count}}",
     "collapse": "Thu gọn cột",
     "expand": "Mở rộng cột"
+  },
+  "layout": {
+    "trigger": "Sắp xếp bố cục",
+    "columns": "Cột",
+    "rows": "Hàng",
+    "auto": "Tự động",
+    "columnsOption": "{{count}} cột",
+    "rowsOption": "{{count}} hàng",
+    "autoColumnsOption": "Cột tự động",
+    "autoRowsOption": "Hàng tự động"
   }
 }

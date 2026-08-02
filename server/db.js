@@ -1321,6 +1321,57 @@ if (
   `);
 }
 
+// The Coach's Playbook (see library knowledge/product/coach/
+// coach-playbook-vocabulary.md for the full vocabulary this schema
+// implements). Two tables, deliberately split by ownership: the Playbook
+// defines knowledge (which practices exist, and their user-editable
+// config), the Coach produces what got detected (observations).
+//
+// playbook_practice_config — one row per practice a user has touched (a
+// practice with no row here is enabled with its catalog-defined defaults —
+// see server/lib/playbook/practices.js — so shipping a new practice never
+// needs a migration or a seed row). `config` is a JSON blob because each
+// practice defines its own field set; validated against that practice's
+// own `fields` schema at the route layer (server/routes/playbook.js), not
+// here.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS playbook_practice_config (
+    practice_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    config TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+`);
+
+// coach_observations — a detected occurrence of a practice firing for a
+// scope (session/project/global) at a point in time. No message/
+// recommendation TEXT columns: this app has no server-side i18n, so display
+// copy is owned entirely by the client's locale files, keyed by
+// `practice_id` — `values_json` carries only the raw numbers/ids a
+// client-side template interpolates (named with a `_json` suffix, not the
+// bare SQL keyword `values`, to avoid any reserved-word friction). `status`
+// starts at 'open'; the dedup index below is how the engine avoids
+// re-firing the same practice+scope while an observation for it is still
+// open.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coach_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    practice_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('session','project','global')),
+    scope_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('risk','info','good')),
+    severity TEXT NOT NULL,
+    values_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','acknowledged','dismissed','resolved')),
+    detected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    responded_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_coach_observations_open
+    ON coach_observations (practice_id, scope_type, scope_id, status);
+  CREATE INDEX IF NOT EXISTS idx_coach_observations_detected_at
+    ON coach_observations (detected_at DESC);
+`);
+
 // Focus-summary access log: one row per focus-window-summary cache
 // resolution (hit or miss), fed from server/lib/focus-summary.js at each
 // readCachedSummary / upsertFocusSummary decision point. This is what makes
@@ -1780,6 +1831,48 @@ const stmts = {
        weekly_red_at = COALESCE(?, weekly_red_at),
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = 1`
+  ),
+
+  // ── Coach's Playbook (practice config + the observations it produces) ──
+  listPlaybookPracticeConfigs: db.prepare("SELECT * FROM playbook_practice_config"),
+  getPlaybookPracticeConfig: db.prepare(
+    "SELECT * FROM playbook_practice_config WHERE practice_id = ?"
+  ),
+  // Caller always supplies the full resulting enabled/config (already merged
+  // with defaults + the incoming patch in JS), so this is a plain replace —
+  // no COALESCE needed at the SQL layer.
+  upsertPlaybookPracticeConfig: db.prepare(
+    `INSERT INTO playbook_practice_config (practice_id, enabled, config, updated_at)
+     VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ON CONFLICT(practice_id) DO UPDATE SET
+       enabled = excluded.enabled,
+       config = excluded.config,
+       updated_at = excluded.updated_at`
+  ),
+
+  insertCoachObservation: db.prepare(
+    `INSERT INTO coach_observations (practice_id, scope_type, scope_id, kind, severity, values_json)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ),
+  getCoachObservation: db.prepare("SELECT * FROM coach_observations WHERE id = ?"),
+  // Dedup lookup the engine uses before inserting - scope_id compared with
+  // an IS-based OR so a NULL scope_id (a future global-scoped practice)
+  // matches correctly, not just non-null session/project ids.
+  getOpenCoachObservation: db.prepare(
+    `SELECT * FROM coach_observations
+     WHERE practice_id = ? AND scope_type = ? AND status = 'open'
+       AND ((scope_id IS NULL AND ? IS NULL) OR scope_id = ?)
+     LIMIT 1`
+  ),
+  listCoachObservations: db.prepare(
+    "SELECT * FROM coach_observations ORDER BY detected_at DESC LIMIT ?"
+  ),
+  listCoachObservationsByStatus: db.prepare(
+    "SELECT * FROM coach_observations WHERE status = ? ORDER BY detected_at DESC LIMIT ?"
+  ),
+  updateCoachObservationStatus: db.prepare(
+    `UPDATE coach_observations SET status = ?, responded_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = ?`
   ),
 
   getAgent: db.prepare("SELECT * FROM agents WHERE id = ?"),

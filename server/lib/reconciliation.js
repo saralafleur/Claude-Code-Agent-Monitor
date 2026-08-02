@@ -40,7 +40,6 @@ const { DISPOSITIONS } = require("./detours");
 
 const DEFAULT_TICK_MS = 14_400_000;
 const BOOT_DELAY_MS = 60_000;
-const DEFAULT_PACE_GRACE_DAYS = 1;
 const DEFAULT_LOOKBACK_DAYS = 7;
 const DEFAULT_VOLUME_MIN_SESSIONS = 5;
 const DEFAULT_VOLUME_THRESHOLD = 0.4;
@@ -98,9 +97,11 @@ function listReconcileTargets(dbModule, limit = DEFAULT_MAX_TARGETS) {
 function evaluateRules(dbModule, target, opts = {}) {
   const cwd = typeof target === "string" ? target : target.cwd;
   const now = opts.now || new Date();
-  const graceDays = Number.isFinite(opts.graceDays)
-    ? opts.graceDays
-    : numEnv("DASHBOARD_PACE_GRACE_DAYS", DEFAULT_PACE_GRACE_DAYS);
+  // Single source for the env-configured default (§9.1 DERIVED-DUAL-VIEW) —
+  // the portfolio summary route (layer 7) reads the same helper so a pace
+  // breach here and a "behind" row there can never disagree on the grace
+  // period.
+  const graceDays = Number.isFinite(opts.graceDays) ? opts.graceDays : pace.paceGraceDaysFromEnv();
   const lookbackDays = numEnv("DASHBOARD_RECONCILE_LOOKBACK_DAYS", DEFAULT_LOOKBACK_DAYS);
   const minSessions = numEnv("DASHBOARD_DETOUR_VOLUME_MIN_SESSIONS", DEFAULT_VOLUME_MIN_SESSIONS);
   const volumeThreshold = numEnv("DASHBOARD_DETOUR_VOLUME_THRESHOLD", DEFAULT_VOLUME_THRESHOLD);

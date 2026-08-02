@@ -47,7 +47,12 @@ const tags = [
   {
     name: "Decision Queue",
     description:
-      "Layer 6 reconciliation output: pace-alert / detour-volume / needs-review / write-outcome entries surfaced for Sara's review over HTTP and ccam. No UI consumer this round (WATCH-3).",
+      "Layer 6 reconciliation output: pace-alert / detour-volume / needs-review / write-outcome entries surfaced for Sara's review over HTTP, ccam, and the Project Manager page.",
+  },
+  {
+    name: "Portfolio",
+    description:
+      "Layer 7 read model: per-project objective/milestone completion and live pace status, computed fresh from pace.js on every request. Powers the Project Manager page's rollup table and pace-watch rail.",
   },
 ];
 
@@ -2036,6 +2041,60 @@ const paths = {
           description: "No such queue item",
           content: {
             "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+          },
+        },
+      },
+    },
+  },
+  "/api/portfolio/summary": {
+    get: {
+      tags: ["Portfolio"],
+      operationId: "getPortfolioSummary",
+      summary: "Layer-7 per-project rollup: milestone completion + live pace status",
+      description:
+        "One entry per real project (the unassigned bucket has no objectives and is out of scope). Pace is computed fresh via pace.js on every request, not read back from decision_queue's historical rows.",
+      responses: {
+        200: {
+          description: "Per-project milestone/pace rollup",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  projects: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        project_id: { type: "string" },
+                        milestones: {
+                          type: "object",
+                          properties: {
+                            done: { type: "integer" },
+                            total: { type: "integer" },
+                          },
+                        },
+                        pace: {
+                          type: "object",
+                          properties: {
+                            counts: {
+                              type: "object",
+                              properties: {
+                                no_target: { type: "integer" },
+                                on_track: { type: "integer" },
+                                behind: { type: "integer" },
+                                done: { type: "integer" },
+                              },
+                            },
+                            behind: { type: "array", items: { type: "object" } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

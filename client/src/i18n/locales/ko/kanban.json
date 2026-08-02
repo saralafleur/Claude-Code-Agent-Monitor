@@ -71,12 +71,14 @@
     "tokens": {
       "in": "입력",
       "out": "출력",
-      "cache": "캐시",
-      "total": "합계",
+      "cacheRead": "읽기",
+      "cacheWrite": "쓰기",
+      "effective": "실효",
       "inTooltip": "이 세션의 총 입력 토큰 수",
       "outTooltip": "이 세션에서 생성된 총 출력 토큰 수",
-      "cacheTooltip": "이 세션의 총 캐시(읽기 + 쓰기) 토큰 수",
-      "totalTooltip": "이 세션의 총 토큰 수(입력 + 출력 + 캐시)"
+      "cacheReadTooltip": "프롬프트 캐시에서 다시 읽은 토큰 수. 매 턴마다 대화 전체 프리픽스를 다시 읽기 때문에 긴 세션에서는 빠르게 증가합니다 — 입력 요금의 약 10%로 과금",
+      "cacheWriteTooltip": "프롬프트 캐시에 새로 기록된 컨텍스트. 프리미엄 요금으로 과금됩니다 — 입력의 1.25배(5분 계층) 또는 2배(1시간 계층). 컨텍스트가 자주 바뀔수록 증가하는 수치입니다",
+      "effectiveTooltip": "입력 환산 소비량: 입력 + 출력 + 캐시 읽기/쓰기를 이 모델의 실제 요금 비율로 가중한 값. $ 비용 수치와 함께 움직이는, 주시해야 할 숫자입니다"
     }
   },
   "tooltip": {
@@ -101,10 +103,6 @@
     "deleteMonitor": "모니터 제거",
     "collapse": "모니터 접기",
     "expand": "모니터 펼치기",
-    "orientationHorizontal": "세로 레이아웃으로 전환",
-    "orientationVertical": "가로 레이아웃으로 전환",
-    "wrapAuto": "자동 줄바꿈",
-    "wrapCount": "{{count}}개마다 줄바꿈",
     "ungrouped": "미분류",
     "collapseUngrouped": "미분류 접기",
     "expandUngrouped": "미분류 펼치기",
@@ -112,11 +110,17 @@
     "emptyUngroupedHint": "프로젝트를 여기에 놓으면 모니터에서 제거됩니다"
   },
   "column": {
-    "orientationHorizontal": "세로 레이아웃으로 전환",
-    "orientationVertical": "가로 레이아웃으로 전환",
-    "wrapAuto": "자동 줄바꿈",
-    "wrapCount": "{{count}}개마다 줄바꿈",
     "collapse": "열 접기",
     "expand": "열 펼치기"
+  },
+  "layout": {
+    "trigger": "레이아웃 설정",
+    "columns": "열",
+    "rows": "행",
+    "auto": "자동",
+    "columnsOption": "{{count}}열",
+    "rowsOption": "{{count}}행",
+    "autoColumnsOption": "자동 열",
+    "autoRowsOption": "자동 행"
   }
 }

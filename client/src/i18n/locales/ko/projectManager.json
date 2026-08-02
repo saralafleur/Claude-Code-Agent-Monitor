@@ -1,0 +1,66 @@
+{
+  "title": "프로젝트 매니저",
+  "subtitle": "추적 중인 모든 프로젝트에 대한 포트폴리오 요약 — 목표일 대비 진행 속도, 처리가 필요한 우회 작업, 그리고 검토가 필요한 조정 결정을 보여줍니다.",
+  "errors": {
+    "loadFailed": "포트폴리오를 불러오지 못했습니다."
+  },
+  "scope": {
+    "all": "모든 프로젝트"
+  },
+  "kpi": {
+    "projectsTracked": "추적 중인 프로젝트",
+    "itemsBehindPace": "진행 속도 지연 항목",
+    "openDecisions": "대기 중인 결정",
+    "detoursResolved": "처리된 우회 작업 (7일)"
+  },
+  "rollup": {
+    "title": "포트폴리오",
+    "empty": "아직 프로젝트가 없습니다 — 프로젝트 페이지에서 생성하세요.",
+    "project": "프로젝트",
+    "progress": "목표 진행률",
+    "milestones": "마일스톤",
+    "pace": "진행 속도",
+    "openDecisions": "대기 중인 결정",
+    "lastActivity": "마지막 활동",
+    "noPlan": "아직 계획이 없습니다",
+    "behind_one": "{{count}}건 지연",
+    "behind_other": "{{count}}건 지연",
+    "onTrack": "정상 진행",
+    "done": "완료",
+    "noTarget": "목표일 없음"
+  },
+  "pace": {
+    "title": "진행 속도 확인",
+    "empty": "지연된 항목이 없습니다.",
+    "overdue_one": "{{count}}일 지연",
+    "overdue_other": "{{count}}일 지연"
+  },
+  "queue": {
+    "title": "결정 대기열",
+    "empty": "지금 당장 결정이 필요한 항목이 없습니다.",
+    "openCount_one": "{{count}}건 대기",
+    "openCount_other": "{{count}}건 대기",
+    "kinds": {
+      "pace_alert": "진행 속도 경고",
+      "detour_volume": "우회 작업 급증",
+      "detour_disposition": "우회 작업 처리",
+      "writeback_conflict": "쓰기 충돌",
+      "writeback_failed": "쓰기 실패"
+    },
+    "actions": {
+      "resolve": "처리",
+      "dismiss": "무시",
+      "retryWrite": "다시 쓰기",
+      "foldIn": "계획에 병합",
+      "newItem": "새 항목",
+      "deliberate": "의도적 기록",
+      "discard": "폐기"
+    },
+    "resolvedNote": "처리됨",
+    "dismissedNote": "무시됨"
+  },
+  "resolved": {
+    "title": "최근 처리 내역",
+    "empty": "아직 처리된 항목이 없습니다."
+  }
+}

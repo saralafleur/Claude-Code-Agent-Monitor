@@ -24,9 +24,10 @@
  * background focus classifiers spawn from an OS temp directory (see
  * lib/types.ts's isInternalSession) - across all three views at once. In the
  * Agents/Sessions views, each status column's header also carries its own
- * orientation toggle (mirroring the Projects view's per-monitor toggle) that
- * switches that column's cards between the default stacked list and a
- * horizontally-scrolling row - persisted in localStorage per view+status.
+ * layout menu (mirroring the Projects view's per-monitor menu, see
+ * `LayoutMenu`) - a single icon opens a popover of visual tiles, one per
+ * orientation+wrap combination, so picking a layout is one click to open and
+ * one click to apply. Persisted in localStorage per view+status.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -99,7 +100,7 @@ import { useTranslation } from "react-i18next";
 import {
   RefreshCw,
   Columns3,
-  Rows3,
+  LayoutGrid,
   ChevronDown,
   HelpCircle,
   Eye,
@@ -324,16 +325,13 @@ function persistStatusColumnOrientation(map: Record<string, "horizontal" | "vert
 }
 
 /** "*" = no fixed wrap (default); "1"-"4" = items per row/column before
- *  wrapping. Shared between the Agents/Sessions `Column` toggle (local-only)
- *  and the Projects view's `MonitorBox` toggle (server-backed via
+ *  wrapping. Shared between the Agents/Sessions `Column` menu (local-only)
+ *  and the Projects view's `MonitorBox` menu (server-backed via
  *  `MonitorGroup.wrap`). */
 type WrapCount = "*" | "1" | "2" | "3" | "4";
-const WRAP_CYCLE: WrapCount[] = ["*", "1", "2", "3", "4"];
-
-function cycleWrap(current: WrapCount | undefined): WrapCount {
-  const idx = WRAP_CYCLE.indexOf(current ?? "*");
-  return WRAP_CYCLE[(idx + 1) % WRAP_CYCLE.length] ?? "*";
-}
+// Every valid wrap value, in the order `LayoutMenu` renders its count tiles -
+// also doubles as the allow-list `loadStatusColumnWrap` validates against.
+const WRAP_VALUES: WrapCount[] = ["1", "2", "3", "4", "*"];
 
 /** CSS grid track sizing for a fixed wrap count - `axis: "row"` wraps
  *  row-major (N items per row, pairing with horizontal orientation),
@@ -356,7 +354,7 @@ function loadStatusColumnWrap(): Record<string, WrapCount> {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const map: Record<string, WrapCount> = {};
     for (const [key, value] of Object.entries(parsed)) {
-      if (WRAP_CYCLE.includes(value as WrapCount)) map[key] = value as WrapCount;
+      if (WRAP_VALUES.includes(value as WrapCount)) map[key] = value as WrapCount;
     }
     return map;
   } catch {
@@ -494,29 +492,25 @@ export function KanbanBoard() {
     });
   }, []);
 
-  // Flips one status column's card orientation (Agents/Sessions views).
-  // `key` is `${view}-${status}` so each column's toggle is independent.
-  const toggleStatusColumnOrientation = useCallback((key: string) => {
-    setStatusColumnOrientationState((prev) => {
-      const next = {
-        ...prev,
-        [key]: prev[key] === "horizontal" ? ("vertical" as const) : ("horizontal" as const),
-      };
-      persistStatusColumnOrientation(next);
-      return next;
-    });
-  }, []);
-
-  // Cycles one status column's wrap count (Agents/Sessions views) through
-  // "*" -> 1 -> 2 -> 3 -> 4 -> "*". Independent of orientation above - same
-  // `key` shape (`${view}-${status}`).
-  const cycleStatusColumnWrap = useCallback((key: string) => {
-    setStatusColumnWrapState((prev) => {
-      const next = { ...prev, [key]: cycleWrap(prev[key]) };
-      persistStatusColumnWrap(next);
-      return next;
-    });
-  }, []);
+  // Sets one status column's orientation + wrap together (Agents/Sessions
+  // views) - the `LayoutMenu` popover picks both in a single tile click, so
+  // this updates both persisted maps in one call rather than two separate
+  // cycle steps. `key` is `${view}-${status}` so each column is independent.
+  const setStatusColumnLayout = useCallback(
+    (key: string, orientation: "horizontal" | "vertical", wrap: WrapCount) => {
+      setStatusColumnOrientationState((prev) => {
+        const next = { ...prev, [key]: orientation };
+        persistStatusColumnOrientation(next);
+        return next;
+      });
+      setStatusColumnWrapState((prev) => {
+        const next = { ...prev, [key]: wrap };
+        persistStatusColumnWrap(next);
+        return next;
+      });
+    },
+    []
+  );
 
   const loadAgents = useCallback(async () => {
     // Fetch every persisted agent status. Bucketing happens below in
@@ -901,27 +895,15 @@ export function KanbanBoard() {
     );
   }
 
-  function handleToggleMonitorOrientation(id: string) {
-    monitorStore.saveMonitors(
-      monitors.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              orientation: (m.orientation === "vertical" ? "horizontal" : "vertical") as
-                | "horizontal"
-                | "vertical",
-            }
-          : m
-      )
-    );
-  }
-
-  // Cycles one monitor's wrap count ("*" -> 1 -> 2 -> 3 -> 4 -> "*") -
-  // independent of orientation above, server-backed same as it.
-  function handleCycleMonitorWrap(id: string) {
-    monitorStore.saveMonitors(
-      monitors.map((m) => (m.id === id ? { ...m, wrap: cycleWrap(m.wrap) } : m))
-    );
+  // Sets one monitor's orientation + wrap together - the `LayoutMenu`
+  // popover picks both in a single tile click, server-backed via
+  // `MonitorGroup.orientation`/`.wrap` same as the old separate toggles.
+  function handleSetMonitorLayout(
+    id: string,
+    orientation: "horizontal" | "vertical",
+    wrap: WrapCount
+  ) {
+    monitorStore.saveMonitors(monitors.map((m) => (m.id === id ? { ...m, orientation, wrap } : m)));
   }
 
   function handleToggleProjectCollapsed(key: string) {
@@ -1272,12 +1254,13 @@ export function KanbanBoard() {
         collapsed={!!monitor.collapsed}
         orientation={monitor.orientation === "vertical" ? "vertical" : "horizontal"}
         wrap={monitor.wrap ?? "*"}
-        onCycleWrap={() => handleCycleMonitorWrap(monitor.id)}
+        onLayoutChange={(orientation, wrap) =>
+          handleSetMonitorLayout(monitor.id, orientation, wrap)
+        }
         dragging={draggedMonitorId === monitor.id}
         onRename={(name) => handleRenameMonitor(monitor.id, name)}
         onDelete={() => handleDeleteMonitor(monitor.id)}
         onToggleCollapsed={() => handleToggleMonitorCollapsed(monitor.id)}
-        onToggleOrientation={() => handleToggleMonitorOrientation(monitor.id)}
         onBoxDragStart={() => handleMonitorDragStart(monitor.id)}
         onBoxDragOver={(e) => {
           if (draggedMonitorId) handleMonitorDragOver(e, monitor.id);
@@ -1355,9 +1338,10 @@ export function KanbanBoard() {
                   }))
                 }
                 orientation={statusColumnOrientation[orientationKey] ?? "vertical"}
-                onToggleOrientation={() => toggleStatusColumnOrientation(orientationKey)}
                 wrap={statusColumnWrap[orientationKey] ?? "*"}
-                onCycleWrap={() => cycleStatusColumnWrap(orientationKey)}
+                onLayoutChange={(orientation, wrap) =>
+                  setStatusColumnLayout(orientationKey, orientation, wrap)
+                }
               >
                 {loading && (items?.length ?? 0) === 0
                   ? Array.from({ length: 3 }).map((_, i) => (
@@ -1399,9 +1383,10 @@ export function KanbanBoard() {
                   }))
                 }
                 orientation={statusColumnOrientation[orientationKey] ?? "vertical"}
-                onToggleOrientation={() => toggleStatusColumnOrientation(orientationKey)}
                 wrap={statusColumnWrap[orientationKey] ?? "*"}
-                onCycleWrap={() => cycleStatusColumnWrap(orientationKey)}
+                onLayoutChange={(orientation, wrap) =>
+                  setStatusColumnLayout(orientationKey, orientation, wrap)
+                }
               >
                 {loading && (items?.length ?? 0) === 0
                   ? Array.from({ length: 3 }).map((_, i) => (
@@ -1564,22 +1549,19 @@ interface ColumnProps {
   onToggleCollapsed?: () => void;
   /** Card layout inside this column - "vertical" (default; the long-standing
    *  stacked list) or "horizontal" (cards laid out side by side in their own
-   *  scrolling row). Only meaningful together with `onToggleOrientation`;
+   *  scrolling row). Only meaningful together with `onLayoutChange`;
    *  Projects-view columns pass neither (that view's boxes have their own,
-   *  separate per-monitor orientation toggle - see MonitorBox). */
+   *  separate per-monitor layout menu - see MonitorBox). */
   orientation?: "horizontal" | "vertical";
-  /** Present only for columns that support this (Agents/Sessions status
-   *  columns); toggles `orientation`. */
-  onToggleOrientation?: () => void;
-  /** A second, independent control alongside `orientation` - "*" (default)
-   *  is today's unbounded row/column; "1"-"4" caps how many cards land per
-   *  row (horizontal) or column (vertical) before wrapping to a new one.
-   *  Only meaningful together with `onCycleWrap`; Projects-view columns pass
-   *  neither, same as `orientation`. */
+  /** A second, independent value alongside `orientation` - "*" (default) is
+   *  today's unbounded row/column; "1"-"4" caps how many cards land per row
+   *  (horizontal) or column (vertical) before wrapping to a new one. Only
+   *  meaningful together with `onLayoutChange`. */
   wrap?: WrapCount;
   /** Present only for columns that support this (Agents/Sessions status
-   *  columns); cycles `wrap` through its 5 values. */
-  onCycleWrap?: () => void;
+   *  columns); sets `orientation` and `wrap` together - the `LayoutMenu`
+   *  popover picks a full combination in one click. */
+  onLayoutChange?: (orientation: "horizontal" | "vertical", wrap: WrapCount) => void;
 }
 
 function Column({
@@ -1606,9 +1588,8 @@ function Column({
   collapsed,
   onToggleCollapsed,
   orientation,
-  onToggleOrientation,
   wrap,
-  onCycleWrap,
+  onLayoutChange,
 }: ColumnProps) {
   const { t } = useTranslation("kanban");
   const childrenArray = Array.isArray(children) ? children : children ? [children] : [];
@@ -1712,42 +1693,12 @@ function Column({
         <span className="ml-auto text-[11px] text-gray-600 bg-surface-3 px-2 py-0.5 rounded-full">
           {count}
         </span>
-        {onToggleOrientation && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleOrientation();
-            }}
-            title={t(isHorizontal ? "column.orientationHorizontal" : "column.orientationVertical")}
-            aria-pressed={isHorizontal}
-            draggable={false}
-            className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
-          >
-            {isHorizontal ? (
-              <Columns3 className="w-3.5 h-3.5" />
-            ) : (
-              <Rows3 className="w-3.5 h-3.5" />
-            )}
-          </button>
-        )}
-        {onCycleWrap && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCycleWrap();
-            }}
-            title={
-              effectiveWrap === "*"
-                ? t("column.wrapAuto")
-                : t("column.wrapCount", { count: Number(effectiveWrap) })
-            }
-            draggable={false}
-            className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0 text-[10px] font-mono font-semibold w-3.5 text-center"
-          >
-            {effectiveWrap}
-          </button>
+        {onLayoutChange && (
+          <LayoutMenu
+            orientation={isHorizontal ? "horizontal" : "vertical"}
+            wrap={effectiveWrap}
+            onChange={onLayoutChange}
+          />
         )}
       </div>
 
@@ -1847,8 +1798,9 @@ interface MonitorBoxProps {
   onRename: (name: string) => void;
   onDelete: () => void;
   onToggleCollapsed: () => void;
-  onToggleOrientation: () => void;
-  onCycleWrap: () => void;
+  /** Sets `orientation` and `wrap` together - the `LayoutMenu` popover picks
+   *  a full combination in one click. */
+  onLayoutChange: (orientation: "horizontal" | "vertical", wrap: WrapCount) => void;
   onBoxDragStart: () => void;
   /** Fired while a drag is over this box - branches at the call site on
    *  whether a project column or another monitor box is being dragged. */
@@ -1882,8 +1834,7 @@ function MonitorBox({
   onRename,
   onDelete,
   onToggleCollapsed,
-  onToggleOrientation,
-  onCycleWrap,
+  onLayoutChange,
   onBoxDragStart,
   onBoxDragOver,
   onBoxDragEnd,
@@ -1944,37 +1895,7 @@ function MonitorBox({
         <span className="text-[11px] text-gray-600 bg-surface-3 px-2 py-0.5 rounded-full flex-shrink-0">
           {count}
         </span>
-        <button
-          type="button"
-          onClick={onToggleOrientation}
-          title={t(
-            orientation === "vertical"
-              ? "monitors.orientationVertical"
-              : "monitors.orientationHorizontal"
-          )}
-          aria-pressed={orientation === "vertical"}
-          draggable={false}
-          className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
-        >
-          {orientation === "vertical" ? (
-            <Rows3 className="w-3.5 h-3.5" />
-          ) : (
-            <Columns3 className="w-3.5 h-3.5" />
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={onCycleWrap}
-          title={
-            effectiveWrap === "*"
-              ? t("monitors.wrapAuto")
-              : t("monitors.wrapCount", { count: Number(effectiveWrap) })
-          }
-          draggable={false}
-          className="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0 text-[10px] font-mono font-semibold w-3.5 text-center"
-        >
-          {effectiveWrap}
-        </button>
+        <LayoutMenu orientation={orientation} wrap={effectiveWrap} onChange={onLayoutChange} />
         <button
           type="button"
           onClick={onDelete}
@@ -2087,6 +2008,167 @@ function UngroupedBox({
         )}
       </div>
     </section>
+  );
+}
+
+/** One visual tile inside `LayoutMenu` - a miniature preview of exactly what
+ *  that orientation+wrap combination looks like, so the popover can be
+ *  scanned and picked without reading any text. "*" renders as a dashed
+ *  outline (no fixed count); "1"-"4" render that many small blocks arranged
+ *  along the matching axis. */
+function LayoutTileGlyph({ axis, wrap }: { axis: "columns" | "rows"; wrap: WrapCount }) {
+  if (wrap === "*") {
+    return (
+      <span className="flex items-center justify-center w-full h-[18px]">
+        <svg
+          viewBox="0 0 24 24"
+          className="w-3.5 h-3.5 opacity-70"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeDasharray="1 4.2"
+          aria-hidden="true"
+        >
+          <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+        </svg>
+      </span>
+    );
+  }
+  const n = Number(wrap);
+  return (
+    <span
+      className="grid gap-[2px] w-full h-[18px]"
+      style={
+        axis === "columns"
+          ? { gridTemplateColumns: `repeat(${n}, 1fr)`, gridAutoRows: "1fr" }
+          : {
+              gridTemplateRows: `repeat(${n}, 1fr)`,
+              gridAutoFlow: "column",
+              gridAutoColumns: "1fr",
+            }
+      }
+      aria-hidden="true"
+    >
+      {Array.from({ length: 6 }).map((_, i) => (
+        <span key={i} className="bg-current opacity-60 rounded-[1.5px]" />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Combined orientation+wrap picker for a Kanban column/monitor header - one
+ * icon opens a popover of visual tiles, each its own full (orientation, wrap)
+ * combination, so choosing a layout is exactly two clicks: one to open, one
+ * on the tile you want, which applies it and closes immediately. Replaces
+ * what used to be two separate blind cycle-buttons (orientation toggle +
+ * wrap-count cycle) that could take several clicks to reach a specific
+ * combination and gave no preview of what the next click would produce.
+ */
+function LayoutMenu({
+  orientation,
+  wrap,
+  onChange,
+}: {
+  orientation: "horizontal" | "vertical";
+  wrap: WrapCount;
+  onChange: (orientation: "horizontal" | "vertical", wrap: WrapCount) => void;
+}) {
+  const { t } = useTranslation("kanban");
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  function renderGroup(groupOrientation: "horizontal" | "vertical", axis: "columns" | "rows") {
+    return (
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+          {t(axis === "columns" ? "layout.columns" : "layout.rows")}
+        </div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {WRAP_VALUES.map((value) => {
+            const isActive = orientation === groupOrientation && wrap === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange(groupOrientation, value);
+                  setOpen(false);
+                }}
+                title={
+                  value === "*"
+                    ? t(axis === "columns" ? "layout.autoColumnsOption" : "layout.autoRowsOption")
+                    : t(axis === "columns" ? "layout.columnsOption" : "layout.rowsOption", {
+                        count: Number(value),
+                      })
+                }
+                draggable={false}
+                className={`flex flex-col items-center justify-center gap-1 h-[42px] rounded-md border transition-colors duration-150 ${
+                  isActive
+                    ? "bg-accent-muted border-accent text-accent-hover"
+                    : "bg-surface-2 border-border text-gray-500 hover:border-border-light hover:text-gray-300"
+                }`}
+              >
+                <LayoutTileGlyph axis={axis} wrap={value} />
+                <span className="text-[9px] font-bold leading-none">
+                  {value === "*" ? t("layout.auto") : value}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={menuRef} className="relative flex-shrink-0">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        title={t("layout.trigger")}
+        aria-haspopup="true"
+        aria-expanded={open}
+        draggable={false}
+        className={`transition-colors flex-shrink-0 ${
+          open ? "text-accent-hover" : "text-gray-500 hover:text-gray-300"
+        }`}
+      >
+        <LayoutGrid className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label={t("layout.trigger")}
+          onClick={(e) => e.stopPropagation()}
+          draggable={false}
+          className="absolute z-30 right-0 top-full mt-1.5 w-[248px] rounded-lg border border-border-light bg-surface-4 shadow-lg shadow-black/40 p-3 space-y-3"
+        >
+          {renderGroup("horizontal", "columns")}
+          {renderGroup("vertical", "rows")}
+        </div>
+      )}
+    </div>
   );
 }
 

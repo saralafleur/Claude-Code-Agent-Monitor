@@ -28,6 +28,19 @@
 // from it.
 const PACE_STATUSES = ["no_target", "on_track", "behind", "done"];
 
+// Default grace period (days past target_date still counted on_track) when
+// DASHBOARD_PACE_GRACE_DAYS isn't set. Every caller of paceStatus() that
+// wants the env-configured grace period (reconciliation.js's R1 rule, the
+// layer-7 portfolio summary route) reads it through this one function
+// instead of re-parsing the env var itself (§9.1 DERIVED-DUAL-VIEW) — a
+// second hardcoded default here and there is exactly how two callers drift.
+const DEFAULT_PACE_GRACE_DAYS = 1;
+
+function paceGraceDaysFromEnv() {
+  const v = Number(process.env.DASHBOARD_PACE_GRACE_DAYS);
+  return Number.isFinite(v) ? v : DEFAULT_PACE_GRACE_DAYS;
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // YYYY-MM-DD in local time (en-CA formatting gives ISO order directly).
@@ -124,4 +137,5 @@ module.exports = {
   localDayString,
   isComplete,
   paceStatus,
+  paceGraceDaysFromEnv,
 };

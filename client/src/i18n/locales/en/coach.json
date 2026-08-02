@@ -1,0 +1,57 @@
+{
+  "title": "Coach",
+  "subtitle": "Patterns from how you actually use Claude Code, and what to do about them.",
+  "tabs": {
+    "label": "Coach views",
+    "feed": "Feed",
+    "playbook": "Playbook"
+  },
+  "empty": {
+    "title": "Nothing to flag right now",
+    "description": "The Coach is watching your sessions in the background. When something's worth your attention, it'll show up here."
+  },
+  "feed": {
+    "loading": "Loading…"
+  },
+  "kindLabel": {
+    "risk": "Warning",
+    "info": "Reminder",
+    "good": "Reinforcement"
+  },
+  "statusLabel": {
+    "acknowledged": "Acknowledged",
+    "dismissed": "Dismissed",
+    "resolved": "Resolved"
+  },
+  "actions": {
+    "openSession": "Open session",
+    "copySummary": "Copy summary",
+    "dismiss": "Dismiss"
+  },
+  "scopeLabel": {
+    "session": "session",
+    "project": "project",
+    "global": "global"
+  },
+  "playbook": {
+    "loading": "Loading…",
+    "noteStrong": "The playbook defines what the Coach watches for.",
+    "note": "A practice you turn off here is simply never evaluated — it won't appear in the Feed, and nothing runs in the background for it.",
+    "previewLabel": "Preview — what this produces in the Feed",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "resetDefault": "Reset to default",
+    "minError": "Must be at least {{min}}"
+  },
+  "practices": {
+    "sessionTokenCeiling": {
+      "name": "Session Token Ceiling",
+      "description": "Flags when a single session's total token usage crosses a ceiling, before quality degrades or the context window becomes unreliable.",
+      "fieldLabel": "Threshold",
+      "unit": "tokens",
+      "message": "Session context is becoming large ({{tokens}} tokens)",
+      "recommendation": "Compact or clear the session before continuing — copy your current context first."
+    }
+  }
+}

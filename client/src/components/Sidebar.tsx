@@ -86,6 +86,8 @@ import {
   CalendarDays,
   Focus,
   SquareTerminal,
+  Compass,
+  Milestone,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "../lib/api";
@@ -100,8 +102,10 @@ function isUpdatePayload(x: unknown): x is UpdateStatusPayload {
 
 // Grouped so the sidebar can render a divider between them: the built-in
 // Agent Monitor surface (dashboard), our own additions (project/focus
-// tracking + usage), and the rest of the built-in surface. Keeps "our
-// additions" visually distinct without reordering within each group.
+// tracking + usage + coach), and the rest of the built-in surface. The
+// middle group also gets its own slightly-offset background panel (see the
+// groupIndex === 1 branch below) so "our additions" reads as one distinct
+// section at a glance, not just another chunk of the same list.
 const NAV_GROUPS = [
   [{ to: "/", icon: LayoutDashboard, key: "nav:dashboard" }],
   [
@@ -112,9 +116,16 @@ const NAV_GROUPS = [
     // Right after Calendar - the stakeholder-readable "what did we actually
     // do" report sibling to the swimlane calendar view.
     { to: "/focus", icon: Focus, key: "nav:focus" },
+    // Right after Focus - the layer-7 portfolio rollup sibling to the
+    // stakeholder-readable "what did we do" report (pace, detours, and the
+    // reconciliation decision queue, one page per portfolio).
+    { to: "/project-manager", icon: Milestone, key: "nav:projectManager" },
     // Grouped with Projects/Calendar/Focus rather than left near Workflows -
     // all four are our additions on top of the original nav surface.
     { to: "/usage", icon: Gauge, key: "nav:usage" },
+    // Right after Usage - the pattern/recommendation layer over the same
+    // usage data, so it reads as the natural next step in this group.
+    { to: "/coach", icon: Compass, key: "nav:coach" },
   ],
   [
     { to: "/kanban", icon: Columns3, key: "nav:agentBoard" },
@@ -454,7 +465,11 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
           {NAV_GROUPS.map((group, groupIndex) => (
             <div
               key={groupIndex}
-              className={`space-y-1 ${groupIndex > 0 ? "pt-2 mt-1 border-t border-border" : ""}`}
+              className={`space-y-1 ${groupIndex > 0 ? "pt-2 mt-1 border-t border-border" : ""} ${
+                groupIndex === 1
+                  ? "rounded-xl bg-surface-2/60 border border-border/50 p-1.5 -mx-0.5"
+                  : ""
+              }`}
             >
               {group.map(({ to, icon: Icon, key }) => {
                 const label = t(key);

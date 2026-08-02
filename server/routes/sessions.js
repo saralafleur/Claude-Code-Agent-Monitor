@@ -21,7 +21,7 @@ const { transcriptCache } = require("./hooks");
 // `terminalFocus.focusTerminalForSession` and this route picks the stub up
 // at call time — same idiom hooks.js uses for `liveness.probeLiveCwds`.
 const terminalFocus = require("../lib/terminal-focus");
-const { calculateCost, attachAgentCosts } = require("./pricing");
+const { calculateCost, attachAgentCosts, matchPricingRule, ratesForBucket } = require("./pricing");
 const { parseSources, sourceColumnClause } = require("../lib/source-filter");
 const {
   getClaudeHome,
@@ -133,20 +133,54 @@ async function readFirstLine(filePath) {
   return null;
 }
 
+// Fallback cache weights (relative to the input rate) used only when a bucket
+// matches no pricing rule or the rule has no input rate: Anthropic's standard
+// multipliers — reads ~10% of input, 5m writes 1.25x, 1h writes 2x.
+const FALLBACK_CACHE_WEIGHTS = { read: 0.1, write5m: 1.25, write1h: 2 };
+
 /**
  * Sums a session's token_usage rows (one per model/speed/tier bucket) into the
- * three totals the Kanban session card shows: fresh input, generated output,
- * and cache (read + write combined — the card treats "cache" as one number,
- * not the read/write split `token_usage` stores it as).
+ * totals the Kanban session card shows: fresh input, generated output, the
+ * cache read/write split, and a cost-weighted `effective` total.
+ *
+ * `effective` is the "input-equivalent" consumption figure:
+ *   input + output + cache_read*(readRate/inputRate) + cache writes at their
+ *   5m/1h premium weights — rates resolved per bucket from the same pricing
+ *   rules calculateCost uses, so this number moves in lockstep with `cost`
+ *   rather than overstating cheap cache reads ~10x like a raw sum would.
+ *
+ * `cache` (read + write combined) is retained for API backward compatibility.
  */
-function sumSessionTokens(tokenRows) {
-  const totals = { input: 0, output: 0, cache: 0 };
+function sumSessionTokens(tokenRows, pricingRules, asOf) {
+  const totals = { input: 0, output: 0, cache: 0, cache_read: 0, cache_write: 0, effective: 0 };
   if (!tokenRows) return totals;
   for (const t of tokenRows) {
     totals.input += t.input_tokens;
     totals.output += t.output_tokens;
+    totals.cache_read += t.cache_read_tokens;
+    totals.cache_write += t.cache_write_tokens;
     totals.cache += t.cache_read_tokens + t.cache_write_tokens;
+
+    let { read, write5m, write1h } = FALLBACK_CACHE_WEIGHTS;
+    const rule = pricingRules ? matchPricingRule(pricingRules, t.model) : null;
+    if (rule) {
+      const { rIn, rRead, r5m, r1h } = ratesForBucket(rule, t, asOf);
+      if (rIn > 0) {
+        read = rRead / rIn;
+        write5m = r5m / rIn;
+        write1h = r1h / rIn;
+      }
+    }
+    const cw1h = t.cache_write_1h_tokens || 0;
+    const cw5m = Math.max(0, t.cache_write_tokens - cw1h);
+    totals.effective +=
+      t.input_tokens +
+      t.output_tokens +
+      t.cache_read_tokens * read +
+      cw5m * write5m +
+      cw1h * write1h;
   }
+  totals.effective = Math.round(totals.effective);
   return totals;
 }
 
@@ -211,7 +245,8 @@ router.get("/", (req, res) => {
               input_tokens + baseline_input as input_tokens,
               output_tokens + baseline_output as output_tokens,
               cache_read_tokens + baseline_cache_read as cache_read_tokens,
-              cache_write_tokens + baseline_cache_write as cache_write_tokens
+              cache_write_tokens + baseline_cache_write as cache_write_tokens,
+              cache_write_1h_tokens + baseline_cache_write_1h as cache_write_1h_tokens
             FROM token_usage WHERE session_id IN (${placeholders})`
           )
           .all(...ids);
@@ -227,7 +262,7 @@ router.get("/", (req, res) => {
           row.cost = sessionTokens
             ? calculateCost(sessionTokens, rules, row.started_at).total_cost
             : 0;
-          row.tokens = sumSessionTokens(sessionTokens);
+          row.tokens = sumSessionTokens(sessionTokens, rules, row.started_at);
         }
       }
 
@@ -262,7 +297,8 @@ router.get("/", (req, res) => {
             input_tokens + baseline_input as input_tokens,
             output_tokens + baseline_output as output_tokens,
             cache_read_tokens + baseline_cache_read as cache_read_tokens,
-            cache_write_tokens + baseline_cache_write as cache_write_tokens
+            cache_write_tokens + baseline_cache_write as cache_write_tokens,
+            cache_write_1h_tokens + baseline_cache_write_1h as cache_write_1h_tokens
           FROM token_usage WHERE session_id IN (${placeholders})`
         )
         .all(...ids);
@@ -279,7 +315,7 @@ router.get("/", (req, res) => {
         row.cost = sessionTokens
           ? calculateCost(sessionTokens, rules, row.started_at).total_cost
           : 0;
-        row.tokens = sumSessionTokens(sessionTokens);
+        row.tokens = sumSessionTokens(sessionTokens, rules, row.started_at);
       }
     }
   }

@@ -1,0 +1,66 @@
+{
+  "title": "Project Manager",
+  "subtitle": "Portfolio rollup across every tracked project — pace against target dates, detours needing a disposition, and the reconciliation calls that need your read.",
+  "errors": {
+    "loadFailed": "Failed to load the portfolio."
+  },
+  "scope": {
+    "all": "All projects"
+  },
+  "kpi": {
+    "projectsTracked": "Projects tracked",
+    "itemsBehindPace": "Items behind pace",
+    "openDecisions": "Open decisions",
+    "detoursResolved": "Detours resolved (7d)"
+  },
+  "rollup": {
+    "title": "Portfolio",
+    "empty": "No projects yet — create one from the Projects page.",
+    "project": "Project",
+    "progress": "Objective progress",
+    "milestones": "Milestones",
+    "pace": "Pace",
+    "openDecisions": "Open decisions",
+    "lastActivity": "Last activity",
+    "noPlan": "No plan yet",
+    "behind_one": "{{count}} behind",
+    "behind_other": "{{count}} behind",
+    "onTrack": "on track",
+    "done": "done",
+    "noTarget": "no target"
+  },
+  "pace": {
+    "title": "Pace watch",
+    "empty": "Nothing behind pace.",
+    "overdue_one": "{{count}}d overdue",
+    "overdue_other": "{{count}}d overdue"
+  },
+  "queue": {
+    "title": "Decision Queue",
+    "empty": "Nothing needs your call right now.",
+    "openCount_one": "{{count}} open",
+    "openCount_other": "{{count}} open",
+    "kinds": {
+      "pace_alert": "pace alert",
+      "detour_volume": "detour volume",
+      "detour_disposition": "detour disposition",
+      "writeback_conflict": "write conflict",
+      "writeback_failed": "write failed"
+    },
+    "actions": {
+      "resolve": "Resolve",
+      "dismiss": "Dismiss",
+      "retryWrite": "Retry write",
+      "foldIn": "Fold in",
+      "newItem": "New item",
+      "deliberate": "Deliberate",
+      "discard": "Discard"
+    },
+    "resolvedNote": "Resolved",
+    "dismissedNote": "Dismissed"
+  },
+  "resolved": {
+    "title": "Recently resolved",
+    "empty": "Nothing resolved yet."
+  }
+}

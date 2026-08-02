@@ -19,6 +19,7 @@ Complete REST API and WebSocket documentation for Agent Dashboard.
   - [Remote Data Sources](#remote-data-sources)
   - [Projects](#projects)
   - [Plans & Focus](#plans--focus)
+  - [Portfolio](#portfolio)
 - [WebSocket API](#websocket-api)
 - [Error Handling](#error-handling)
 - [Rate Limiting](#rate-limiting)
@@ -175,13 +176,13 @@ classDiagram
         +string awaiting_reason "notification|stop|session_start|interrupted|subagent|shell|monitor; null unless Waiting"
         +number cost
         +number agent_count
-        +object tokens "input/output/cache totals; list endpoint only"
+        +object tokens "input/output/cache_read/cache_write/effective totals; list endpoint only"
     }
     
     SessionListResponse --> Session
 ```
 
-> **Note on `tokens`** — only `GET /api/sessions` (this endpoint) attaches a `tokens` object per session: session-lifetime totals summed across every model/speed/tier bucket in `token_usage`, `{ input, output, cache }`. `cache` combines cache-read and cache-write tokens into one figure (the Kanban session card shows a single "Cache" number, not the read/write split). Undefined on other endpoints — it means "not computed here," not zero usage.
+> **Note on `tokens`** — only `GET /api/sessions` (this endpoint) attaches a `tokens` object per session: session-lifetime totals summed across every model/speed/tier bucket in `token_usage`, `{ input, output, cache, cache_read, cache_write, effective }`. `cache_read` and `cache_write` are the split figures the Kanban session card displays (`cache`, their combined sum, is retained for backward compatibility). `effective` is the cost-weighted **input-equivalent** total: `input + output + cache_read×(readRate/inputRate) + cache writes at their 5m/1h premium weights`, with the rates resolved per bucket from the same pricing rules `cost` uses (standard Anthropic multipliers ≈ 0.1× for reads, 1.25×/2× for 5m/1h writes; those multipliers are also the fallback for unpriced models) — so `effective` tracks `cost` instead of overstating cache-heavy sessions the way a raw sum would. Undefined on other endpoints — it means "not computed here," not zero usage.
 
 ---
 
@@ -1642,6 +1643,46 @@ Two generation paths, split at 2 local calendar days (`server/lib/focus-summary.
 
 ---
 
+### Portfolio
+
+The layer-7 read model behind the **Project Manager** page (`/project-manager`, sidebar label **Project Manager**, positioned right after Focus): one rollup per project combining objective/milestone completion and live pace status.
+
+```http
+GET /api/portfolio/summary
+```
+
+One entry per real project (the "unassigned" bucket has no objectives to track and is out of scope). Pace is computed fresh via `server/lib/pace.js`'s `paceStatus()` on every request — mirrored exactly from the layer-6 reconciliation tick's own R1 rule (same `graceDays` default, via the shared `paceGraceDaysFromEnv()` helper), so this list never shows a pace breach the scheduler itself wouldn't flag, and never a stale copy of `decision_queue`'s historical rows. `pace.behind` is pre-filtered to numbered, top-level-ish plan items — a sub-item (`fold_in`'d under a parent, no independent number) never carries its own target date; `milestones` counts every item, sub-items included.
+
+**Response**
+
+```json
+{
+  "projects": [
+    {
+      "project_id": "96386f5d-…",
+      "milestones": { "done": 12, "total": 17 },
+      "pace": {
+        "counts": { "no_target": 3, "on_track": 1, "behind": 1, "done": 12 },
+        "behind": [
+          {
+            "cwd": "/Users/sara/CODE-LOCAL/SARA/Claude-Code-Agent-Monitor",
+            "item_id": "a1b2c3d4",
+            "item_number": 14,
+            "text": "Run the DEC-7 live trial against the real fleet",
+            "target_date": "2026-07-31",
+            "days_overdue": 1
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+The Project Manager page composes this with `GET /api/projects` (name, session counts, last activity) and `GET /api/decision-queue` (the layer-6 reconciliation decision queue — pending items render as actionable cards; resolved/dismissed items feed the "Recently resolved" rail) — three independent fetches rather than one combined endpoint, each already owned by its own single-responsibility route. Resolving a `detour_disposition` queue row goes through `POST /api/detours/:id/resolve` (`fold_in`/`new_item`/`deliberate`/`discard` — `fold_in`/`new_item` synchronously write into the cwd's `AGENT-PLAN.md`); every other kind goes through `POST /api/decision-queue/:id/resolve` (`resolve`/`dismiss`/`retry_write`).
+
+---
+
 ### Claude Config Explorer
 
 The `/api/cc-config/*` namespace powers the Claude Config Explorer page. All read endpoints are pure file reads under `CLAUDE_HOME` and the project's `.claude/` dir; mutations are limited to low-risk text-file artifacts (skills, subagents, slash commands, output styles, memory) and always create a timestamped backup before writing. Plugins, MCP servers, hooks-in-settings, and live `settings.json` files stay read-only because they are written concurrently by the running Claude Code CLI.
@@ -1964,6 +2005,22 @@ Broadcast whenever `PUT /api/color-thresholds` changes the global Usage-page col
 
 ```json
 { "type": "color_thresholds_updated", "data": { "session": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }, "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 } } }
+```
+
+#### decision_queue_updated
+
+Broadcast whenever a layer-6 `decision_queue` row changes: a reconciliation tick enqueues a new `pace_alert`/`detour_volume`/`detour_disposition`/`writeback_*` row, or `POST /api/decision-queue/:id/resolve` resolves/dismisses/retries one. Carries the full updated row (see [Portfolio](#portfolio)). The Project Manager page treats this as a reload signal (debounced) rather than merging the row in place, since resolving one row can also touch a linked `detour_dispositions` row.
+
+```json
+{ "type": "decision_queue_updated", "data": { "id": 42, "cwd": "/Users/sara/CODE-LOCAL/SARA/Claude-Code-Agent-Monitor", "project_id": "96386f5d-…", "kind": "pace_alert", "status": "pending", "message": "Item 14 is 1 day(s) past its target date." } }
+```
+
+#### detour_disposition
+
+Broadcast whenever a layer-4 `detour_dispositions` row changes: the classifier records a new inferred/declared detour, or `POST /api/detours/:id/resolve` resolves one (`fold_in`/`new_item` synchronously write into the cwd's `AGENT-PLAN.md` first). Carries the full updated row. Same debounced-reload treatment as `decision_queue_updated` above.
+
+```json
+{ "type": "detour_disposition", "data": { "id": 40, "cwd": "/Users/sara/CODE-LOCAL/SARA/Claude-Code-Agent-Monitor", "disposition": "fold_in", "write_status": "written", "resolved_item_id": "a1b2c3d4" } }
 ```
 
 ### Event Flow

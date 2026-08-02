@@ -125,6 +125,12 @@ import plan_vi from "./locales/vi/plan.json";
 import usage_en from "./locales/en/usage.json";
 import usage_zh from "./locales/zh/usage.json";
 import usage_vi from "./locales/vi/usage.json";
+import coach_en from "./locales/en/coach.json";
+import coach_zh from "./locales/zh/coach.json";
+import coach_vi from "./locales/vi/coach.json";
+import projectManager_en from "./locales/en/projectManager.json";
+import projectManager_zh from "./locales/zh/projectManager.json";
+import projectManager_vi from "./locales/vi/projectManager.json";
 
 import common_ko from "./locales/ko/common.json";
 import nav_ko from "./locales/ko/nav.json";
@@ -144,6 +150,8 @@ import splash_ko from "./locales/ko/splash.json";
 import projects_ko from "./locales/ko/projects.json";
 import plan_ko from "./locales/ko/plan.json";
 import usage_ko from "./locales/ko/usage.json";
+import coach_ko from "./locales/ko/coach.json";
+import projectManager_ko from "./locales/ko/projectManager.json";
 
 i18n
   .use(LanguageDetector)
@@ -169,6 +177,8 @@ i18n
         projects: projects_en,
         plan: plan_en,
         usage: usage_en,
+        coach: coach_en,
+        projectManager: projectManager_en,
       },
       zh: {
         common: common_zh,
@@ -189,6 +199,8 @@ i18n
         projects: projects_zh,
         plan: plan_zh,
         usage: usage_zh,
+        coach: coach_zh,
+        projectManager: projectManager_zh,
       },
       vi: {
         common: common_vi,
@@ -209,6 +221,8 @@ i18n
         projects: projects_vi,
         plan: plan_vi,
         usage: usage_vi,
+        coach: coach_vi,
+        projectManager: projectManager_vi,
       },
       ko: {
         common: common_ko,
@@ -229,6 +243,8 @@ i18n
         projects: projects_ko,
         plan: plan_ko,
         usage: usage_ko,
+        coach: coach_ko,
+        projectManager: projectManager_ko,
       },
     },
     supportedLngs: ["en", "zh", "vi", "ko"],
@@ -253,6 +269,8 @@ i18n
       "projects",
       "plan",
       "usage",
+      "coach",
+      "projectManager",
     ],
     defaultNS: "common",
     interpolation: { escapeValue: false },

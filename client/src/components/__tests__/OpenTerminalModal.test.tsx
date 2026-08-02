@@ -6,7 +6,7 @@
  * project/cwd pair, the success feedback auto-closing the modal, error
  * feedback surfacing the server's message, close behavior (Escape,
  * backdrop click, close button), the "Most used" / "All projects"
- * sectioning that promotes the top 3 projects by session_count above the
+ * sectioning that promotes the top 5 projects by session_count above the
  * rest, and the optional effort-name field (persists across the
  * project/folder navigation, passed through to api.projects.openTerminal
  * only when non-blank) — same local pending/success/error conventions as
@@ -73,7 +73,7 @@ describe("OpenTerminalModal", () => {
     await waitFor(() => expect(screen.getByText("No projects yet")).toBeInTheDocument());
   });
 
-  it("shows no section headers when there are 3 or fewer projects", async () => {
+  it("shows no section headers when there are 5 or fewer projects", async () => {
     const projects = [
       makeProject({ id: "p1", name: "Charlie", session_count: 10 }),
       makeProject({ id: "p2", name: "Alpha", session_count: 5 }),
@@ -101,13 +101,15 @@ describe("OpenTerminalModal", () => {
     expect(screen.queryByText("Most used")).not.toBeInTheDocument();
   });
 
-  it("promotes the top 3 by session_count above an alphabetical rest, once there are more than 3 projects with usage", async () => {
+  it("promotes the top 5 by session_count above an alphabetical rest, once there are more than 5 projects with usage", async () => {
     const projects = [
       makeProject({ id: "p1", name: "Delta", session_count: 2 }),
       makeProject({ id: "p2", name: "Alpha", session_count: 9 }),
       makeProject({ id: "p3", name: "Bravo", session_count: 7 }),
       makeProject({ id: "p4", name: "Charlie", session_count: 8 }),
       makeProject({ id: "p5", name: "Echo", session_count: 0 }),
+      makeProject({ id: "p6", name: "Foxtrot", session_count: 6 }),
+      makeProject({ id: "p7", name: "Golf", session_count: 5 }),
     ];
     listMock.mockResolvedValue({ projects, unassigned: { cwds: [] } });
     render(<OpenTerminalModal onClose={vi.fn()} />);
@@ -116,10 +118,10 @@ describe("OpenTerminalModal", () => {
     expect(screen.getByText("All projects")).toBeInTheDocument();
 
     const names = screen
-      .getAllByText(/^(Delta|Alpha|Bravo|Charlie|Echo)$/)
+      .getAllByText(/^(Delta|Alpha|Bravo|Charlie|Echo|Foxtrot|Golf)$/)
       .map((el) => el.textContent);
-    // Most used: Alpha (9), Charlie (8), Bravo (7) — then alphabetical rest: Delta, Echo.
-    expect(names).toEqual(["Alpha", "Charlie", "Bravo", "Delta", "Echo"]);
+    // Most used: Alpha (9), Charlie (8), Bravo (7), Foxtrot (6), Golf (5) — then alphabetical rest: Delta, Echo.
+    expect(names).toEqual(["Alpha", "Charlie", "Bravo", "Foxtrot", "Golf", "Delta", "Echo"]);
   });
 
   it("disables a project with no mapped folders", async () => {

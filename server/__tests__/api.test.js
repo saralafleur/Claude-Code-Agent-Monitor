@@ -268,6 +268,35 @@ describe("Sessions API", () => {
     assert.ok(res.body.sessions.length >= 2);
   });
 
+  it("list tokens carry the cache read/write split and a cost-weighted effective total", async () => {
+    await post("/api/sessions", { id: "sess-tok-split", name: "Token Split" });
+    // Sonnet default rates: in $3, cache read $0.30 (0.1x), 5m write $3.75
+    // (1.25x), 1h write $6 (2x) — so `effective` is exactly computable.
+    db.prepare(
+      `INSERT INTO token_usage (session_id, model, input_tokens, output_tokens,
+         cache_read_tokens, cache_write_tokens, cache_write_1h_tokens)
+       VALUES ('sess-tok-split', 'claude-sonnet-4-6', 10000, 5000, 1000000, 100000, 40000)`
+    ).run();
+
+    // Both list code paths (time sort and the price-sort full scan) must agree.
+    for (const qs of ["?q=sess-tok-split", "?q=sess-tok-split&sort_by=price"]) {
+      const res = await fetch(`/api/sessions${qs}`);
+      assert.equal(res.status, 200);
+      const row = res.body.sessions.find((s) => s.id === "sess-tok-split");
+      assert.ok(row, `session present for ${qs}`);
+      assert.equal(row.tokens.input, 10000);
+      assert.equal(row.tokens.output, 5000);
+      assert.equal(row.tokens.cache_read, 1000000);
+      assert.equal(row.tokens.cache_write, 100000);
+      // Back-compat combined figure = read + write.
+      assert.equal(row.tokens.cache, 1100000);
+      // effective = 10000 + 5000 + 1000000*0.1 + 60000*1.25 + 40000*2
+      assert.equal(row.tokens.effective, 270000);
+    }
+
+    db.prepare("DELETE FROM token_usage WHERE session_id = 'sess-tok-split'").run();
+  });
+
   it("should filter sessions by status", async () => {
     const res = await fetch("/api/sessions?status=active");
     assert.equal(res.status, 200);

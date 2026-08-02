@@ -961,8 +961,12 @@
                     Cards surface model name, cumulative cost, and the current tool being called.
                     The model chip renders in <strong>bright red</strong> for premium/expensive
                     models — Opus or Fable — flagging cost-heavy sessions at a glance. Session
-                    cards also show a compact <strong>input / output / cache</strong> token strip
-                    with a running total, once the session has used any tokens.
+                    cards also show a compact <strong>input / output / cache-read / cache-write</strong>
+                    token strip with a cost-weighted <strong>Effective</strong> total, once the
+                    session has used any tokens — cache reads and writes are split into separate
+                    figures (reads bill at ~10% of the input rate, writes at a premium), and
+                    Effective weighs each category by the model's actual pricing rates so it
+                    tracks the $ cost instead of overstating cache-heavy sessions.
                     Counts update in real time via WebSocket so the board is always in sync with
                     the live event store. Hover a Waiting badge to see why — needs input, turn done, at prompt, or interrupted.
                     A third <strong>Projects</strong> view groups sessions by project instead of status; once at
@@ -1280,6 +1284,36 @@
                     window, or a generation failure) the endpoint returns
                     <code>{ summary: null }</code> with a 200 and the page hides the block
                     entirely.
+                  </p>
+                </div>
+                <div class="feature-card">
+                  <div class="feature-icon ic-indigo">🗺️</div>
+                  <h3 id="feat-project-manager">Project Manager</h3>
+                  <p>
+                    A standalone page (<code>/project-manager</code>, sidebar label
+                    <strong>Project Manager</strong>, positioned right after
+                    <strong>Focus</strong>) answering "what's going on across every
+                    project I'm tracking" at a glance instead of checking each one
+                    individually. A portfolio rollup table — one row per project, with
+                    an objective/milestone progress bar, a pace badge, an
+                    open-decision count, and last activity — sits above the
+                    <strong>Decision Queue</strong>: pending reconciliation items
+                    (<code>pace_alert</code>, <code>detour_volume</code>,
+                    <code>detour_disposition</code>, and write-back failures) rendered
+                    as actionable cards, each resolved in place —
+                    <code>fold_in</code>/<code>new_item</code>/<code>deliberate</code>/<code>discard</code>
+                    for a detour, or resolve/dismiss/retry for everything else. A
+                    <strong>Pace Watch</strong> rail lists every behind item across
+                    every project, worst-overdue first, and a
+                    <strong>Recently Resolved</strong> log records what was just
+                    cleared. A project-scope chip row filters the table, queue, and
+                    rail down to a single project. It composes the dashboard's
+                    existing and new portfolio-management endpoints —
+                    <code>GET /api/projects</code>, <code>GET /api/portfolio/summary</code>,
+                    and <code>GET /api/decision-queue</code> — rather than
+                    duplicating their logic, and is the first client page built on
+                    top of the pace-tracking, detour-disposition, and reconciliation
+                    work that had previously shipped server-only.
                   </p>
                 </div>
                 <div class="feature-card">
@@ -1731,7 +1765,7 @@
             </div>
             <div class="screenshot-card">
               <img src="../images/board-sessions.png" alt="Kanban Board — Sessions view" width="100%" loading="lazy" decoding="async" />
-              <div class="screenshot-caption"><span class="caption-icon">🗂️</span> <span><strong>Kanban Board (sessions)</strong> — sessions swim-laned across 5 columns: Active, Waiting, Completed, Error, Abandoned. Each card shows agent count, duration, model, cumulative cost, and a compact input/output/cache token strip</span></div>
+              <div class="screenshot-caption"><span class="caption-icon">🗂️</span> <span><strong>Kanban Board (sessions)</strong> — sessions swim-laned across 5 columns: Active, Waiting, Completed, Error, Abandoned. Each card shows agent count, duration, model, cumulative cost, and a compact token strip with the cache read/write split and a cost-weighted Effective total</span></div>
             </div>
             <div class="screenshot-card" id="ss-sessions">
               <img src="../images/sessions.png" alt="Sessions Overview" width="100%" loading="lazy" decoding="async" />
@@ -7250,8 +7284,8 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=83" defer></script>
-    <script src="script.js?v=33" defer></script>
+    <script src="i18n-content.js?v=85" defer></script>
+    <script src="script.js?v=34" defer></script>
     <script>
       (function () {
         var carousel = document.getElementById("feature-carousel");

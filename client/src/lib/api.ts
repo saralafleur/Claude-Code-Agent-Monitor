@@ -404,6 +404,11 @@ import type {
   UnassignedProjectBucket,
   Plan,
   PlanItem,
+  DecisionQueueItem,
+  DecisionQueueKind,
+  DetourDisposition,
+  DetourDispositionValue,
+  PortfolioProjectSummary,
   SessionFocus,
   FocusReport,
   FocusWindowSummary,
@@ -412,6 +417,8 @@ import type {
   UpdateStatusPayload,
   MonitorLayoutPayload,
   ColorThresholdsConfig,
+  PlaybookPractice,
+  CoachObservation,
   WebhookDelivery,
   WebhookProvider,
   WebhookTarget,
@@ -2143,6 +2150,56 @@ export const api = {
       }),
   },
 
+  playbook: {
+    /**
+     * GET /api/playbook/practices — the Coach's Playbook: every catalog
+     * practice merged with its current (server-shared) config.
+     * @returns The practice list.
+     */
+    listPractices: () => request<{ practices: PlaybookPractice[] }>("/playbook/practices"),
+    /**
+     * PUT /api/playbook/practices/:id/config — patch a practice's
+     * `enabled`/`config`. Every other connected client picks up the change
+     * live over the `playbook_practice_config_updated` WebSocket push.
+     * @param id The practice id (e.g. `"session-token-ceiling"`).
+     * @param patch `{ enabled?, config? }` — `config` may be a partial patch.
+     * @returns The full resulting {@link PlaybookPractice}.
+     */
+    updatePracticeConfig: (
+      id: string,
+      patch: { enabled?: boolean; config?: Record<string, number> }
+    ) =>
+      request<PlaybookPractice>(`/playbook/practices/${encodeURIComponent(id)}/config`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+  },
+
+  coach: {
+    /**
+     * GET /api/coach/observations — the Coach Feed, most recent first.
+     * @param status Optionally narrow to one status.
+     * @returns The observation list.
+     */
+    listObservations: (status?: CoachObservation["status"]) =>
+      request<{ observations: CoachObservation[] }>(
+        `/coach/observations${status ? `?status=${status}` : ""}`
+      ),
+    /**
+     * POST /api/coach/observations/:id/respond — record what the user did
+     * with an observation. Every other connected client picks up the change
+     * live over the `coach_observation_updated` WebSocket push.
+     * @param id The observation id.
+     * @param response One of acknowledged/dismissed/resolved.
+     * @returns The full resulting {@link CoachObservation}.
+     */
+    respondToObservation: (id: number, response: "acknowledged" | "dismissed" | "resolved") =>
+      request<CoachObservation>(`/coach/observations/${id}/respond`, {
+        method: "POST",
+        body: JSON.stringify({ response }),
+      }),
+  },
+
   /**
    * GET /api/focus-report — cross-project aggregate focus-time report,
    * powering the standalone Focus Calendar board (as opposed to
@@ -2385,6 +2442,127 @@ export const api = {
       request<{ todos: SessionTodo[] | null; updated_at: string | null }>(
         `/sessions/${encodeURIComponent(sessionId)}/todos`
       ),
+    /**
+     * POST /api/plans/items/target — set or clear a plan item's pace target
+     * date (layer 5). Authored out-of-band; survives every re-ingest.
+     * @param data `cwd`, `item_number`, and `target_date` (`YYYY-MM-DD`, or
+     *             `null` to clear).
+     * @returns `{ ok: true, item }` — the updated {@link PlanItem}.
+     */
+    setItemTarget: (data: { cwd: string; item_number: number; target_date: string | null }) =>
+      request<{ ok: true; item: PlanItem }>("/plans/items/target", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  // ───────────────────────────── Decision Queue API ────────────────────────────
+  /** Layer 6 reconciliation output: pace-alert / detour-volume / needs-review
+   *  / write-outcome entries. Maps to `server/routes/decision-queue.js`. */
+  decisionQueue: {
+    /**
+     * GET /api/decision-queue — list queue rows, newest first. Small N in
+     * practice (a handful of concurrent projects); fetched unfiltered and
+     * sliced/grouped client-side rather than round-tripping per filter.
+     * @param params Optional `status`/`kind`/`cwd`/`project_id`/`limit` filter.
+     * @returns `{ queue }` — the matching {@link DecisionQueueItem}s.
+     */
+    list: (params?: {
+      status?: "pending" | "resolved" | "dismissed";
+      kind?: DecisionQueueKind;
+      cwd?: string;
+      project_id?: string;
+      limit?: number;
+    }) => {
+      const qs = new URLSearchParams();
+      if (params?.status) qs.set("status", params.status);
+      if (params?.kind) qs.set("kind", params.kind);
+      if (params?.cwd) qs.set("cwd", params.cwd);
+      if (params?.project_id) qs.set("project_id", params.project_id);
+      if (params?.limit) qs.set("limit", String(params.limit));
+      const q = qs.toString();
+      return request<{ queue: DecisionQueueItem[] }>(`/decision-queue${q ? `?${q}` : ""}`);
+    },
+    /**
+     * POST /api/decision-queue/:id/resolve — act on a queue item: mark it
+     * resolved or dismissed (also resolving a linked `detour_disposition`
+     * row to `deliberate`/`discard`), or retry a stuck write-back.
+     * @param id     The queue row id.
+     * @param action `resolve` | `dismiss` | `retry_write`.
+     * @returns The updated {@link DecisionQueueItem} (plus write outcome for
+     *          `retry_write`).
+     */
+    resolve: (id: number, action: "resolve" | "dismiss" | "retry_write") =>
+      request<{
+        queue: DecisionQueueItem;
+        write_status?: string | null;
+        resolved_item_id?: string | null;
+      }>(`/decision-queue/${id}/resolve`, { method: "POST", body: JSON.stringify({ action }) }),
+  },
+
+  // ────────────────────────────────── Detours API ──────────────────────────────
+  /** Layer 4: durable, resolvable detour dispositions. Maps to
+   *  `server/routes/detours.js`. fold_in/new_item auto-write into the cwd's
+   *  AGENT-PLAN.md through the audited plan-writeback path. */
+  detours: {
+    /**
+     * GET /api/detours — list dispositions, newest first.
+     * @param params Optional `cwd`/`project_id`/`status`/`limit` filter.
+     * @returns `{ detours }` — the matching {@link DetourDisposition}s.
+     */
+    list: (params?: {
+      cwd?: string;
+      project_id?: string;
+      status?: "pending" | "resolved" | "conflict" | "failed";
+      limit?: number;
+    }) => {
+      const qs = new URLSearchParams();
+      if (params?.cwd) qs.set("cwd", params.cwd);
+      if (params?.project_id) qs.set("project_id", params.project_id);
+      if (params?.status) qs.set("status", params.status);
+      if (params?.limit) qs.set("limit", String(params.limit));
+      const q = qs.toString();
+      return request<{ detours: DetourDisposition[] }>(`/detours${q ? `?${q}` : ""}`);
+    },
+    /**
+     * POST /api/detours/:id/resolve — resolve a disposition by hand.
+     * fold_in/new_item synchronously write into AGENT-PLAN.md.
+     * @param id   The detour disposition row id.
+     * @param data `disposition` plus, for fold_in/new_item, the proposed
+     *             content (`proposed_text` etc.) and an optional
+     *             `expected_hash` for optimistic-concurrency retry.
+     * @returns The write outcome plus the updated {@link DetourDisposition}.
+     */
+    resolve: (
+      id: number,
+      data: {
+        disposition: DetourDispositionValue;
+        note?: string;
+        proposed_text?: string;
+        proposed_acceptance?: string;
+        proposed_detail?: string;
+        proposed_parent_item_id?: string;
+        expected_hash?: string;
+      }
+    ) =>
+      request<{
+        write_status: string;
+        resolved_item_id: string | null;
+        write_error: string | null;
+        detour: DetourDisposition;
+      }>(`/detours/${id}/resolve`, { method: "POST", body: JSON.stringify(data) }),
+  },
+
+  // ───────────────────────────────── Portfolio API ─────────────────────────────
+  /** Layer 7 read model: per-project milestone completion + live pace
+   *  status. Maps to `server/routes/portfolio.js`. */
+  portfolio: {
+    /**
+     * GET /api/portfolio/summary — one rollup per real project, computed
+     * fresh from pace.js on every request.
+     * @returns `{ projects }` — the {@link PortfolioProjectSummary}s.
+     */
+    summary: () => request<{ projects: PortfolioProjectSummary[] }>("/portfolio/summary"),
   },
 };
 

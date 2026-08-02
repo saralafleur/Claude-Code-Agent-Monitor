@@ -71,12 +71,14 @@
     "tokens": {
       "in": "In",
       "out": "Out",
-      "cache": "Cache",
-      "total": "Total",
+      "cacheRead": "Read",
+      "cacheWrite": "Write",
+      "effective": "Effective",
       "inTooltip": "Total fresh input tokens for this session",
       "outTooltip": "Total output tokens generated for this session",
-      "cacheTooltip": "Total cache-read + cache-write tokens for this session",
-      "totalTooltip": "Total tokens for this session (input + output + cache)"
+      "cacheReadTooltip": "Tokens re-read from the prompt cache. The whole conversation prefix is re-read on every turn, so this grows fast in long sessions — billed at ~10% of the input rate",
+      "cacheWriteTooltip": "New context written into the prompt cache. Billed at a premium — 1.25x input (5-minute tier) or 2x (1-hour tier). This is the number that grows when context churns",
+      "effectiveTooltip": "Input-equivalent consumption: in + out + cache reads and writes weighted by this model's actual pricing rates. Tracks the $ cost figure — the number to watch"
     }
   },
   "tooltip": {
@@ -101,10 +103,6 @@
     "deleteMonitor": "Remove monitor",
     "collapse": "Collapse monitor",
     "expand": "Expand monitor",
-    "orientationHorizontal": "Switch to vertical layout",
-    "orientationVertical": "Switch to horizontal layout",
-    "wrapAuto": "Auto wrap",
-    "wrapCount": "Wrap after {{count}}",
     "ungrouped": "Ungrouped",
     "collapseUngrouped": "Collapse ungrouped",
     "expandUngrouped": "Expand ungrouped",
@@ -113,10 +111,16 @@
   },
   "column": {
     "collapse": "Collapse column",
-    "expand": "Expand column",
-    "orientationHorizontal": "Switch to vertical layout",
-    "orientationVertical": "Switch to horizontal layout",
-    "wrapAuto": "Auto wrap",
-    "wrapCount": "Wrap after {{count}}"
+    "expand": "Expand column"
+  },
+  "layout": {
+    "trigger": "Arrange layout",
+    "columns": "Columns",
+    "rows": "Rows",
+    "auto": "Auto",
+    "columnsOption": "{{count}} columns",
+    "rowsOption": "{{count}} rows",
+    "autoColumnsOption": "Auto columns",
+    "autoRowsOption": "Auto rows"
   }
 }

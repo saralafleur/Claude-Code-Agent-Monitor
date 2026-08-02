@@ -12,8 +12,8 @@
  * pending/success/error feedback convention (no toast system in this
  * codebase, see client/src/pages/Run.tsx) but auto-closes shortly after a
  * successful open, since the popup's whole job is done at that point. When
- * there are more than three projects with any usage history, the top-level
- * list is split into a "Most used" section (the 3 highest `session_count`,
+ * there are more than five projects with any usage history, the top-level
+ * list is split into a "Most used" section (the 5 highest `session_count`,
  * ties broken alphabetically) followed by the rest in the server's
  * alphabetical order — otherwise (few projects, or none used yet) it's
  * shown as one plain alphabetical list. An optional "effort name" text
@@ -67,17 +67,17 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Splits into a "most used" top 3 (by session_count, ties alphabetical)
+  // Splits into a "most used" top 5 (by session_count, ties alphabetical)
   // plus the remainder, which stays in the server's alphabetical order.
   // Skipped (empty topUsed) when there's nothing meaningful to promote.
   const { topUsed, rest } = useMemo(() => {
-    if (!projects || projects.length <= 3 || !projects.some((p) => p.session_count > 0)) {
+    if (!projects || projects.length <= 5 || !projects.some((p) => p.session_count > 0)) {
       return { topUsed: [] as Project[], rest: projects ?? [] };
     }
     const byUsage = [...projects].sort(
       (a, b) => b.session_count - a.session_count || a.name.localeCompare(b.name)
     );
-    const top = byUsage.slice(0, 3);
+    const top = byUsage.slice(0, 5);
     const topIds = new Set(top.map((p) => p.id));
     return { topUsed: top, rest: projects.filter((p) => !topIds.has(p.id)) };
   }, [projects]);

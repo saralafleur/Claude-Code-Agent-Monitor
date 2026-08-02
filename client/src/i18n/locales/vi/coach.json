@@ -1,0 +1,57 @@
+{
+  "title": "Huấn luyện viên",
+  "subtitle": "Các mẫu hình rút ra từ cách bạn thực sự sử dụng Claude Code, và gợi ý nên làm gì tiếp theo.",
+  "tabs": {
+    "label": "Chế độ xem Huấn luyện viên",
+    "feed": "Bảng tin",
+    "playbook": "Sổ tay"
+  },
+  "empty": {
+    "title": "Hiện chưa có gì cần lưu ý",
+    "description": "Huấn luyện viên đang theo dõi các phiên làm việc của bạn trong nền. Khi có điều gì đáng chú ý, nó sẽ hiển thị ở đây."
+  },
+  "feed": {
+    "loading": "Đang tải…"
+  },
+  "kindLabel": {
+    "risk": "Cảnh báo",
+    "info": "Nhắc nhở",
+    "good": "Ghi nhận tích cực"
+  },
+  "statusLabel": {
+    "acknowledged": "Đã xác nhận",
+    "dismissed": "Đã bỏ qua",
+    "resolved": "Đã giải quyết"
+  },
+  "actions": {
+    "openSession": "Mở phiên",
+    "copySummary": "Sao chép tóm tắt",
+    "dismiss": "Bỏ qua"
+  },
+  "scopeLabel": {
+    "session": "phiên",
+    "project": "dự án",
+    "global": "toàn cục"
+  },
+  "playbook": {
+    "loading": "Đang tải…",
+    "noteStrong": "Sổ tay xác định những gì Huấn luyện viên theo dõi.",
+    "note": "Một thực hành bạn tắt ở đây sẽ hoàn toàn không được đánh giá — nó sẽ không xuất hiện trong Bảng tin, và không có gì chạy ngầm cho nó.",
+    "previewLabel": "Xem trước — nội dung sẽ xuất hiện trong Bảng tin",
+    "save": "Lưu thay đổi",
+    "saving": "Đang lưu…",
+    "saved": "Đã lưu",
+    "resetDefault": "Đặt lại mặc định",
+    "minError": "Phải lớn hơn hoặc bằng {{min}}"
+  },
+  "practices": {
+    "sessionTokenCeiling": {
+      "name": "Giới hạn Token của phiên",
+      "description": "Cảnh báo khi tổng lượng token sử dụng trong một phiên vượt quá giới hạn, trước khi chất lượng giảm sút hoặc cửa sổ ngữ cảnh trở nên không đáng tin cậy.",
+      "fieldLabel": "Ngưỡng",
+      "unit": "tokens",
+      "message": "Ngữ cảnh của phiên đang trở nên lớn ({{tokens}} tokens)",
+      "recommendation": "Hãy dùng /compact hoặc /clear trước khi tiếp tục — sao chép lại ngữ cảnh hiện tại của bạn trước."
+    }
+  }
+}

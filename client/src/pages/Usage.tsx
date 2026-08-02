@@ -155,9 +155,10 @@ function sessionMarkerColor(
 /**
  * Color for the right half of the session marker line: same as the left
  * half in the common case, but once the weekly window is at least in its
- * own "orange" band it takes over the right half - so a fresh-looking
+ * own "yellow" band it takes over the right half - so a fresh-looking
  * session marker still visibly tints toward the weekly window's own
- * urgency color instead of reading as uniformly fine when the weekly
+ * urgency color (yellow, then orange, then red as the weekly window
+ * climbs further) instead of reading as uniformly fine when the weekly
  * window is the thing about to run out.
  */
 function sessionMarkerRightColor(
@@ -166,7 +167,7 @@ function sessionMarkerRightColor(
   sessionThresholds: ColorThresholds,
   weeklyThresholds: ColorThresholds
 ): string {
-  if (weeklyPct != null && weeklyPct >= weeklyThresholds.orangeAt) {
+  if (weeklyPct != null && weeklyPct >= weeklyThresholds.yellowAt) {
     return weeklyPctColor(weeklyPct, weeklyThresholds);
   }
   return sessionMarkerColor(pct, weeklyPct, sessionThresholds, weeklyThresholds);
@@ -564,11 +565,16 @@ function AccountsPanel({
 // and RESET_CALENDAR_BUFFER_DAYS past whichever account resets furthest out
 // (so the last bar doesn't end flush against the grid's right edge) - capped
 // defensively in case a bad/stale reset timestamp would otherwise blow the
-// grid out.
+// grid out. Day columns are uncapped 1fr (no per-column minimum) so
+// dayCount columns always divide up whatever width the card actually has -
+// this card only gets 1fr of the row's 2fr/1fr split (see the grid split in
+// Usage()), and a per-column pixel floor previously made wide dayCounts
+// (7-10+ days) overflow that narrower share, silently falling back to
+// horizontal scroll with no visible scrollbar cue - the buffer days would
+// exist in the DOM but never actually be seen without scrolling.
 const RESET_CALENDAR_MIN_DAYS = 7;
 const RESET_CALENDAR_MAX_DAYS = 14;
 const RESET_CALENDAR_BUFFER_DAYS = 2;
-const RESET_CALENDAR_DAY_PX = 44;
 const RESET_CALENDAR_LABEL_PX = 140;
 
 /** Midnight-to-midnight day difference, ignoring time-of-day, so "resets
@@ -626,9 +632,13 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
   });
 
   const furthestResetDays = Math.max(0, ...rows.map((r) => r.spanDays ?? 0));
+  // +1: furthestResetDays is a day *index* (0 = today), so the column that
+  // actually shows that reset date is index furthestResetDays - reaching
+  // RESET_CALENDAR_BUFFER_DAYS *past* it requires that many extra columns
+  // beyond the reset column itself, hence the trailing +1.
   const dayCount = Math.min(
     RESET_CALENDAR_MAX_DAYS,
-    Math.max(RESET_CALENDAR_MIN_DAYS, furthestResetDays + RESET_CALENDAR_BUFFER_DAYS)
+    Math.max(RESET_CALENDAR_MIN_DAYS, furthestResetDays + RESET_CALENDAR_BUFFER_DAYS + 1)
   );
 
   const days = Array.from({ length: dayCount }, (_, i) => {
@@ -636,21 +646,20 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
     d.setDate(d.getDate() + i);
     return d;
   });
-  const trackWidth = dayCount * RESET_CALENDAR_DAY_PX;
+  const dayGridColumns = `repeat(${dayCount}, minmax(0, 1fr))`;
 
   return (
     <div className="card p-4">
       <h2 className="text-sm font-semibold text-gray-200">{t("accounts.calendar.title")}</h2>
       <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.calendar.subtitle")}</p>
-      <div className="overflow-x-auto">
-        <div style={{ minWidth: `${RESET_CALENDAR_LABEL_PX + trackWidth}px` }}>
-          <div className="flex">
-            <div style={{ width: RESET_CALENDAR_LABEL_PX }} className="flex-shrink-0" />
+      <div>
+        <div className="flex">
+          <div style={{ width: RESET_CALENDAR_LABEL_PX }} className="flex-shrink-0" />
+          <div className="flex-1 min-w-0 grid" style={{ gridTemplateColumns: dayGridColumns }}>
             {days.map((d, i) => (
               <div
                 key={i}
-                style={{ width: RESET_CALENDAR_DAY_PX }}
-                className={`flex-shrink-0 text-center text-[10px] font-mono ${
+                className={`text-center text-[10px] font-mono ${
                   i === 0 ? "text-accent font-semibold" : "text-gray-500"
                 }`}
               >
@@ -659,63 +668,65 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
               </div>
             ))}
           </div>
-          {rows.map(({ account, pct, spanDays, resetWhen, countdown }) => {
-            const visibleDays = spanDays != null ? Math.min(spanDays, dayCount) : 0;
-
-            return (
-              <div key={account.id} className="border-t border-border first:border-t-0 py-1.5">
-                <div className="flex items-center h-9">
-                  <div
-                    style={{ width: RESET_CALENDAR_LABEL_PX }}
-                    className="flex-shrink-0 pr-2 flex items-center justify-between gap-1"
-                  >
-                    <span className="text-xs text-gray-300 truncate">{account.label}</span>
-                    {pct != null && (
-                      <span
-                        className={`text-[11px] font-mono flex-shrink-0 ${pctTextColor(pct, thresholds)}`}
-                      >
-                        {pct}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative h-9" style={{ width: trackWidth }}>
-                    <div className="absolute inset-0 flex">
-                      {days.map((_, i) => (
-                        <div
-                          key={i}
-                          style={{ width: RESET_CALENDAR_DAY_PX }}
-                          className="flex-shrink-0 border-l border-border/40 h-full"
-                        />
-                      ))}
-                    </div>
-                    {pct != null && spanDays != null && (
-                      <div
-                        className={`absolute top-0.5 h-8 rounded ${weeklyPctColor(pct, thresholds)}`}
-                        style={{ left: 0, width: `${visibleDays * RESET_CALENDAR_DAY_PX - 2}px` }}
-                        title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
-                      />
-                    )}
-                    {countdown && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-1">
-                        <span className="text-base sm:text-lg font-bold text-gray-100 bg-surface-1/80 rounded px-2 py-0.5 leading-tight whitespace-nowrap">
-                          {countdown}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {resetWhen && (
-                  <p
-                    style={{ paddingLeft: RESET_CALENDAR_LABEL_PX }}
-                    className="text-[11px] text-gray-500 mt-0.5"
-                  >
-                    {t("resets", { when: resetWhen })}
-                  </p>
-                )}
-              </div>
-            );
-          })}
         </div>
+        {rows.map(({ account, pct, spanDays, resetWhen, countdown }) => {
+          // +1: spanDays counts whole days from today *to* the reset date
+          // (e.g. 7 for "resets a week from today"), but column 0 is today,
+          // so filling spanDays columns lands one column short of the reset
+          // date's own column - the bar would stop the day *before* reset
+          // instead of reaching it. +1 fills through the reset day itself.
+          const visibleDays = spanDays != null ? Math.min(spanDays + 1, dayCount) : 0;
+
+          return (
+            <div key={account.id} className="border-t border-border first:border-t-0 py-1.5">
+              <div className="flex items-center h-9">
+                <div
+                  style={{ width: RESET_CALENDAR_LABEL_PX }}
+                  className="flex-shrink-0 pr-2 flex items-center justify-between gap-1"
+                >
+                  <span className="text-xs text-gray-300 truncate">{account.label}</span>
+                  {pct != null && (
+                    <span
+                      className={`text-[11px] font-mono flex-shrink-0 ${pctTextColor(pct, thresholds)}`}
+                    >
+                      {pct}%
+                    </span>
+                  )}
+                </div>
+                <div
+                  className="relative flex-1 min-w-0 h-9 grid"
+                  style={{ gridTemplateColumns: dayGridColumns }}
+                >
+                  {days.map((_, i) => (
+                    <div key={i} className="border-l border-border/40 h-full" />
+                  ))}
+                  {pct != null && spanDays != null && (
+                    <div
+                      className={`absolute top-0.5 left-0 h-8 rounded ${weeklyPctColor(pct, thresholds)}`}
+                      style={{ width: `calc(${(visibleDays / dayCount) * 100}% - 2px)` }}
+                      title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
+                    />
+                  )}
+                  {countdown && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-1">
+                      <span className="text-base font-bold text-gray-100 bg-surface-1/80 rounded px-2 py-0.5 leading-none whitespace-nowrap">
+                        {countdown}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {resetWhen && (
+                <p
+                  style={{ paddingLeft: RESET_CALENDAR_LABEL_PX }}
+                  className="text-[11px] text-gray-500 mt-0.5"
+                >
+                  {t("resets", { when: resetWhen })}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

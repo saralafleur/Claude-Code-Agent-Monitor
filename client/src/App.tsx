@@ -52,6 +52,8 @@
  * - `./pages/Analytics`
  * - `./pages/Workflows`
  * - `./pages/Usage`
+ * - `./pages/CoachPage`
+ * - `./pages/PlaybookPage`
  * - `./pages/Settings`
  * - `./pages/CcConfig`
  * - `./pages/Run`
@@ -82,6 +84,9 @@ import { ActivityFeed } from "./pages/ActivityFeed";
 import { Analytics } from "./pages/Analytics";
 import { Workflows } from "./pages/Workflows";
 import { Usage } from "./pages/Usage";
+import { ProjectManager } from "./pages/ProjectManager";
+import { CoachPage } from "./pages/CoachPage";
+import { PlaybookPage } from "./pages/PlaybookPage";
 import { Settings } from "./pages/Settings";
 import { CcConfig } from "./pages/CcConfig";
 import { Run } from "./pages/Run";
@@ -114,6 +119,9 @@ export default function App() {
             {/* Right after Projects, per DEC-5 - mirrors the corrected sidebar order. */}
             <Route path="focus-calendar" element={<FocusCalendarBoard />} />
             <Route path="focus" element={<FocusPage />} />
+            {/* Right after Focus - the layer-7 portfolio rollup sibling to the
+                stakeholder-readable "what did we do" report. */}
+            <Route path="project-manager" element={<ProjectManager />} />
             <Route path="kanban" element={<KanbanBoard />} />
             <Route path="sessions" element={<Sessions />} />
             <Route path="sessions/:id" element={<SessionDetail />} />
@@ -121,6 +129,8 @@ export default function App() {
             <Route path="analytics" element={<Analytics />} />
             <Route path="workflows" element={<Workflows />} />
             <Route path="usage" element={<Usage />} />
+            <Route path="coach" element={<CoachPage />} />
+            <Route path="coach/playbook" element={<PlaybookPage />} />
             <Route path="cc-config" element={<CcConfig />} />
             <Route path="run" element={<Run />} />
             <Route path="settings" element={<Settings />} />

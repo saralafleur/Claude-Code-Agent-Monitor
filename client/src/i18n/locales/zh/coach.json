@@ -1,0 +1,57 @@
+{
+  "title": "教练",
+  "subtitle": "来自你实际使用 Claude Code 方式的模式分析，以及应对建议。",
+  "tabs": {
+    "label": "教练视图",
+    "feed": "动态",
+    "playbook": "手册"
+  },
+  "empty": {
+    "title": "目前没有需要关注的内容",
+    "description": "教练正在后台持续观察你的会话。一旦出现值得关注的情况，会显示在这里。"
+  },
+  "feed": {
+    "loading": "加载中…"
+  },
+  "kindLabel": {
+    "risk": "警告",
+    "info": "提醒",
+    "good": "正向反馈"
+  },
+  "statusLabel": {
+    "acknowledged": "已确认",
+    "dismissed": "已忽略",
+    "resolved": "已解决"
+  },
+  "actions": {
+    "openSession": "打开会话",
+    "copySummary": "复制摘要",
+    "dismiss": "忽略"
+  },
+  "scopeLabel": {
+    "session": "会话",
+    "project": "项目",
+    "global": "全局"
+  },
+  "playbook": {
+    "loading": "加载中…",
+    "noteStrong": "手册定义了教练要观察的内容。",
+    "note": "在此关闭的实践项将完全不会被评估——不会出现在动态中，也不会在后台运行任何检测。",
+    "previewLabel": "预览 — 这会在动态中生成的内容",
+    "save": "保存更改",
+    "saving": "正在保存…",
+    "saved": "已保存",
+    "resetDefault": "恢复默认值",
+    "minError": "不能小于 {{min}}"
+  },
+  "practices": {
+    "sessionTokenCeiling": {
+      "name": "会话 Token 上限",
+      "description": "当单个会话的 Token 总用量超过设定上限时发出提示，避免质量下降或上下文窗口变得不可靠。",
+      "fieldLabel": "阈值",
+      "unit": "tokens",
+      "message": "会话上下文正在变大（{{tokens}} tokens）",
+      "recommendation": "建议在继续之前先执行 /compact 或 /clear——请先复制保存当前上下文。"
+    }
+  }
+}

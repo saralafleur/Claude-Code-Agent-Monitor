@@ -71,12 +71,14 @@
     "tokens": {
       "in": "输入",
       "out": "输出",
-      "cache": "缓存",
-      "total": "总计",
-      "inTooltip": "此会话的输入 token 总数",
+      "cacheRead": "读取",
+      "cacheWrite": "写入",
+      "effective": "有效",
+      "inTooltip": "此会话的新输入 token 总数",
       "outTooltip": "此会话生成的输出 token 总数",
-      "cacheTooltip": "此会话的缓存读取 + 写入 token 总数",
-      "totalTooltip": "此会话的 token 总数(输入 + 输出 + 缓存)"
+      "cacheReadTooltip": "从提示缓存重新读取的 token 数。每一轮都会重新读取整个对话前缀,因此长会话中该数值增长很快 — 按输入费率的约 10% 计费",
+      "cacheWriteTooltip": "写入提示缓存的新上下文。按溢价计费 — 输入费率的 1.25 倍(5 分钟层)或 2 倍(1 小时层)。上下文频繁变动时该数值会增长",
+      "effectiveTooltip": "折算为输入等价的消耗量:输入 + 输出 + 按该模型实际费率加权的缓存读/写。与 $ 成本数字同步变动 — 这才是需要关注的数字"
     }
   },
   "tooltip": {
@@ -101,10 +103,6 @@
     "deleteMonitor": "移除显示器",
     "collapse": "折叠显示器",
     "expand": "展开显示器",
-    "orientationHorizontal": "切换为垂直布局",
-    "orientationVertical": "切换为水平布局",
-    "wrapAuto": "自动换行",
-    "wrapCount": "每 {{count}} 个换行",
     "ungrouped": "未分组",
     "collapseUngrouped": "折叠未分组",
     "expandUngrouped": "展开未分组",
@@ -112,11 +110,17 @@
     "emptyUngroupedHint": "将项目拖到这里以将其移出显示器"
   },
   "column": {
-    "orientationHorizontal": "切换为垂直布局",
-    "orientationVertical": "切换为水平布局",
-    "wrapAuto": "自动换行",
-    "wrapCount": "每 {{count}} 个换行",
     "collapse": "折叠列",
     "expand": "展开列"
+  },
+  "layout": {
+    "trigger": "排列布局",
+    "columns": "列",
+    "rows": "行",
+    "auto": "自动",
+    "columnsOption": "{{count}} 列",
+    "rowsOption": "{{count}} 行",
+    "autoColumnsOption": "自动列",
+    "autoRowsOption": "自动行"
   }
 }

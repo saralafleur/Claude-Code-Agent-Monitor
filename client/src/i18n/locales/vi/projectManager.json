@@ -1,0 +1,66 @@
+{
+  "title": "Quản lý dự án",
+  "subtitle": "Tổng hợp danh mục dự án — tiến độ so với ngày mục tiêu, các lối rẽ cần được xử lý, và những quyết định đối chiếu cần bạn xem xét.",
+  "errors": {
+    "loadFailed": "Không thể tải danh mục dự án."
+  },
+  "scope": {
+    "all": "Tất cả dự án"
+  },
+  "kpi": {
+    "projectsTracked": "Dự án đang theo dõi",
+    "itemsBehindPace": "Mục chậm tiến độ",
+    "openDecisions": "Quyết định đang chờ",
+    "detoursResolved": "Lối rẽ đã xử lý (7 ngày)"
+  },
+  "rollup": {
+    "title": "Danh mục dự án",
+    "empty": "Chưa có dự án nào — tạo dự án từ trang Dự án.",
+    "project": "Dự án",
+    "progress": "Tiến độ mục tiêu",
+    "milestones": "Cột mốc",
+    "pace": "Tiến độ",
+    "openDecisions": "Quyết định đang chờ",
+    "lastActivity": "Hoạt động gần nhất",
+    "noPlan": "Chưa có kế hoạch",
+    "behind_one": "{{count}} chậm tiến độ",
+    "behind_other": "{{count}} chậm tiến độ",
+    "onTrack": "đúng tiến độ",
+    "done": "hoàn thành",
+    "noTarget": "chưa có mục tiêu"
+  },
+  "pace": {
+    "title": "Theo dõi tiến độ",
+    "empty": "Không có mục nào chậm tiến độ.",
+    "overdue_one": "trễ {{count}} ngày",
+    "overdue_other": "trễ {{count}} ngày"
+  },
+  "queue": {
+    "title": "Hàng đợi quyết định",
+    "empty": "Hiện không có gì cần bạn quyết định.",
+    "openCount_one": "{{count}} đang chờ",
+    "openCount_other": "{{count}} đang chờ",
+    "kinds": {
+      "pace_alert": "cảnh báo tiến độ",
+      "detour_volume": "khối lượng lối rẽ",
+      "detour_disposition": "xử lý lối rẽ",
+      "writeback_conflict": "xung đột ghi",
+      "writeback_failed": "ghi thất bại"
+    },
+    "actions": {
+      "resolve": "Xử lý",
+      "dismiss": "Bỏ qua",
+      "retryWrite": "Thử ghi lại",
+      "foldIn": "Gộp vào kế hoạch",
+      "newItem": "Mục mới",
+      "deliberate": "Ghi nhận có chủ đích",
+      "discard": "Loại bỏ"
+    },
+    "resolvedNote": "Đã xử lý",
+    "dismissedNote": "Đã bỏ qua"
+  },
+  "resolved": {
+    "title": "Vừa xử lý xong",
+    "empty": "Chưa xử lý mục nào."
+  }
+}

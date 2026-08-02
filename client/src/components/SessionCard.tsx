@@ -233,7 +233,15 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
   // token_usage) - the aggregate is derived here rather than trusting a
   // server-computed sum, so it always matches what the three figures above it show.
   const tokens = session.tokens;
+  // Raw sum is only the strip's visibility gate — the displayed aggregate is
+  // `effective` (cost-weighted input-equivalent tokens, computed server-side
+  // from the pricing rules), which tracks the $ figure instead of counting a
+  // ~10%-rate cache-read token the same as a full-rate output token.
   const tokenTotal = tokens ? tokens.input + tokens.output + tokens.cache : 0;
+  // Fallbacks cover cached/stale API payloads that predate the split fields.
+  const tokenCacheRead = tokens ? (tokens.cache_read ?? tokens.cache) : 0;
+  const tokenCacheWrite = tokens ? (tokens.cache_write ?? 0) : 0;
+  const tokenEffective = tokens ? (tokens.effective ?? tokenTotal) : 0;
 
   // Declared focus breadcrumb (AGENT-PLAN.md item + detour chain). Read from
   // the shared focusStore — one bulk hydrate + WS merges, never a per-card
@@ -651,13 +659,16 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
         </span>
       </div>
 
-      {/* Compact token strip - input/output/cache totals plus an aggregate,
-          same hairline-separated treatment as the Waiting hover bar below.
-          Only present once the session has actually used any tokens. */}
+      {/* Compact token strip - input/output/cache-read/cache-write totals plus
+          the cost-weighted Effective aggregate, same hairline-separated
+          treatment as the Waiting hover bar below. Cache is split because the
+          two halves mean opposite things: writes (amber) are the premium-priced
+          "context churn" signal, reads (purple) are the cheap per-turn re-read
+          of the whole prefix. Only present once the session has used tokens. */}
       {tokens && tokenTotal > 0 && (
-        <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_auto] gap-2.5 mt-2.5 pt-2 border-t border-border/50">
+        <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_auto] gap-2.5 mt-2.5 pt-2 border-t border-border/50">
           <div className="min-w-0">
-            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5 whitespace-nowrap">
               <ArrowDown className="w-2.5 h-2.5 text-sky-400" />
               {t("session.tokens.in")}
             </div>
@@ -669,7 +680,7 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
             </div>
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5 whitespace-nowrap">
               <ArrowUp className="w-2.5 h-2.5 text-emerald-400" />
               {t("session.tokens.out")}
             </div>
@@ -681,26 +692,38 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
             </div>
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5 whitespace-nowrap">
               <Database className="w-2.5 h-2.5 text-purple-400" />
-              {t("session.tokens.cache")}
+              {t("session.tokens.cacheRead")}
             </div>
             <div
               className="text-[11px] font-semibold text-gray-300 truncate"
-              title={t("session.tokens.cacheTooltip")}
+              title={t("session.tokens.cacheReadTooltip")}
             >
-              {fmt(tokens.cache)}
+              {fmt(tokenCacheRead)}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-gray-600 mb-0.5 whitespace-nowrap">
+              <Database className="w-2.5 h-2.5 text-amber-400" />
+              {t("session.tokens.cacheWrite")}
+            </div>
+            <div
+              className="text-[11px] font-semibold text-gray-300 truncate"
+              title={t("session.tokens.cacheWriteTooltip")}
+            >
+              {fmt(tokenCacheWrite)}
             </div>
           </div>
           <div className="text-right flex-shrink-0">
-            <div className="text-[9px] uppercase tracking-wide text-accent-hover mb-0.5">
-              {t("session.tokens.total")}
+            <div className="text-[9px] uppercase tracking-wide text-accent-hover mb-0.5 whitespace-nowrap">
+              {t("session.tokens.effective")}
             </div>
             <div
               className="text-xs font-bold text-accent-hover"
-              title={t("session.tokens.totalTooltip")}
+              title={t("session.tokens.effectiveTooltip")}
             >
-              {fmt(tokenTotal)}
+              {fmt(tokenEffective)}
             </div>
           </div>
         </div>

@@ -250,11 +250,17 @@ function createOpenApiSpec() {
               type: "object",
               nullable: true,
               description:
-                "Session-lifetime token totals, summed across every model/speed/tier bucket. Only present on GET /api/sessions (list). `cache` combines cache-read and cache-write tokens.",
+                "Session-lifetime token totals, summed across every model/speed/tier bucket. Only present on GET /api/sessions (list). `cache_read`/`cache_write` are the split figures; `effective` is the cost-weighted input-equivalent total (input + output + cache reads/writes weighted by the model's pricing rates, so it tracks `cost`). `cache` (read + write combined) is retained for backward compatibility.",
               properties: {
                 input: { type: "integer" },
                 output: { type: "integer" },
-                cache: { type: "integer" },
+                cache: {
+                  type: "integer",
+                  description: "Deprecated combined read+write figure - prefer the split fields.",
+                },
+                cache_read: { type: "integer" },
+                cache_write: { type: "integer" },
+                effective: { type: "integer" },
               },
             },
             awaiting_input_since: {

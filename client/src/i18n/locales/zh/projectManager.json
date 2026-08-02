@@ -1,0 +1,66 @@
+{
+  "title": "项目管理",
+  "subtitle": "跨所有跟踪项目的组合汇总 — 相对目标日期的进度、需要处理的偏离事项，以及需要你审阅的协调决定。",
+  "errors": {
+    "loadFailed": "加载项目组合失败。"
+  },
+  "scope": {
+    "all": "所有项目"
+  },
+  "kpi": {
+    "projectsTracked": "跟踪中的项目",
+    "itemsBehindPace": "进度滞后的项",
+    "openDecisions": "待处理决定",
+    "detoursResolved": "已处理的偏离事项（7 天）"
+  },
+  "rollup": {
+    "title": "项目组合",
+    "empty": "暂无项目 — 请在项目页面创建。",
+    "project": "项目",
+    "progress": "目标进度",
+    "milestones": "里程碑",
+    "pace": "进度",
+    "openDecisions": "待处理决定",
+    "lastActivity": "最近活动",
+    "noPlan": "暂无计划",
+    "behind_one": "{{count}} 项滞后",
+    "behind_other": "{{count}} 项滞后",
+    "onTrack": "进度正常",
+    "done": "已完成",
+    "noTarget": "未设目标"
+  },
+  "pace": {
+    "title": "进度监控",
+    "empty": "没有滞后的项。",
+    "overdue_one": "逾期 {{count}} 天",
+    "overdue_other": "逾期 {{count}} 天"
+  },
+  "queue": {
+    "title": "决策队列",
+    "empty": "目前没有需要你决定的事项。",
+    "openCount_one": "{{count}} 项待处理",
+    "openCount_other": "{{count}} 项待处理",
+    "kinds": {
+      "pace_alert": "进度警报",
+      "detour_volume": "偏离事项过多",
+      "detour_disposition": "偏离事项处理",
+      "writeback_conflict": "写入冲突",
+      "writeback_failed": "写入失败"
+    },
+    "actions": {
+      "resolve": "处理",
+      "dismiss": "忽略",
+      "retryWrite": "重试写入",
+      "foldIn": "并入计划",
+      "newItem": "新建条目",
+      "deliberate": "记为有意为之",
+      "discard": "丢弃"
+    },
+    "resolvedNote": "已处理",
+    "dismissedNote": "已忽略"
+  },
+  "resolved": {
+    "title": "最近已处理",
+    "empty": "暂无已处理事项。"
+  }
+}

@@ -80,6 +80,23 @@ function ratesForBucket(rule, row, asOf) {
 // cache-write split and server-tool request counts. Cost = token cost (rate-
 // modified) + web-search surcharge ($10/1k) + estimated code-execution time
 // (free when used with web search/fetch; org free-hours allowance applied once).
+/**
+ * Find the most specific pricing rule whose model_pattern matches `model`
+ * (longest pattern wins — same precedence calculateCost applies). Returns
+ * null when no rule matches. Exported so other routes can resolve per-model
+ * rates (e.g. the session list's cost-weighted "effective" token total)
+ * without duplicating the matching semantics.
+ */
+function matchPricingRule(pricingRules, model) {
+  const sorted = [...pricingRules].sort((a, b) => b.model_pattern.length - a.model_pattern.length);
+  return (
+    sorted.find((p) => {
+      const pattern = p.model_pattern.replace(/%/g, ".*");
+      return new RegExp("^" + pattern + "$").test(model);
+    }) || null
+  );
+}
+
 function calculateCost(tokenRows, pricingRules, asOf) {
   const sortedRules = [...pricingRules].sort(
     (a, b) => b.model_pattern.length - a.model_pattern.length
@@ -470,3 +487,5 @@ module.exports = router;
 module.exports.calculateCost = calculateCost;
 module.exports.agentOwnCost = agentOwnCost;
 module.exports.attachAgentCosts = attachAgentCosts;
+module.exports.matchPricingRule = matchPricingRule;
+module.exports.ratesForBucket = ratesForBucket;
