@@ -1,0 +1,43 @@
+{
+  "backToProjects": "Quay lại Dự án",
+  "notFound": "Không tìm thấy dự án",
+  "notFoundDesc": "Dự án này có thể đã bị xóa, hoặc liên kết đã lỗi thời.",
+  "errors": {
+    "loadFailed": "Không thể tải chi tiết dự án này."
+  },
+  "plan": {
+    "title": "Kế hoạch",
+    "empty": "Chưa tìm thấy AGENT-PLAN.md trong các thư mục của dự án này."
+  },
+  "repos": {
+    "title": "Kho mã nguồn",
+    "empty": "Chưa có thư mục nào được ánh xạ của dự án này là kho git.",
+    "worktrees_one": "{{count}} worktree",
+    "worktrees_other": "{{count}} worktree",
+    "branch": "Nhánh",
+    "detached": "HEAD tách rời",
+    "dirty": "Có thay đổi chưa commit",
+    "clean": "Sạch",
+    "unknown": "Không xác định",
+    "nonRepoFoldersTitle": "Thư mục đã ánh xạ khác",
+    "nonRepoFolder": "Không phải kho git"
+  },
+  "suggestedRepos": {
+    "title": "Kho mã nguồn được đề xuất",
+    "description": "Được nêu trong PROJECT-CONTEXT.md của một kho đã ánh xạ, chưa thuộc dự án này.",
+    "add": "Thêm vào dự án",
+    "adding": "Đang thêm…",
+    "addFailed": "Không thể thêm kho này vào dự án."
+  },
+  "intake": {
+    "title": "Sáng kiến Team-Intake",
+    "empty": "Chưa tìm thấy thư mục intake/ nào trong các thư mục đã ánh xạ của dự án này.",
+    "stages": {
+      "requested": "Đã yêu cầu",
+      "planned": "Đã lên kế hoạch",
+      "qa": "QA",
+      "built": "Đã xây dựng",
+      "released": "Đã phát hành"
+    }
+  }
+}

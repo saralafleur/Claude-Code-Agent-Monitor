@@ -1675,6 +1675,117 @@ export interface UnassignedProjectBucket {
   last_activity: string | null;
 }
 
+// ───── Project Detail: repo/worktree topology & team-intake status ─────
+// Both computed live on every request by server/lib/repo-topology.js and
+// server/lib/intake-scan.js (see GET /api/projects/:id/repos and
+// /api/projects/:id/intake) — nothing here is persisted, so there is no
+// "last updated" timestamp to show; a page refresh always reflects the
+// current filesystem/git state.
+
+/** One git worktree of a {@link RepoTopologyEntry}, from `git worktree list
+ *  --porcelain`. */
+export interface WorktreeInfo {
+  /** Absolute filesystem path of this worktree. */
+  path: string;
+  /** HEAD commit sha; null only if git couldn't report one (unborn branch). */
+  head: string | null;
+  /** Full ref (e.g. `"refs/heads/master"`); null when `detached` is true. */
+  branch: string | null;
+  /** True for the repo's bare source worktree entry, if any. */
+  bare: boolean;
+  /** True when HEAD isn't on a branch. */
+  detached: boolean;
+  /** True when git reports this worktree as locked. */
+  locked: boolean;
+  /** True when git reports this worktree as prunable (its gitdir file points
+   *  somewhere that no longer exists). */
+  prunable: boolean;
+  /** Whether the worktree has uncommitted changes (`git status --porcelain`).
+   *  Null when this couldn't be determined (missing path, timeout, error, or
+   *  the request-wide dirty-check cap was reached) — render as "unknown",
+   *  never as a false "clean". */
+  dirty: boolean | null;
+}
+
+/** One of a project's mapped folders that turned out to be a git repo, with
+ *  its live worktrees. */
+export interface RepoTopologyEntry {
+  /** Absolute working directory (matches a {@link ProjectPath.cwd}). */
+  cwd: string;
+  /** The owning {@link ProjectPath.id}, for unmapping via the existing
+   *  `DELETE /:id/paths/:pathId` action if desired. */
+  pathId: number;
+  /** This repo's live worktrees (always includes the main one). */
+  worktrees: WorktreeInfo[];
+}
+
+/** A sibling repo named in a mapped repo's own PROJECT-CONTEXT.md "Repo
+ *  topology" section that isn't mapped to the project yet. Surfaced as a
+ *  suggestion only — the client must call `api.projects.addPath` to actually
+ *  add it; nothing adds it automatically. */
+export interface DetectedSiblingRepo {
+  /** Repo name as written in PROJECT-CONTEXT.md. */
+  name: string;
+  /** Resolved absolute path (verified to exist and be a git repo). */
+  path: string;
+  /** Which of the project's own mapped repos named this sibling. */
+  sourceRepoCwd: string;
+}
+
+/** GET /api/projects/:id/repos response. */
+export interface ProjectRepoTopology {
+  /** The project id. */
+  project_id: string;
+  /** Mapped folders that are git repos, each with its worktrees. */
+  repos: RepoTopologyEntry[];
+  /** Mapped folders that are NOT git repos (no `.git`). */
+  nonRepoFolders: Array<{ cwd: string; pathId: number }>;
+  /** Sibling repos detected via PROJECT-CONTEXT.md but not yet mapped. */
+  detectedSiblings: DetectedSiblingRepo[];
+}
+
+/** The delivery-team pipeline stages an {@link IntakeInitiative} can be
+ *  inferred to be at, from lowest to highest — see
+ *  server/lib/intake-scan.js's `ARTIFACT_CHECKS`. Purely a file-presence
+ *  heuristic: it reflects which artifact was last produced, not whether the
+ *  item is stalled or blocked. */
+export type IntakeStage = "requested" | "planned" | "qa" | "built" | "released";
+
+/** Which known delivery-team artifact files exist for an
+ *  {@link IntakeInitiative}, the raw signal `deriveIntakeStage` picks a
+ *  stage from. */
+export interface IntakeArtifactFlags {
+  requestBrief: boolean;
+  technicalPlan: boolean;
+  qaAssessment: boolean;
+  buildReport: boolean;
+  merged: boolean;
+}
+
+/** One `intake/<slug>/` folder found under a project's mapped folders, from
+ *  GET /api/projects/:id/intake. */
+export interface IntakeInitiative {
+  /** Which mapped folder this initiative's `intake/` directory was found
+   *  under. */
+  sourceCwd: string;
+  /** The intake folder's own name, e.g. `"2026-08-01-build-project-manager"`. */
+  slug: string;
+  /** Absolute path of the slug folder. */
+  path: string;
+  /** Highest pipeline stage inferred from `artifacts`. */
+  stage: IntakeStage;
+  artifacts: IntakeArtifactFlags;
+}
+
+/** GET /api/projects/:id/intake response. */
+export interface ProjectIntakeReport {
+  /** The project id. */
+  project_id: string;
+  /** Every intake initiative found across the project's mapped folders,
+   *  sorted by slug within each folder. */
+  initiatives: IntakeInitiative[];
+}
+
 /** One interval where a single {@link FocusKind} was continuously current
  *  for a session, from GET /api/projects/:id/focus-report. `item_number` is
  *  the item that was current when the segment started — for a detour this

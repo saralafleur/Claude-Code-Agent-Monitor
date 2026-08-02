@@ -1249,6 +1249,79 @@ DELETE /api/projects/:id/paths/:pathId
 
 `pathId` is the numeric id from `Project.paths[].id`. Unmaps the folder — the folder and its sessions are untouched; it becomes unassigned again. Returns `{ "project": Project }`, or **404** if the project id or `pathId` is unknown (or the mapping doesn't belong to that project).
 
+#### Repo & Worktree Topology
+
+```http
+GET /api/projects/:id/repos
+```
+
+Backs the [Project Detail page](../client/src/pages/ProjectDetail.tsx) (`/projects/:id`, reached from a project row's "open detail" icon in the Projects list). Computed **live on every call** — nothing here is persisted — by `server/lib/repo-topology.js`: splits the project's mapped folders into actual git repos (has a `.git`) versus plain folders, lists each repo's live worktrees (`git worktree list --porcelain`, `git` invoked via `execFile` with an isolated env — see `server/lib/git-env.js` — never a shell string), and best-effort-detects sibling repos named in a mapped repo's own `PROJECT-CONTEXT.md` "Repo topology" section that aren't mapped to the project yet. **404** for an unknown project id.
+
+```json
+{
+  "project_id": "b6f1a2d0-3c4e-4f5a-9b8c-1d2e3f4a5b6c",
+  "repos": [
+    {
+      "cwd": "/Users/dev/Claude-Code-Agent-Monitor",
+      "pathId": 1,
+      "worktrees": [
+        {
+          "path": "/Users/dev/Claude-Code-Agent-Monitor",
+          "head": "2f9c8a1b3d4e5f60718293a4b5c6d7e8f9a0b1c2",
+          "branch": "refs/heads/master",
+          "bare": false,
+          "detached": false,
+          "locked": false,
+          "prunable": false,
+          "dirty": false
+        }
+      ]
+    }
+  ],
+  "nonRepoFolders": [{ "cwd": "/Users/dev/scratch-notes", "pathId": 2 }],
+  "detectedSiblings": [
+    {
+      "name": "sibling-repo",
+      "path": "/Users/dev/sibling-repo",
+      "sourceRepoCwd": "/Users/dev/Claude-Code-Agent-Monitor"
+    }
+  ]
+}
+```
+
+`worktrees[].dirty` is `true`/`false` from `git status --porcelain --ignore-submodules -uno`, or `null` when it genuinely couldn't be determined (missing path, timeout, error, or a per-request cap of 25 dirty-checks was reached) — render `null` as "unknown", never as a false "clean". `detectedSiblings` are suggestions only: nothing is added to the project automatically — the client adds one explicitly via the existing `POST /api/projects/:id/paths`.
+
+#### Team-Intake Initiatives
+
+```http
+GET /api/projects/:id/intake
+```
+
+Also backs the Project Detail page. Computed **live on every call** by `server/lib/intake-scan.js`: scans each mapped folder's `intake/<slug>/` directories (the layout the `team-intake`/`team-qa`/`team-build`/`team-release` delivery-team pipeline skills produce) and infers a pipeline stage purely from which known artifact files exist — no markdown content is parsed. **404** for an unknown project id.
+
+```json
+{
+  "project_id": "b6f1a2d0-3c4e-4f5a-9b8c-1d2e3f4a5b6c",
+  "initiatives": [
+    {
+      "sourceCwd": "/Users/dev/Claude-Code-Agent-Monitor",
+      "slug": "2026-08-01-build-project-manager",
+      "path": "/Users/dev/Claude-Code-Agent-Monitor/intake/2026-08-01-build-project-manager",
+      "stage": "qa",
+      "artifacts": {
+        "requestBrief": true,
+        "technicalPlan": true,
+        "qaAssessment": true,
+        "buildReport": false,
+        "merged": false
+      }
+    }
+  ]
+}
+```
+
+`stage` is the highest satisfied step of `requested` (`request-brief.md`) → `planned` (`technical-plan.md`) → `qa` (`qa/qa-assessment.md` or `qa/test-plan.md`) → `built` (`build/*/build-report.md`) → `released` (`merge.json`); a slug folder with none of those recognized files still floors out at `requested`.
+
 ---
 
 ### Plans & Focus
@@ -1758,7 +1831,7 @@ Every capture is persisted regardless of parse success: `status` is `"ok"` (key 
 
 The `/api/accounts/*` namespace is a second, multi-account capture path alongside the tmux/TUI one above. Each account is just a `{ label, configDir }` pair — `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into, used purely so this dashboard can hold a separate OAuth credential to poll that account's usage; real work is often done through whichever profile is logged into the *default* `~/.claude` dir instead, not through this named `configDir`. This dashboard never sees or stores a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` (and the automatic scheduler below) reads that credential live from the CLI's own storage (macOS Keychain, or a `.credentials.json` file on other platforms — see `server/lib/claude-cli-credentials.js`, via the shared `server/lib/account-capture.js`) and, if usable, fetches usage directly from `api.anthropic.com` (`server/lib/usage-fetch-oauth.js`), persisting the result into the same `usage_captures` table with `account_id` set. Same same-origin guard as `/api/usage` and `/api/run` since this makes a real outbound network call with a live token.
 
-Every enabled account is also captured automatically, on a tick (`server/lib/account-capture-scheduler.js`), so its rate-limit percentages — and the delta-based `last_used_at`/`is_active` below — stay fresh without a manual Refresh click. Default interval 15 minutes; disable with `DASHBOARD_ACCOUNT_CAPTURE_MODE=off` or override with `DASHBOARD_ACCOUNT_CAPTURE_MS`.
+Every enabled account is also captured automatically, on a tick (`server/lib/account-capture-scheduler.js`), so its rate-limit percentages — and the delta-based `last_used_at`/`is_active` below — stay fresh without a manual Refresh click. Default interval 5 minutes; disable with `DASHBOARD_ACCOUNT_CAPTURE_MODE=off` or override with `DASHBOARD_ACCOUNT_CAPTURE_MS`.
 
 ```http
 GET    /api/accounts                       List accounts + each one's latest known session/weekly rate-limit %

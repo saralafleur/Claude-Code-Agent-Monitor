@@ -196,6 +196,7 @@ client/
 │   ├── pages/              # Route pages
 │   │   ├── Dashboard.tsx
 │   │   ├── Projects.tsx       # Projects list/management page (/projects); groups sessions by working-directory-derived "project" into horizontally-scrollable rows; create/rename/delete + folder-mapping CRUD via api.projects
+│   │   ├── ProjectDetail.tsx  # Full-page single-project view (/projects/:id, reached from a Projects row's "open detail" icon); plan (PlanPanel/PlanModal reuse), repo/worktree topology + PROJECT-CONTEXT.md-detected sibling repos (GET /api/projects/:id/repos), and team-intake initiative status (GET /api/projects/:id/intake) — both computed live, nothing persisted
 │   │   ├── FocusCalendarBoard.tsx # Cross-project Calendar board (/focus-calendar); project/session/time-period filters over GET /api/focus-report
 │   │   ├── FocusPage.tsx      # "What did we actually do" activity report (/focus); same filters as the Calendar board, stat tiles + an LLM-synthesized window Summary block (GET /api/focus-report/summary; hidden when null) + FocusActivityCard instead of a swimlane grid
 │   │   ├── ProjectManager.tsx # Layer-7 portfolio rollup (/project-manager); per-project milestone/pace rollup (GET /api/portfolio/summary) + the layer-6 decision queue (GET /api/decision-queue) composed into one page — the first client consumer of layers 4-6, which shipped server-only

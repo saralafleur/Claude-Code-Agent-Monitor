@@ -14,7 +14,9 @@ const { describe, it, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
 const os = require("os");
+const fs = require("fs");
 const http = require("http");
+const { execFileSync } = require("child_process");
 
 const TEST_DB = path.join(os.tmpdir(), `dashboard-projects-test-${Date.now()}-${process.pid}.db`);
 process.env.DASHBOARD_DB_PATH = TEST_DB;
@@ -89,6 +91,50 @@ after(() => {
 
 beforeEach(() => {
   terminalFocus.openTerminalForCwd = realOpenTerminalForCwd;
+});
+
+// GET /:id/repos and GET /:id/intake do real filesystem/git work (unlike
+// the rest of this file's `/tmp/fake-path` strings), so they need an actual
+// tmp dir with real repos in it.
+const FS_FIXTURE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "projects-route-fixtures-"));
+const ISOLATED_GIT_ENV = { ...process.env };
+for (const key of [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+]) {
+  delete ISOLATED_GIT_ENV[key];
+}
+
+function makeFixtureRepo(name) {
+  const repo = path.join(FS_FIXTURE_ROOT, name);
+  fs.mkdirSync(repo, { recursive: true });
+  execFileSync("git", ["-c", "init.defaultBranch=master", "init", repo], {
+    stdio: "ignore",
+    env: ISOLATED_GIT_ENV,
+  });
+  fs.writeFileSync(path.join(repo, "README.md"), "fixture\n");
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd: repo,
+    stdio: "ignore",
+    env: ISOLATED_GIT_ENV,
+  });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"], {
+    cwd: repo,
+    stdio: "ignore",
+    env: ISOLATED_GIT_ENV,
+  });
+  return repo;
+}
+
+after(() => {
+  try {
+    fs.rmSync(FS_FIXTURE_ROOT, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
 });
 
 describe("Project CRUD", () => {
@@ -437,5 +483,75 @@ describe("POST /:id/open-terminal", () => {
       assert.equal(res.status, status, `${code} should map to ${status}`);
       assert.equal(res.body.error.code, code);
     }
+  });
+});
+
+describe("GET /:id/repos", () => {
+  it("404 for a project that doesn't exist", async () => {
+    const res = await fetch("/api/projects/does-not-exist/repos");
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
+  });
+
+  it("empty repos/nonRepoFolders/detectedSiblings for a project with no mapped folders", async () => {
+    const created = await post("/api/projects", { name: "Repos Empty Project" });
+    const res = await fetch(`/api/projects/${created.body.project.id}/repos`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.project_id, created.body.project.id);
+    assert.deepEqual(res.body.repos, []);
+    assert.deepEqual(res.body.nonRepoFolders, []);
+    assert.deepEqual(res.body.detectedSiblings, []);
+  });
+
+  it("splits a real git repo from a non-git mapped folder and lists the repo's worktree", async () => {
+    const repo = makeFixtureRepo("repos-route-real-repo");
+    const plainFolder = path.join(FS_FIXTURE_ROOT, "repos-route-plain-folder");
+    fs.mkdirSync(plainFolder, { recursive: true });
+
+    const created = await post("/api/projects", {
+      name: "Repos Route Project",
+      cwds: [repo, plainFolder],
+    });
+
+    const res = await fetch(`/api/projects/${created.body.project.id}/repos`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.repos.length, 1);
+    assert.equal(res.body.repos[0].cwd, repo);
+    assert.equal(res.body.repos[0].worktrees.length, 1);
+    assert.equal(res.body.repos[0].worktrees[0].dirty, false);
+    assert.equal(res.body.nonRepoFolders.length, 1);
+    assert.equal(res.body.nonRepoFolders[0].cwd, plainFolder);
+  });
+});
+
+describe("GET /:id/intake", () => {
+  it("404 for a project that doesn't exist", async () => {
+    const res = await fetch("/api/projects/does-not-exist/intake");
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
+  });
+
+  it("empty initiatives for a project with no mapped folders", async () => {
+    const created = await post("/api/projects", { name: "Intake Empty Project" });
+    const res = await fetch(`/api/projects/${created.body.project.id}/intake`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.project_id, created.body.project.id);
+    assert.deepEqual(res.body.initiatives, []);
+  });
+
+  it("infers stage from real intake/<slug>/ artifact files under a mapped folder", async () => {
+    const cwd = path.join(FS_FIXTURE_ROOT, "intake-route-cwd");
+    fs.mkdirSync(path.join(cwd, "intake", "route-item", "qa"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, "intake", "route-item", "request-brief.md"), "x");
+    fs.writeFileSync(path.join(cwd, "intake", "route-item", "technical-plan.md"), "x");
+    fs.writeFileSync(path.join(cwd, "intake", "route-item", "qa", "qa-assessment.md"), "x");
+
+    const created = await post("/api/projects", { name: "Intake Route Project", cwds: [cwd] });
+    const res = await fetch(`/api/projects/${created.body.project.id}/intake`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.initiatives.length, 1);
+    assert.equal(res.body.initiatives[0].slug, "route-item");
+    assert.equal(res.body.initiatives[0].stage, "qa");
+    assert.equal(res.body.initiatives[0].sourceCwd, cwd);
   });
 });

@@ -10,7 +10,11 @@
  * also be pinned (PATCH `pinned`), which floats it to the top of `listProjects`
  * ahead of the regular alphabetical order. Also exposes an "open terminal in
  * one of this project's folders" action (macOS only, see
- * server/lib/terminal-focus.js) for the Kanban board's project picker.
+ * server/lib/terminal-focus.js) for the Kanban board's project picker, and
+ * two read-only Project Detail page endpoints computed live on every call
+ * (no persistence): `/repos` (git repo/worktree topology, see
+ * server/lib/repo-topology.js) and `/intake` (team-intake initiative status,
+ * see server/lib/intake-scan.js).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -19,6 +23,8 @@ const { v4: uuidv4 } = require("uuid");
 const dbModule = require("../db");
 const { stmts, db } = dbModule;
 const { buildProjectFocusReport } = require("../lib/focus-report");
+const { buildProjectRepoTopology } = require("../lib/repo-topology");
+const { scanProjectIntake } = require("../lib/intake-scan");
 // Required as a module object (not destructured) so tests can swap
 // `terminalFocus.openTerminalForCwd` and this route picks the stub up at
 // call time — same idiom routes/sessions.js uses for its own terminal-focus
@@ -265,6 +271,34 @@ router.get("/:id/focus-report", (req, res) => {
           )
           .all(JSON.stringify(cwds));
   const report = buildProjectFocusReport(dbModule, sessions);
+  res.json({ project_id: project.id, ...report });
+});
+
+// GET /api/projects/:id/repos - which of this project's mapped folders are
+// git repos, their live worktrees (git worktree list), and any sibling
+// repos detected via PROJECT-CONTEXT.md that aren't mapped to the project
+// yet (suggestions only - see server/lib/repo-topology.js for how those are
+// found; the client must call POST /:id/paths to actually add one).
+router.get("/:id/repos", async (req, res) => {
+  const project = stmts.getProject.get(req.params.id);
+  if (!project) {
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+  }
+  const topology = await buildProjectRepoTopology(dbModule, project);
+  res.json({ project_id: project.id, ...topology });
+});
+
+// GET /api/projects/:id/intake - team-intake initiatives found under this
+// project's mapped folders' intake/<slug>/ directories, with a stage
+// inferred from which known delivery-team artifact files exist (see
+// server/lib/intake-scan.js). File-presence heuristic only - no markdown
+// content is parsed.
+router.get("/:id/intake", (req, res) => {
+  const project = stmts.getProject.get(req.params.id);
+  if (!project) {
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+  }
+  const report = scanProjectIntake(dbModule, project);
   res.json({ project_id: project.id, ...report });
 });
 

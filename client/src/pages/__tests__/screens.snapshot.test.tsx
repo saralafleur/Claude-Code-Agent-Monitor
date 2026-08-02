@@ -482,6 +482,11 @@ vi.mock("../../lib/api", async (importOriginal) => {
         remove: r({ ok: true }),
         addPath: r({ project: {} }),
         removePath: r({ project: {} }),
+        // Project Detail page's repo/worktree topology + team-intake status
+        // fetches - deterministically empty, same idiom as the rest of this
+        // mock block.
+        repos: r({ project_id: "", repos: [], nonRepoFolders: [], detectedSiblings: [] }),
+        intake: r({ project_id: "", initiatives: [] }),
       },
       plans: {
         list: r({ plans: [] }),
@@ -522,6 +527,7 @@ vi.mock("../../lib/push", () => ({
 // Page components (imported after the mocks above; vi.mock is hoisted).
 import { Dashboard } from "../Dashboard";
 import { Projects } from "../Projects";
+import { ProjectDetail } from "../ProjectDetail";
 // New page (build task 17), not yet built as of this test's authoring - this
 // import fails to resolve until FocusCalendarBoard.tsx exists, which
 // (unavoidably, being a top-level ES import) currently fails this entire
@@ -618,6 +624,19 @@ describe("screen snapshots", () => {
   });
   it("Projects", async () => {
     await snapshot(<Projects />, "/projects");
+  });
+  // Deterministic "not found" state: the shared `projects.list` fixture
+  // above returns no projects, so no id ever matches - same rationale as
+  // every other empty-collection fixture in this file. The populated/happy
+  // path (plan, repos, worktrees, suggested siblings, intake initiatives)
+  // is covered by ProjectDetail.test.tsx instead.
+  it("Project detail", async () => {
+    await snapshot(
+      <Routes>
+        <Route path="/projects/:id" element={<ProjectDetail />} />
+      </Routes>,
+      "/projects/proj-1"
+    );
   });
   // Positioned right after "Projects" per DEC-5's ordering convention
   // (mirrors the sidebar's Calendar-right-after-Projects placement).

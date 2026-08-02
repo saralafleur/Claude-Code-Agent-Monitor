@@ -1,0 +1,43 @@
+{
+  "backToProjects": "返回项目列表",
+  "notFound": "未找到项目",
+  "notFoundDesc": "此项目可能已被删除，或链接已过期。",
+  "errors": {
+    "loadFailed": "加载项目详情失败。"
+  },
+  "plan": {
+    "title": "计划",
+    "empty": "此项目的文件夹中尚未找到 AGENT-PLAN.md。"
+  },
+  "repos": {
+    "title": "代码仓库",
+    "empty": "此项目映射的文件夹中还没有 Git 仓库。",
+    "worktrees_one": "{{count}} 个工作树",
+    "worktrees_other": "{{count}} 个工作树",
+    "branch": "分支",
+    "detached": "分离头指针（Detached HEAD）",
+    "dirty": "有未提交的更改",
+    "clean": "干净",
+    "unknown": "未知",
+    "nonRepoFoldersTitle": "其他已映射文件夹",
+    "nonRepoFolder": "不是 Git 仓库"
+  },
+  "suggestedRepos": {
+    "title": "建议的仓库",
+    "description": "在已映射仓库的 PROJECT-CONTEXT.md 中提及，但尚未加入此项目。",
+    "add": "添加到项目",
+    "adding": "添加中…",
+    "addFailed": "添加此仓库失败。"
+  },
+  "intake": {
+    "title": "团队立项事项",
+    "empty": "此项目映射的文件夹中还没有找到 intake/ 文件夹。",
+    "stages": {
+      "requested": "已请求",
+      "planned": "已规划",
+      "qa": "质量保证",
+      "built": "已构建",
+      "released": "已发布"
+    }
+  }
+}

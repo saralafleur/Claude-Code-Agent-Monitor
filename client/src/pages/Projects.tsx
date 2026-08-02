@@ -37,6 +37,7 @@ import {
   type DragEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   FolderKanban,
   Folder,
@@ -55,6 +56,7 @@ import {
   ChevronRight,
   Pin,
   PinOff,
+  ArrowUpRight,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -715,6 +717,7 @@ function ProjectRow({
   onDragEnd,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <Fragment>
@@ -822,6 +825,13 @@ function ProjectRow({
               className="p-1 rounded-md text-gray-500 hover:text-accent hover:bg-surface-3 flex-shrink-0"
             >
               <BarChart3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => navigate(`/projects/${project.id}`)}
+              title={t("openDetail")}
+              className="p-1 rounded-md text-gray-500 hover:text-accent hover:bg-surface-3 flex-shrink-0"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={onDeleteClick}

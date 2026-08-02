@@ -11,10 +11,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act, screen, within } from "@testing-library/react";
+import { render, act, screen, within, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "i18next";
 import type { WSMessage } from "../../lib/types";
+
+const navigateMock = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual("react-router-dom");
+  return { ...actual, useNavigate: () => navigateMock };
+});
 
 // Mutable per-test fixtures, read by the api mock below (same idiom as
 // Run.defaultCwd.test.tsx's `cwdItems`).
@@ -233,6 +239,16 @@ describe("ProjectManager page", () => {
     const rowB = within(table).getByText("email-ops").closest("tr") as HTMLElement;
     expect(within(rowB).getByText(i18n.t("projectManager:rollup.noPlan"))).toBeInTheDocument();
     expect(within(rowB).getByText(i18n.t("projectManager:rollup.noTarget"))).toBeInTheDocument();
+  });
+
+  it("clicking a project's rollup row navigates to its Project Detail page", async () => {
+    await renderPage();
+    const table = screen.getByRole("table");
+    const rowA = within(table).getByText("Claude-Code-Agent-Monitor").closest("tr") as HTMLElement;
+
+    fireEvent.click(rowA);
+
+    expect(navigateMock).toHaveBeenCalledWith("/projects/proj-a");
   });
 
   it("renders KPI tiles from the composed data, not re-derived independently", async () => {

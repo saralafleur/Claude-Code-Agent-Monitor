@@ -15,6 +15,10 @@
  * only renders what those endpoints computed; it never re-derives pace or
  * completion itself (PROJECT-CONTEXT.md §9.1 DERIVED-DUAL-VIEW).
  *
+ * Clicking a project's row in the rollup table navigates to its full
+ * {@link ProjectDetail} page (`/projects/:id`) — the same destination as the
+ * "open detail" icon on that project's row in `Projects.tsx`.
+ *
  * A `detour_disposition` queue row resolves through `api.detours.resolve`
  * (fold_in/new_item/deliberate/discard — the full layer-4 lifecycle;
  * fold_in/new_item synchronously write into the cwd's `AGENT-PLAN.md`).
@@ -27,6 +31,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   Milestone,
   AlertTriangle,
@@ -84,6 +89,7 @@ function paceCounts(summary: PortfolioProjectSummary | undefined) {
 
 export function ProjectManager() {
   const { t } = useTranslation("projectManager");
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioProjectSummary[]>([]);
   const [queue, setQueue] = useState<DecisionQueueItem[]>([]);
@@ -333,7 +339,11 @@ export function ProjectManager() {
                       (q) => q.project_id === project.id
                     ).length;
                     return (
-                      <tr key={project.id} className="border-t border-border hover:bg-surface-4">
+                      <tr
+                        key={project.id}
+                        onClick={() => navigate(`/projects/${project.id}`)}
+                        className="border-t border-border hover:bg-surface-4 cursor-pointer transition-colors"
+                      >
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-100">{project.name}</div>
                         </td>

@@ -395,6 +395,8 @@ import type {
   FocusSummaryTimelineResponse,
   ModelPricing,
   Project,
+  ProjectRepoTopology,
+  ProjectIntakeReport,
   Session,
   SessionDrillIn,
   SessionStats,
@@ -2371,6 +2373,26 @@ export const api = {
      */
     focusReport: (id: string) =>
       request<FocusReport>(`/projects/${encodeURIComponent(id)}/focus-report`),
+    /**
+     * GET /api/projects/:id/repos — which of this project's mapped folders
+     * are git repos, their live worktrees, and any sibling repos detected
+     * via PROJECT-CONTEXT.md that aren't mapped yet (suggestions only — add
+     * one via {@link api.projects.addPath}). Computed live on every call.
+     * @param id The project id.
+     * @returns The {@link ProjectRepoTopology}.
+     */
+    repos: (id: string) =>
+      request<ProjectRepoTopology>(`/projects/${encodeURIComponent(id)}/repos`),
+    /**
+     * GET /api/projects/:id/intake — team-intake initiatives found under
+     * this project's mapped folders, with a stage inferred from which known
+     * delivery-team artifact files exist (file-presence heuristic, no
+     * markdown parsing). Computed live on every call.
+     * @param id The project id.
+     * @returns The {@link ProjectIntakeReport}.
+     */
+    intake: (id: string) =>
+      request<ProjectIntakeReport>(`/projects/${encodeURIComponent(id)}/intake`),
     /**
      * POST /api/projects/:id/open-terminal — opens a brand-new Terminal.app
      * window in one of this project's mapped folders and starts a fresh

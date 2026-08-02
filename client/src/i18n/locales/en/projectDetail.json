@@ -1,0 +1,43 @@
+{
+  "backToProjects": "Back to Projects",
+  "notFound": "Project not found",
+  "notFoundDesc": "This project may have been deleted, or the link is out of date.",
+  "errors": {
+    "loadFailed": "Failed to load this project's details."
+  },
+  "plan": {
+    "title": "Plan",
+    "empty": "No AGENT-PLAN.md found in this project's folders yet."
+  },
+  "repos": {
+    "title": "Repos",
+    "empty": "None of this project's mapped folders are git repos yet.",
+    "worktrees_one": "{{count}} worktree",
+    "worktrees_other": "{{count}} worktrees",
+    "branch": "Branch",
+    "detached": "Detached HEAD",
+    "dirty": "Uncommitted changes",
+    "clean": "Clean",
+    "unknown": "Unknown",
+    "nonRepoFoldersTitle": "Other mapped folders",
+    "nonRepoFolder": "Not a git repo"
+  },
+  "suggestedRepos": {
+    "title": "Suggested repos",
+    "description": "Named in a mapped repo's PROJECT-CONTEXT.md, not yet part of this project.",
+    "add": "Add to project",
+    "adding": "Adding…",
+    "addFailed": "Failed to add this repo to the project."
+  },
+  "intake": {
+    "title": "Team-Intake Initiatives",
+    "empty": "No intake/ folders found in this project's mapped folders yet.",
+    "stages": {
+      "requested": "Requested",
+      "planned": "Planned",
+      "qa": "QA",
+      "built": "Built",
+      "released": "Released"
+    }
+  }
+}

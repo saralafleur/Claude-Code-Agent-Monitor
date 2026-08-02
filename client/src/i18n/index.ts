@@ -131,6 +131,9 @@ import coach_vi from "./locales/vi/coach.json";
 import projectManager_en from "./locales/en/projectManager.json";
 import projectManager_zh from "./locales/zh/projectManager.json";
 import projectManager_vi from "./locales/vi/projectManager.json";
+import projectDetail_en from "./locales/en/projectDetail.json";
+import projectDetail_zh from "./locales/zh/projectDetail.json";
+import projectDetail_vi from "./locales/vi/projectDetail.json";
 
 import common_ko from "./locales/ko/common.json";
 import nav_ko from "./locales/ko/nav.json";
@@ -152,6 +155,7 @@ import plan_ko from "./locales/ko/plan.json";
 import usage_ko from "./locales/ko/usage.json";
 import coach_ko from "./locales/ko/coach.json";
 import projectManager_ko from "./locales/ko/projectManager.json";
+import projectDetail_ko from "./locales/ko/projectDetail.json";
 
 i18n
   .use(LanguageDetector)
@@ -179,6 +183,7 @@ i18n
         usage: usage_en,
         coach: coach_en,
         projectManager: projectManager_en,
+        projectDetail: projectDetail_en,
       },
       zh: {
         common: common_zh,
@@ -201,6 +206,7 @@ i18n
         usage: usage_zh,
         coach: coach_zh,
         projectManager: projectManager_zh,
+        projectDetail: projectDetail_zh,
       },
       vi: {
         common: common_vi,
@@ -223,6 +229,7 @@ i18n
         usage: usage_vi,
         coach: coach_vi,
         projectManager: projectManager_vi,
+        projectDetail: projectDetail_vi,
       },
       ko: {
         common: common_ko,
@@ -245,6 +252,7 @@ i18n
         usage: usage_ko,
         coach: coach_ko,
         projectManager: projectManager_ko,
+        projectDetail: projectDetail_ko,
       },
     },
     supportedLngs: ["en", "zh", "vi", "ko"],
@@ -271,6 +279,7 @@ i18n
       "usage",
       "coach",
       "projectManager",
+      "projectDetail",
     ],
     defaultNS: "common",
     interpolation: { escapeValue: false },
