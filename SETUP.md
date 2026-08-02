@@ -51,7 +51,7 @@ npm run install-hooks
 > Container note: do not rely on hook auto-install from inside Docker or Podman. The hook path written by a container would point at the container filesystem, not the host. Start the container first, then run `npm run install-hooks` on the host. As a safeguard (issue #193), the installer now **detects container execution and refuses to run** (exiting non-zero) so it can never poison a bind-mounted host `~/.claude`; the containerized server logs the same guidance instead of silently writing a bad path. If you genuinely run Claude Code inside the same container, override with `CCAM_ALLOW_CONTAINER_HOOKS=1 npm run install-hooks`.
 
 > [!NOTE]
-> Prefer a ready-made dev environment? This repo ships an **optional** Dev Container (`.devcontainer/`) for VS Code / GitHub Codespaces — Node 22, native build tools for `better-sqlite3`, Python, and ports `4820`/`5173` preconfigured. It's purely opt-in and changes nothing for host-based development. See [`.devcontainer/README.md`](.devcontainer/README.md). (Hooks remain host-side there too.)
+> Prefer a ready-made dev environment? This repo ships an **optional** Dev Container (`.devcontainer/`) for VS Code / GitHub Codespaces — Node 22, native build tools for `better-sqlite3`, Python, and ports `4820`/`9200` preconfigured. It's purely opt-in and changes nothing for host-based development. See [`.devcontainer/README.md`](.devcontainer/README.md). (Hooks remain host-side there too.)
 
 ### Container runtime (Docker / Podman)
 
@@ -185,7 +185,7 @@ The **Claude Code Agent Monitor** is available as an integrated VS Code extensio
 - **Activity Bar View**: Adds a custom "Radar" icon to the activity bar providing real-time agent health, token counts, and session stats.
 - **Status Bar Integration**: Displays live session and agent pulse counts in the bottom bar.
 - **Embedded Dashboard**: Renders the full web dashboard directly in a VS Code editor tab.
-- **Automated Detection**: Automatically finds your dashboard server on ports `5173` or `4820`.
+- **Automated Detection**: Automatically finds your dashboard server on ports `9200` or `4820`.
 
 <p align="center">
   <img src="vscode-extension/vscode.png" alt="VS Code Extension Screenshot" width="100%">

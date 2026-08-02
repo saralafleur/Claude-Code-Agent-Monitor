@@ -31,7 +31,7 @@ function setLocation(href: string) {
 
 describe("DevBuildSiteCard", () => {
   beforeEach(() => {
-    setLocation("http://localhost:5173/focus?foo=bar");
+    setLocation("http://localhost:9200/focus?foo=bar");
   });
 
   it("renders both segments", () => {

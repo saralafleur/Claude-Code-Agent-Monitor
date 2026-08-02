@@ -1792,7 +1792,24 @@ The `/api/playbook/*` namespace exposes the Coach's Playbook — the catalog of 
 }
 ```
 
-`scope` (`session`/`project`/`global`) is what one Observation from the practice is scoped to — v1's engine only evaluates `session`-scoped practices against currently-active sessions. `fields` describes the practice's own config schema; v1 only has `type: "number"` fields (a threshold), each with a `default` and a `min` floor. `config` is the practice's current values, keyed by each field's `key` — a key not yet configured falls back to that field's `default`. v1 ships exactly one practice: `session-token-ceiling`, which flags a session whose total token usage crosses `thresholdTokens`.
+`scope` (`session`/`project`/`global`) is what one Observation from the practice is scoped to — the engine evaluates `session`-scoped practices against every currently-active session, and `global`-scoped practices once per tick against dashboard-wide state; `project`-scoped evaluation isn't built yet. `fields` describes the practice's own config schema; every practice so far only has `type: "number"` fields (a threshold), each with a `default` and a `min` floor. `config` is the practice's current values, keyed by each field's `key` — a key not yet configured falls back to that field's `default`. Ships two practices: `session-token-ceiling` (scope `session`), which flags a session whose total token usage crosses `thresholdTokens`, and `account-weekly-balance` (scope `global`), which flags when two or more enabled Claude accounts (Usage page's Accounts panel) still have weekly-quota headroom and the gap between the lowest- and highest-used of them crosses `gapThresholdPct` — recommending a switch to the lower-used account.
+
+**A second practice's shape** (`account-weekly-balance`, note the string-valued `id`/`label` fields inside `values_json` alongside the numeric ones — a global-scoped practice's Observation names the accounts it's about):
+
+```json
+{
+  "id": "account-weekly-balance",
+  "category": "account-management",
+  "scope": "global",
+  "kind": "info",
+  "defaultSeverity": "info",
+  "fields": [
+    { "key": "gapThresholdPct", "type": "number", "default": 25, "min": 1 }
+  ],
+  "enabled": true,
+  "config": { "gapThresholdPct": 25 }
+}
+```
 
 #### List Practices
 
@@ -1839,7 +1856,24 @@ The `/api/coach/*` namespace exposes the Coach's Feed — **Observations** the P
 }
 ```
 
-`scope_type` (`session`/`project`/`global`) says what `scope_id` identifies; `scope_id` is `null` for a `global`-scoped Observation. `values_json` is a **JSON-encoded string**, not a nested object — callers `JSON.parse` it to read the practice-specific numbers that triggered detection. `status` starts `"open"` and moves to `"acknowledged"`/`"dismissed"`/`"resolved"` via the respond endpoint below; `responded_at` is `null` until it does.
+`scope_type` (`session`/`project`/`global`) says what `scope_id` identifies; `scope_id` is `null` for a `global`-scoped Observation. `values_json` is a **JSON-encoded string**, not a nested object — callers `JSON.parse` it to read the practice-specific values that triggered detection; a global-scoped practice's `values_json` can carry strings (e.g. account labels) alongside numbers, not just numbers. `status` starts `"open"` and moves to `"acknowledged"`/`"dismissed"`/`"resolved"` via the respond endpoint below; `responded_at` is `null` until it does.
+
+**A global-scoped Observation** (`account-weekly-balance`, `scope_id` null):
+
+```json
+{
+  "id": 43,
+  "practice_id": "account-weekly-balance",
+  "scope_type": "global",
+  "scope_id": null,
+  "kind": "info",
+  "severity": "info",
+  "values_json": "{\"gapPct\":40,\"gapThresholdPct\":25,\"lowAccountId\":\"acct-work\",\"lowLabel\":\"Work\",\"lowPct\":40,\"highAccountId\":\"acct-personal\",\"highLabel\":\"Personal\",\"highPct\":80}",
+  "status": "open",
+  "detected_at": "2026-08-02T12:00:00.000Z",
+  "responded_at": null
+}
+```
 
 #### List Observations
 

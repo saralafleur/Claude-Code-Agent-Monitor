@@ -6,15 +6,16 @@
  * `product/coach/coach-playbook-vocabulary.md` for the full agreed
  * terminology this module implements).
  *
- * v1 ships exactly one practice, `session-token-ceiling` — everything else
- * here (the `fields` schema, the pure `detect()` contract) is generic on
- * purpose so a second practice is a new catalog entry, not new plumbing.
+ * The `fields` schema and the pure `detect()` contract are generic on
+ * purpose, so a new practice is a new catalog entry, not new plumbing —
+ * `session-token-ceiling` (session scope) and `account-weekly-balance`
+ * (global scope) each prove that out.
  *
  * `detect(ctx, config)` is a pure function — no I/O, no db access — so it's
  * unit-testable in isolation from the engine's scheduling/persistence
  * concerns, same separation `evaluateRules` keeps in `../reconciliation.js`.
  * It returns `null` when the practice doesn't fire, or `{ values }` (the raw
- * numbers a client-side i18n template interpolates — this app has no
+ * numbers/labels a client-side i18n template interpolates — this app has no
  * server-side i18n, so no display strings live here) when it does.
  *
  * @author Son Nguyen <hoangson091104@gmail.com>
@@ -32,6 +33,48 @@ const PRACTICES = [
     detect(ctx, config) {
       if (!(ctx.totalTokens >= config.thresholdTokens)) return null;
       return { values: { totalTokens: ctx.totalTokens, thresholdTokens: config.thresholdTokens } };
+    },
+  },
+  {
+    id: "account-weekly-balance",
+    category: "account-management",
+    scope: "global",
+    kind: "info",
+    defaultSeverity: "info",
+    fields: [{ key: "gapThresholdPct", type: "number", default: 25, min: 1 }],
+    /**
+     * ctx: { accounts: Array<{ id: string, label: string, weeklyUsedPct: number|null }> }
+     * — every enabled account's latest known weekly-quota-used percentage.
+     * Fires when at least two accounts still have headroom (weeklyUsedPct <
+     * 100) and the spread between the lowest- and highest-used of those
+     * accounts is at least `gapThresholdPct` points — the recommendation is
+     * always to rotate active work onto the lowest-used one, so a session
+     * window running out on the heavily-used account still has a fallback
+     * with weekly quota left.
+     */
+    detect(ctx, config) {
+      const eligible = (ctx.accounts || []).filter(
+        (a) => typeof a.weeklyUsedPct === "number" && a.weeklyUsedPct < 100
+      );
+      if (eligible.length < 2) return null;
+
+      const low = eligible.reduce((a, b) => (b.weeklyUsedPct < a.weeklyUsedPct ? b : a));
+      const high = eligible.reduce((a, b) => (b.weeklyUsedPct > a.weeklyUsedPct ? b : a));
+      const gapPct = high.weeklyUsedPct - low.weeklyUsedPct;
+      if (gapPct < config.gapThresholdPct) return null;
+
+      return {
+        values: {
+          gapPct: Math.round(gapPct),
+          gapThresholdPct: config.gapThresholdPct,
+          lowAccountId: low.id,
+          lowLabel: low.label,
+          lowPct: Math.round(low.weeklyUsedPct),
+          highAccountId: high.id,
+          highLabel: high.label,
+          highPct: Math.round(high.weeklyUsedPct),
+        },
+      };
     },
   },
 ];

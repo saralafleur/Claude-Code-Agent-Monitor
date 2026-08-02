@@ -54,6 +54,16 @@
       "unit": "tokens",
       "message": "Session context is becoming large ({{tokens}} tokens)",
       "recommendation": "Compact or clear the session before continuing — copy your current context first."
+    },
+    "accountWeeklyBalance": {
+      "name": "Account Rotation",
+      "description": "Flags when two or more connected accounts have drifted apart on weekly usage, so you can rotate active work to the one with more headroom instead of draining a single account solo.",
+      "fieldLabel": "Gap threshold",
+      "unit": "%",
+      "previewLowLabel": "Work",
+      "previewHighLabel": "Personal",
+      "message": "{{lowLabel}} has {{gapPct}}% more weekly quota left than {{highLabel}} ({{lowPct}}% vs {{highPct}}% used)",
+      "recommendation": "Switch your active work to {{lowLabel}} — rotating keeps a session-window swap available and protects both accounts' weekly quota."
     }
   }
 }

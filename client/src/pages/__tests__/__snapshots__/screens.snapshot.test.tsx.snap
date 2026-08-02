@@ -6468,172 +6468,176 @@ exports[`screen snapshots > Playbook 1`] = `
       A practice you turn off here is simply never evaluated — it won't appear in the Feed, and nothing runs in the background for it.
     </div>
     <div
-      class="card p-5"
+      class="space-y-4"
     >
       <div
-        class="flex items-start gap-3"
+        class="card p-5"
       >
-        <label
-          class="flex-shrink-0 mt-1 cursor-pointer"
+        <div
+          class="flex items-start gap-3"
         >
-          <input
-            aria-label="Session Token Ceiling"
-            checked=""
-            class="peer sr-only"
-            type="checkbox"
-          />
-          <span
-            class="block w-8 h-[18px] rounded-full bg-surface-5 border border-border-light peer-checked:bg-accent peer-checked:border-accent transition-colors relative"
+          <label
+            class="flex-shrink-0 mt-1 cursor-pointer"
           >
-            <span
-              class="absolute top-[1px] left-[1px] w-[14px] h-[14px] rounded-full bg-gray-400 peer-checked:bg-white peer-checked:translate-x-[14px] transition-transform"
+            <input
+              aria-label="Session Token Ceiling"
+              checked=""
+              class="peer sr-only"
+              type="checkbox"
             />
-          </span>
-        </label>
-        <div
-          class="flex-1 min-w-0"
-        >
-          <div
-            class="flex items-baseline gap-2 flex-wrap"
-          >
-            <h2
-              class="text-sm font-semibold text-gray-100"
-            >
-              Session Token Ceiling
-            </h2>
-            <code
-              class="text-[10.5px] text-gray-600"
-            >
-              session-token-ceiling
-            </code>
-          </div>
-          <p
-            class="text-xs text-gray-500 mt-1"
-          >
-            Flags when a single session's total token usage crosses a ceiling, before quality degrades or the context window becomes unreliable.
-          </p>
-        </div>
-        <span
-          class="text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-surface-4 text-gray-400 border border-border-light flex-shrink-0"
-        >
-          session
-        </span>
-      </div>
-      <div
-        class="mt-4 pt-4 border-t border-border"
-      >
-        <label
-          class="block text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5"
-          for="threshold-field"
-        >
-          Threshold
-        </label>
-        <div
-          class="flex items-stretch border border-border rounded-lg overflow-hidden bg-surface-3 max-w-xs"
-        >
-          <input
-            class="flex-1 min-w-0 bg-transparent border-none text-gray-100 font-mono text-sm px-2.5 py-1.5 tabular-nums focus:outline-none"
-            id="threshold-field"
-            inputmode="decimal"
-            placeholder="e.g. 500k or 1.2m"
-            type="text"
-            value="100,000,000"
-          />
-          <span
-            class="flex items-center px-2.5 text-[11px] text-gray-500 bg-surface-4 border-l border-border"
-          >
-            tokens
-          </span>
-        </div>
-        <div
-          class="flex flex-wrap gap-1.5 mt-2"
-        >
-          <button
-            class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
-            type="button"
-          >
-            500K
-          </button>
-          <button
-            class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
-            type="button"
-          >
-            1M
-          </button>
-          <button
-            class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
-            type="button"
-          >
-            5M
-          </button>
-          <button
-            class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
-            type="button"
-          >
-            10M
-          </button>
-          <button
-            class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
-            type="button"
-          >
-            50M
-          </button>
-          <button
-            class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-accent bg-accent/10 text-accent"
-            type="button"
-          >
-            100M
-          </button>
-        </div>
-      </div>
-      <div
-        class="mt-4 pt-4 border-t border-border"
-      >
-        <div
-          class="text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-2"
-        >
-          Preview — what this produces in the Feed
-        </div>
-        <div
-          class="card border-l-[3px] border-l-orange-400 p-4"
-        >
-          <div
-            class="flex items-center justify-between gap-3 mb-1.5"
-          >
             <span
-              class="text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-orange-400/15 text-orange-400"
+              class="block w-8 h-[18px] rounded-full bg-surface-5 border border-border-light peer-checked:bg-accent peer-checked:border-accent transition-colors relative"
             >
-              Warning
+              <span
+                class="absolute top-[1px] left-[1px] w-[14px] h-[14px] rounded-full bg-gray-400 peer-checked:bg-white peer-checked:translate-x-[14px] transition-transform"
+              />
+            </span>
+          </label>
+          <div
+            class="flex-1 min-w-0"
+          >
+            <div
+              class="flex items-baseline gap-2 flex-wrap"
+            >
+              <h2
+                class="text-sm font-semibold text-gray-100"
+              >
+                Session Token Ceiling
+              </h2>
+              <code
+                class="text-[10.5px] text-gray-600"
+              >
+                session-token-ceiling
+              </code>
+            </div>
+            <p
+              class="text-xs text-gray-500 mt-1"
+            >
+              Flags when a single session's total token usage crosses a ceiling, before quality degrades or the context window becomes unreliable.
+            </p>
+          </div>
+          <span
+            class="text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-surface-4 text-gray-400 border border-border-light flex-shrink-0"
+          >
+            session
+          </span>
+        </div>
+        <div
+          class="mt-4 pt-4 border-t border-border"
+        >
+          <label
+            class="block text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5"
+            for="session-token-ceiling-field"
+          >
+            Threshold
+          </label>
+          <div
+            class="flex items-stretch border border-border rounded-lg overflow-hidden bg-surface-3 max-w-xs"
+          >
+            <input
+              class="flex-1 min-w-0 bg-transparent border-none text-gray-100 font-mono text-sm px-2.5 py-1.5 tabular-nums focus:outline-none"
+              id="session-token-ceiling-field"
+              inputmode="decimal"
+              placeholder="e.g. 500k or 1.2m"
+              type="text"
+              value="100,000,000"
+            />
+            <span
+              class="flex items-center px-2.5 text-[11px] text-gray-500 bg-surface-4 border-l border-border"
+            >
+              tokens
             </span>
           </div>
-          <p
-            class="text-sm font-medium text-gray-100"
+          <div
+            class="flex flex-wrap gap-1.5 mt-2"
           >
-            Session context is becoming large (102.4M tokens)
-          </p>
-          <p
-            class="text-xs text-gray-400 mt-1"
-          >
-            Compact or clear the session before continuing — copy your current context first.
-          </p>
+            <button
+              class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
+              type="button"
+            >
+              500K
+            </button>
+            <button
+              class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
+              type="button"
+            >
+              1M
+            </button>
+            <button
+              class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
+              type="button"
+            >
+              5M
+            </button>
+            <button
+              class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
+              type="button"
+            >
+              10M
+            </button>
+            <button
+              class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-border-light bg-surface-3 text-gray-400 hover:text-gray-200 hover:border-border"
+              type="button"
+            >
+              50M
+            </button>
+            <button
+              class="text-[11px] font-mono px-2 py-1 rounded-md border transition-colors border-accent bg-accent/10 text-accent"
+              type="button"
+            >
+              100M
+            </button>
+          </div>
         </div>
-      </div>
-      <div
-        class="flex items-center gap-2 mt-4"
-      >
-        <button
-          class="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed"
-          disabled=""
-          type="button"
+        <div
+          class="mt-4 pt-4 border-t border-border"
         >
-          Save changes
-        </button>
-        <button
-          class="btn-ghost text-xs disabled:opacity-60 disabled:cursor-not-allowed"
-          type="button"
+          <div
+            class="text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-2"
+          >
+            Preview — what this produces in the Feed
+          </div>
+          <div
+            class="card border-l-[3px] border-l-orange-400 p-4"
+          >
+            <div
+              class="flex items-center justify-between gap-3 mb-1.5"
+            >
+              <span
+                class="text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-orange-400/15 text-orange-400"
+              >
+                Warning
+              </span>
+            </div>
+            <p
+              class="text-sm font-medium text-gray-100"
+            >
+              Session context is becoming large (102.4M tokens)
+            </p>
+            <p
+              class="text-xs text-gray-400 mt-1"
+            >
+              Compact or clear the session before continuing — copy your current context first.
+            </p>
+          </div>
+        </div>
+        <div
+          class="flex items-center gap-2 mt-4"
         >
-          Reset to default
-        </button>
+          <button
+            class="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled=""
+            type="button"
+          >
+            Save changes
+          </button>
+          <button
+            class="btn-ghost text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+            type="button"
+          >
+            Reset to default
+          </button>
+        </div>
       </div>
     </div>
   </div>

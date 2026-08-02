@@ -165,7 +165,7 @@ npm run dev
 sequenceDiagram
     participant Dev as Developer
     participant Server as Dev Server<br/>:4820 (watch mode)
-    participant Client as Vite Dev<br/>:5173 (HMR)
+    participant Client as Vite Dev<br/>:9200 (HMR)
     participant Browser
     
     Dev->>Server: Edit server/*.js

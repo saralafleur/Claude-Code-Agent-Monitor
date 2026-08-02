@@ -1,8 +1,10 @@
 /**
  * @file Tests for the Coach's Playbook: the engine's tick/evaluateSession
  * (session-token-ceiling firing, dedup against an already-open Observation,
- * and the enabled/disabled config gate), plus the /api/playbook/practices
- * and /api/coach/observations routes (CRUD + validation).
+ * and the enabled/disabled config gate), tick/evaluateGlobal
+ * (account-weekly-balance firing off enabled accounts' latest weekly %s),
+ * plus the /api/playbook/practices and /api/coach/observations routes
+ * (CRUD + validation).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -58,6 +60,19 @@ describe("playbook engine", () => {
       0,
       0
     );
+  }
+
+  // Seeds one enabled account plus a usage_captures row carrying its latest
+  // weekly-window pct — the shape evaluateGlobal's ctx assembly reads.
+  function seedAccount(id, label, weeklyUsedPct) {
+    dbModule.stmts.insertAccount.run(id, label, `/tmp/${id}`, 1);
+    const usageCapturesDb = require("../lib/usage-captures-db");
+    usageCapturesDb.recordCapture({
+      cwd: `/tmp/${id}`,
+      status: "ok",
+      accountId: id,
+      weekWindowPct: weeklyUsedPct,
+    });
   }
 
   it("fires session-token-ceiling once a session's summed tokens cross the threshold", () => {
@@ -144,6 +159,73 @@ describe("playbook engine", () => {
     const created = engine.tick(dbModule);
     assert.equal(created.length, 0);
   });
+
+  it("fires account-weekly-balance once two accounts' weekly-used gap crosses the threshold", () => {
+    seedAccount("acct-a", "Personal", 80);
+    seedAccount("acct-b", "Work", 40);
+
+    const created = engine.tick(dbModule);
+    const obs = created.find((o) => o.practice_id === "account-weekly-balance");
+    assert.ok(obs, "expected account-weekly-balance to fire");
+    assert.equal(obs.scope_type, "global");
+    assert.equal(obs.scope_id, null);
+    const values = JSON.parse(obs.values_json);
+    assert.equal(values.gapPct, 40);
+    assert.equal(values.lowAccountId, "acct-b");
+    assert.equal(values.highAccountId, "acct-a");
+  });
+
+  it("does not fire account-weekly-balance below the gap threshold", () => {
+    seedAccount("acct-a", "Personal", 55);
+    seedAccount("acct-b", "Work", 40);
+
+    const created = engine.tick(dbModule);
+    assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
+  });
+
+  it("does not fire account-weekly-balance with fewer than two accounts that still have headroom", () => {
+    seedAccount("acct-a", "Personal", 100);
+    seedAccount("acct-b", "Work", 40);
+
+    const created = engine.tick(dbModule);
+    assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
+  });
+
+  it("does not create a duplicate account-weekly-balance observation while one is still open", () => {
+    seedAccount("acct-a", "Personal", 80);
+    seedAccount("acct-b", "Work", 40);
+
+    const first = engine.tick(dbModule).filter((o) => o.practice_id === "account-weekly-balance");
+    assert.equal(first.length, 1);
+    const second = engine.tick(dbModule).filter((o) => o.practice_id === "account-weekly-balance");
+    assert.equal(second.length, 0);
+  });
+
+  it("respects a raised account-weekly-balance gap threshold override", () => {
+    seedAccount("acct-a", "Personal", 80);
+    seedAccount("acct-b", "Work", 40);
+    dbModule.stmts.upsertPlaybookPracticeConfig.run(
+      "account-weekly-balance",
+      1,
+      JSON.stringify({ gapThresholdPct: 50 })
+    );
+
+    const created = engine.tick(dbModule);
+    assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
+  });
+
+  it("does not evaluate a disabled account-weekly-balance practice", () => {
+    seedAccount("acct-a", "Personal", 80);
+    seedAccount("acct-b", "Work", 40);
+    dbModule.stmts.upsertPlaybookPracticeConfig.run(
+      "account-weekly-balance",
+      0,
+      JSON.stringify({ gapThresholdPct: 25 })
+    );
+
+    const created = engine.tick(dbModule);
+    assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
+  });
 });
 
 describe("playbook + coach routes", () => {
@@ -213,11 +295,18 @@ describe("playbook + coach routes", () => {
     it("returns the catalog with default config on a fresh DB", async () => {
       const res = await get("/api/playbook/practices");
       assert.equal(res.status, 200);
-      assert.equal(res.body.practices.length, 1);
-      const [practice] = res.body.practices;
-      assert.equal(practice.id, "session-token-ceiling");
-      assert.equal(practice.enabled, true);
-      assert.deepEqual(practice.config, { thresholdTokens: 100_000_000 });
+      assert.equal(res.body.practices.length, 2);
+      const byId = new Map(res.body.practices.map((p) => [p.id, p]));
+
+      const tokenCeiling = byId.get("session-token-ceiling");
+      assert.equal(tokenCeiling.enabled, true);
+      assert.deepEqual(tokenCeiling.config, { thresholdTokens: 100_000_000 });
+
+      const accountBalance = byId.get("account-weekly-balance");
+      assert.ok(accountBalance, "expected account-weekly-balance in the catalog");
+      assert.equal(accountBalance.scope, "global");
+      assert.equal(accountBalance.enabled, true);
+      assert.deepEqual(accountBalance.config, { gapThresholdPct: 25 });
     });
   });
 
@@ -262,6 +351,19 @@ describe("playbook + coach routes", () => {
       });
       assert.equal(res.status, 400);
       assert.equal(res.body.error.code, "INVALID_CONFIG");
+    });
+
+    it("persists an account-weekly-balance gap-threshold override", async () => {
+      const putRes = await put("/api/playbook/practices/account-weekly-balance/config", {
+        config: { gapThresholdPct: 30 },
+      });
+      assert.equal(putRes.status, 200);
+      assert.deepEqual(putRes.body.config, { gapThresholdPct: 30 });
+
+      // restore for later tests
+      await put("/api/playbook/practices/account-weekly-balance/config", {
+        config: { gapThresholdPct: 25 },
+      });
     });
   });
 

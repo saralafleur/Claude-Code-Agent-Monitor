@@ -87,7 +87,7 @@ const schemas = {
         type: "string",
         enum: ["session", "project", "global"],
         description:
-          'What one Observation from this practice is scoped to. v1\'s engine only evaluates `"session"`-scoped practices.',
+          'What one Observation from this practice is scoped to. The engine evaluates `"session"`-scoped practices per active session and `"global"`-scoped practices once per tick against dashboard-wide state (e.g. every enabled account); `"project"`-scoped evaluation isn\'t built yet.',
         example: "session",
       },
       kind: {
@@ -261,7 +261,7 @@ const paths = {
       tags: ["Playbook"],
       summary: "List Playbook practices",
       description:
-        "Returns every catalog practice merged with its stored config (or the catalog defaults, if a practice has never been configured). v1 ships exactly one practice, `session-token-ceiling` (category `context-management`, scope `session`, kind `risk`) — a threshold on a session's total token usage. No authentication — this is a local-first dashboard.",
+        "Returns every catalog practice merged with its stored config (or the catalog defaults, if a practice has never been configured). Ships two practices: `session-token-ceiling` (category `context-management`, scope `session`, kind `risk`) — a threshold on a session's total token usage — and `account-weekly-balance` (category `account-management`, scope `global`, kind `info`) — fires when two or more enabled accounts still have weekly-quota headroom and the gap between the lowest- and highest-used of them crosses a configurable percentage-point threshold, recommending a switch to the lower-used account. No authentication — this is a local-first dashboard.",
       operationId: "listPlaybookPractices",
       responses: {
         200: {
@@ -287,6 +287,23 @@ const paths = {
                     ],
                     enabled: true,
                     config: { thresholdTokens: 100000000 },
+                  },
+                  {
+                    id: "account-weekly-balance",
+                    category: "account-management",
+                    scope: "global",
+                    kind: "info",
+                    defaultSeverity: "info",
+                    fields: [
+                      {
+                        key: "gapThresholdPct",
+                        type: "number",
+                        default: 25,
+                        min: 1,
+                      },
+                    ],
+                    enabled: true,
+                    config: { gapThresholdPct: 25 },
                   },
                 ],
               },

@@ -172,7 +172,7 @@ class DashboardWebviewProvider {
   async fetchAll() {
     if (this._fetching) return this._fetching;
     this._fetching = (async () => {
-      const ports = [4820, 5173];
+      const ports = [4820, 9200];
       let foundActive = false;
 
       for (const p of ports) {
@@ -717,7 +717,7 @@ try {
     $('pill-text').textContent = isOn ? 'Online' : 'Offline';
     $('hero-sub').textContent = isOn
       ? ('localhost:' + (s.port || '4820') + ' · live')
-      : 'No backend detected on 4820 / 5173';
+      : 'No backend detected on 4820 / 9200';
     if (isOn) renderOnline(s); else renderOffline();
   };
 

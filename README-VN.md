@@ -376,7 +376,7 @@ npm run build && npm start
 
 | Cách thức        | URL                     |
 | ----------- | ----------------------- |
-| Phát triển | `http://localhost:5173` |
+| Phát triển | `http://localhost:9200` |
 | Sản xuất  | `http://localhost:4820` |
 
 ### 5. Tùy chọn: Xây dựng và chạy máy chủ MCP cục bộ
@@ -1922,7 +1922,7 @@ Chúng tôi hỗ trợ cả hai chế độ triển khai phát triển và sản
 graph LR
     subgraph dev["Development — 2 processes"]
         D_CMD["npm run dev"] --> D_SRV["Express :4820<br/>node --watch"]
-        D_CMD --> D_VITE["Vite :5173<br/>HMR"]
+        D_CMD --> D_VITE["Vite :9200<br/>HMR"]
         D_BROWSER["Browser"] --> D_VITE
         D_VITE -->|"proxy /api + /ws"| D_SRV
     end

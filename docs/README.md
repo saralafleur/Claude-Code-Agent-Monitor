@@ -66,7 +66,7 @@ graph LR
     A[New to Project] --> B[Read SETUP.md]
     B --> C[Install Dependencies]
     C --> D[Run npm run dev]
-    D --> E[Open localhost:5173]
+    D --> E[Open localhost:9200]
     
     style A fill:#3B82F6
     style E fill:#10B981
@@ -77,7 +77,7 @@ graph LR
 1. Read [SETUP.md](../SETUP.md)
 2. Run `npm run setup`
 3. Run `npm run dev`
-4. Open browser to `http://localhost:5173`
+4. Open browser to `http://localhost:9200`
 
 ---
 

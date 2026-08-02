@@ -1096,7 +1096,7 @@ Commit the updated `.snap` file alongside the change.
 npm run dev
 ```
 
-Starts Vite dev server with HMR at `http://localhost:5173`
+Starts Vite dev server with HMR at `http://localhost:9200`
 
 ```mermaid
 graph LR

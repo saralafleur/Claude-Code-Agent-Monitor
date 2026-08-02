@@ -53,7 +53,7 @@ export default defineConfig({
     __DASHBOARD_PORT__: JSON.stringify(DASHBOARD_PORT),
   },
   server: {
-    port: 5173,
+    port: 9200,
     proxy: {
       "/api": {
         target: `http://127.0.0.1:${DASHBOARD_PORT}`,

@@ -80,7 +80,7 @@ describe("CORS", () => {
     assert.equal(await allowed(undefined), true);
   });
   it("allows loopback origins", async () => {
-    assert.equal(await allowed("http://localhost:5173"), true);
+    assert.equal(await allowed("http://localhost:9200"), true);
     assert.equal(await allowed("http://127.0.0.1:4820"), true);
   });
   it("refuses cross-origin pages", async () => {

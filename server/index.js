@@ -259,7 +259,7 @@ function startServer(app, port) {
         );
       }
       if (!isProduction) {
-        console.log(`Client dev server expected at http://localhost:5173`);
+        console.log(`Client dev server expected at http://localhost:9200`);
       }
       resolve(server);
     });

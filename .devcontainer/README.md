@@ -28,13 +28,13 @@ dependencies (`npm run setup`) and builds the MCP server (`npm run mcp:install`,
 | Python           | `python3` / `python` for `statusline.py` and helper scripts         |
 | sqlite3 CLI      | inspect the dashboard DB during development                         |
 | Features         | GitHub CLI, Docker-in-Docker (build/run the project's own Dockerfile) |
-| Forwarded ports  | `4820` (server API + WebSocket), `5173` (Vite client)               |
+| Forwarded ports  | `4820` (server API + WebSocket), `9200` (Vite client)               |
 | Editor           | ESLint + Prettier (format on save), Vitest, Docker, YAML, Tailwind  |
 
 ## Everyday commands
 
 ```bash
-npm run dev            # server on :4820 + Vite client on :5173
+npm run dev            # server on :4820 + Vite client on :9200
 npm start              # production-style server (serves client/dist)
 npm run test:server    # node --test
 npm run test:client    # vitest

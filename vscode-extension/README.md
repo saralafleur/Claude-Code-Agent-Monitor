@@ -48,7 +48,7 @@ npm run dev
 
 ### 3. Usage
 - Click the **Radar/Dashboard icon** in the Activity Bar.
-- The extension automatically detects your local server on ports **5173** (dev) or **4820** (prod).
+- The extension automatically detects your local server on ports **9200** (dev) or **4820** (prod).
 - Use the **Refresh** button in the sidebar to manually force an update.
 
 ---

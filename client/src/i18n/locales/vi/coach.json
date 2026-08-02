@@ -54,6 +54,16 @@
       "unit": "tokens",
       "message": "Ngữ cảnh của phiên đang trở nên lớn ({{tokens}} tokens)",
       "recommendation": "Hãy dùng /compact hoặc /clear trước khi tiếp tục — sao chép lại ngữ cảnh hiện tại của bạn trước."
+    },
+    "accountWeeklyBalance": {
+      "name": "Luân phiên tài khoản",
+      "description": "Cảnh báo khi hai tài khoản trở lên có mức sử dụng hằng tuần lệch nhau đáng kể, để bạn có thể chuyển công việc sang tài khoản còn nhiều hạn mức hơn thay vì dùng cạn một tài khoản duy nhất.",
+      "fieldLabel": "Ngưỡng chênh lệch",
+      "unit": "%",
+      "previewLowLabel": "Công việc",
+      "previewHighLabel": "Cá nhân",
+      "message": "{{lowLabel}} còn nhiều hạn mức tuần hơn {{highLabel}} {{gapPct}}% ({{lowPct}}% so với {{highPct}}% đã dùng)",
+      "recommendation": "Hãy chuyển công việc hiện tại sang {{lowLabel}} — luân phiên giúp luôn có thể đổi phiên làm việc và bảo toàn hạn mức tuần của cả hai tài khoản."
     }
   }
 }

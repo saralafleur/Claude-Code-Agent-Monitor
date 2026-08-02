@@ -27,7 +27,7 @@ The Agent Monitor has these components:
 - **WebSocket** (`server/websocket.js`): Real-time event broadcast
 - **Hook Handler** (`scripts/hook-handler.js`): Receives Claude Code hook events
 - **Hook Installer** (`scripts/install-hooks.js`): Configures hooks in `~/.claude/settings.json`
-- **Client** (`client/`): React + Vite SPA on port 5173 (dev) or served by Express (prod)
+- **Client** (`client/`): React + Vite SPA on port 9200 (dev) or served by Express (prod)
 - **MCP Server** (`mcp/`): Model Context Protocol integration
 
 ## Investigation Process

@@ -5,7 +5,7 @@
   // open the repo in a GitHub Codespace. It changes nothing for host-based dev.
   //
   // Covers the full project: the Express server (4820), the React/Vite client
-  // (5173), the MCP server, and the VS Code extension. The native `better-sqlite3`
+  // (9200), the MCP server, and the VS Code extension. The native `better-sqlite3`
   // addon builds here (build-essential + python3 are installed in the Dockerfile).
   //
   // NOTE (issue #193): Claude Code hooks are a HOST-side concern. This container
@@ -28,13 +28,13 @@
 
   // Server (API + WebSocket) and the Vite client dev server. VS Code forwards
   // these from the container's localhost, so the secure loopback bind is fine.
-  "forwardPorts": [4820, 5173],
+  "forwardPorts": [4820, 9200],
   "portsAttributes": {
     "4820": {
       "label": "Dashboard server (API + WebSocket)",
       "onAutoForward": "notify"
     },
-    "5173": {
+    "9200": {
       "label": "Vite dev client",
       "onAutoForward": "openBrowser"
     }
@@ -48,7 +48,7 @@
   "remoteUser": "node",
 
   // Dev defaults. NODE_ENV=development so `npm run dev` runs API-only with the
-  // Vite client on 5173 (production mode would serve the prebuilt client/dist).
+  // Vite client on 9200 (production mode would serve the prebuilt client/dist).
   "remoteEnv": {
     "NODE_ENV": "development"
   },

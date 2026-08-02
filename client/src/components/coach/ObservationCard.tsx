@@ -22,18 +22,31 @@ import { useTranslation } from "react-i18next";
 import { fmt, timeAgo } from "../../lib/format";
 
 /** Maps a practice id to its i18n key segment (lower camelCase, per this
- *  repo's key-naming convention) — extend when a second practice ships. */
+ *  repo's key-naming convention) — extend when a new practice ships. */
 const PRACTICE_I18N_KEY: Record<string, string> = {
   "session-token-ceiling": "sessionTokenCeiling",
+  "account-weekly-balance": "accountWeeklyBalance",
 };
 
 /** Formats a practice's raw `values` into the params its message/
  *  recommendation i18n templates interpolate — extend alongside the map above. */
-function messageParams(practiceId: string, values: Record<string, number>): Record<string, string> {
+function messageParams(
+  practiceId: string,
+  values: Record<string, number | string>
+): Record<string, string> {
   if (practiceId === "session-token-ceiling") {
     return {
-      tokens: fmt(values.totalTokens ?? 0),
-      threshold: fmt(values.thresholdTokens ?? 0),
+      tokens: fmt(Number(values.totalTokens ?? 0)),
+      threshold: fmt(Number(values.thresholdTokens ?? 0)),
+    };
+  }
+  if (practiceId === "account-weekly-balance") {
+    return {
+      lowLabel: String(values.lowLabel ?? ""),
+      lowPct: String(values.lowPct ?? 0),
+      highLabel: String(values.highLabel ?? ""),
+      highPct: String(values.highPct ?? 0),
+      gapPct: String(values.gapPct ?? 0),
     };
   }
   return {};
@@ -42,7 +55,7 @@ function messageParams(practiceId: string, values: Record<string, number>): Reco
 export interface ObservationCardProps {
   practiceId: string;
   kind: "risk" | "info" | "good";
-  values: Record<string, number>;
+  values: Record<string, number | string>;
   scopeType?: "session" | "project" | "global";
   scopeId?: string | null;
   /** ISO timestamp; omit for a live-preview card (no time shown). */
@@ -82,7 +95,13 @@ export function ObservationCard({
         ? "bg-emerald-400/15 text-emerald-400"
         : "bg-sky-400/15 text-sky-400";
 
-  const showActions = scopeType === "session" && !!scopeId && detectedAt !== undefined;
+  // A real (non-preview) card always gets its actions row — Dismiss must
+  // reach every scope, not just session, or a global-scoped observation
+  // (e.g. account-weekly-balance) could never be cleared from the Feed.
+  // "Open session" is additionally gated to a session-scoped observation
+  // with a real scopeId, since there's nothing to open otherwise.
+  const showActions = detectedAt !== undefined;
+  const showOpenSession = scopeType === "session" && !!scopeId;
 
   return (
     <div className={`card border-l-[3px] ${borderClass} p-4`}>
@@ -98,12 +117,14 @@ export function ObservationCard({
       <p className="text-xs text-gray-400 mt-1">{recommendation}</p>
       {showActions && (
         <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <Link
-            to={`/sessions/${scopeId}`}
-            className="text-[11px] font-medium bg-surface-3 border border-border-light text-gray-300 hover:bg-surface-4 hover:text-gray-100 px-2.5 py-1 rounded-md transition-colors"
-          >
-            {t("actions.openSession")}
-          </Link>
+          {showOpenSession && (
+            <Link
+              to={`/sessions/${scopeId}`}
+              className="text-[11px] font-medium bg-surface-3 border border-border-light text-gray-300 hover:bg-surface-4 hover:text-gray-100 px-2.5 py-1 rounded-md transition-colors"
+            >
+              {t("actions.openSession")}
+            </Link>
+          )}
           <button
             type="button"
             onClick={() => {

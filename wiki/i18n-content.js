@@ -784,8 +784,8 @@ window.__WIKI_CONTENT_I18N = {
       "<b>Event Frequency</b>：总事件数、每日会话数和子代理生成速率。",
     "Renders the full React application within a native webview tab. Supports <b>Deep Linking</b>: one-click jump from the sidebar directly to specific views like the <i>Kanban Board</i>, <i>Analytics Hub</i>, or your <i>Last 10 Sessions</i>.":
       "在原生 webview 标签页中渲染完整的 React 应用。支持 <b>Deep Linking</b>：从侧边栏一键直达特定视图，例如 <i>Kanban Board</i>、<i>Analytics Hub</i> 或你的 <i>Last 10 Sessions</i>。",
-    "Seamlessly scans ports <code>5173</code> (Vite Dev) and <code>4820</code> (Production) on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> modes in the sidebar as you start or stop your local server.":
-      "无缝扫描 localhost 上的端口 <code>5173</code>（Vite Dev）和 <code>4820</code>（Production）。当你启动或停止本地服务器时，会在侧边栏中自动切换 <b>Online</b> 和 <b>Offline</b> 模式。",
+    "Seamlessly scans ports <code>9200</code> (Vite Dev) and <code>4820</code> (Production) on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> modes in the sidebar as you start or stop your local server.":
+      "无缝扫描 localhost 上的端口 <code>9200</code>（Vite Dev）和 <code>4820</code>（Production）。当你启动或停止本地服务器时，会在侧边栏中自动切换 <b>Online</b> 和 <b>Offline</b> 模式。",
     "<strong>Zero-Config Setup</strong>": "<strong>零配置安装</strong>",
     "The extension is designed to be plug-and-play. Once your server is running, the extension automatically discovers the API and begins streaming telemetry — no manual URL configuration required.":
       "该扩展设计为即插即用。一旦服务器运行，扩展会自动发现 API 并开始流式传输遥测数据 — 无需手动配置 URL。",
@@ -2163,8 +2163,8 @@ window.__WIKI_CONTENT_I18N = {
       "<b>Event Frequency</b>: Tổng số sự kiện, các phiên hằng ngày và tốc độ sinh ra subagent.",
     "Renders the full React application within a native webview tab. Supports <b>Deep Linking</b>: one-click jump from the sidebar directly to specific views like the <i>Kanban Board</i>, <i>Analytics Hub</i>, or your <i>Last 10 Sessions</i>.":
       "Kết xuất toàn bộ ứng dụng React trong một tab webview gốc. Hỗ trợ <b>Deep Linking</b>: nhảy một cú nhấp từ thanh bên trực tiếp đến các chế độ xem cụ thể như <i>Kanban Board</i>, <i>Analytics Hub</i>, hoặc <i>Last 10 Sessions</i> của bạn.",
-    "Seamlessly scans ports <code>5173</code> (Vite Dev) and <code>4820</code> (Production) on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> modes in the sidebar as you start or stop your local server.":
-      "Quét liền mạch các cổng <code>5173</code> (Vite Dev) và <code>4820</code> (Production) trên localhost. Tự động chuyển đổi giữa chế độ <b>Online</b> và <b>Offline</b> trong thanh bên khi bạn khởi động hoặc dừng máy chủ cục bộ của mình.",
+    "Seamlessly scans ports <code>9200</code> (Vite Dev) and <code>4820</code> (Production) on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> modes in the sidebar as you start or stop your local server.":
+      "Quét liền mạch các cổng <code>9200</code> (Vite Dev) và <code>4820</code> (Production) trên localhost. Tự động chuyển đổi giữa chế độ <b>Online</b> và <b>Offline</b> trong thanh bên khi bạn khởi động hoặc dừng máy chủ cục bộ của mình.",
     "<strong>Zero-Config Setup</strong>": "<strong>Thiết lập không cần cấu hình</strong>",
     "The extension is designed to be plug-and-play. Once your server is running, the extension automatically discovers the API and begins streaming telemetry — no manual URL configuration required.":
       "Tiện ích mở rộng được thiết kế để cắm-và-chạy. Khi máy chủ của bạn đang chạy, tiện ích sẽ tự động phát hiện API và bắt đầu truyền phát dữ liệu đo từ xa — không cần cấu hình URL thủ công.",
@@ -3545,8 +3545,8 @@ window.__WIKI_CONTENT_I18N = {
       "<b>이벤트 빈도</b>: 총 이벤트 수, 일별 세션 수, 서브에이전트 생성 비율입니다.",
     "Renders the full React application within a native webview tab. Supports <b>Deep Linking</b>: one-click jump from the sidebar directly to specific views like the <i>Kanban Board</i>, <i>Analytics Hub</i>, or your <i>Last 10 Sessions</i>.":
       "전체 React 애플리케이션을 네이티브 웹뷰 탭 안에 렌더링합니다. <b>딥 링크</b>를 지원하여 사이드바에서 <i>Kanban Board</i>, <i>Analytics Hub</i>, <i>Last 10 Sessions</i>와 같은 특정 화면으로 한 번의 클릭으로 바로 이동할 수 있습니다.",
-    "Seamlessly scans ports <code>5173</code> (Vite Dev) and <code>4820</code> (Production) on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> modes in the sidebar as you start or stop your local server.":
-      "localhost의 <code>5173</code>(Vite Dev) 포트와 <code>4820</code>(Production) 포트를 매끄럽게 스캔합니다. 로컬 서버를 시작하거나 중지하면 사이드바에서 <b>Online</b> 모드와 <b>Offline</b> 모드가 자동으로 전환됩니다.",
+    "Seamlessly scans ports <code>9200</code> (Vite Dev) and <code>4820</code> (Production) on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> modes in the sidebar as you start or stop your local server.":
+      "localhost의 <code>9200</code>(Vite Dev) 포트와 <code>4820</code>(Production) 포트를 매끄럽게 스캔합니다. 로컬 서버를 시작하거나 중지하면 사이드바에서 <b>Online</b> 모드와 <b>Offline</b> 모드가 자동으로 전환됩니다.",
     "<strong>Zero-Config Setup</strong>": "<strong>제로 설정 구성</strong>",
     "The extension is designed to be plug-and-play. Once your server is running, the extension automatically discovers the API and begins streaming telemetry — no manual URL configuration required.":
       "이 확장 프로그램은 플러그 앤 플레이 방식으로 설계되었습니다. 서버가 실행되면 확장 프로그램이 API를 자동으로 감지하고 텔레메트리 스트리밍을 시작하므로, URL을 수동으로 설정할 필요가 없습니다.",

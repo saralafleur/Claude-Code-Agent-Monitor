@@ -57,7 +57,7 @@ npm run setup
 npm run dev
 ```
 
-The Express server runs on `http://localhost:4820` and the Vite dev server on `http://localhost:5173`.
+The Express server runs on `http://localhost:4820` and the Vite dev server on `http://localhost:9200`.
 
 ---
 

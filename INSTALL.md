@@ -58,9 +58,9 @@ This starts two processes concurrently:
 | Process | URL | Description |
 |---|---|---|
 | Express server | http://localhost:4820 | API, WebSocket, SQLite |
-| Vite dev server | http://localhost:5173 | React frontend with HMR |
+| Vite dev server | http://localhost:9200 | React frontend with HMR |
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:9200** in your browser.
 
 > [!TIP]
 > When you run the dashboard directly on the host with `npm run dev` or `npm start`, the server automatically writes the Claude Code hook configuration to `~/.claude/settings.json`. If you run the dashboard in Docker or Podman, install hooks from the host with `npm run install-hooks` after the container is up.
@@ -506,7 +506,7 @@ npm run setup
 
 ### Server starts but client shows a blank page
 
-The Vite dev server and Express server run on different ports. Make sure both are running (`npm run dev` starts both). Open **http://localhost:5173**, not `http://localhost:4820`, during development.
+The Vite dev server and Express server run on different ports. Make sure both are running (`npm run dev` starts both). Open **http://localhost:9200**, not `http://localhost:4820`, during development.
 
 ### No sessions appearing after starting Claude Code
 
@@ -531,4 +531,4 @@ See [SETUP.md — Troubleshooting](./SETUP.md#troubleshooting) for detailed hook
 | Service | Default | Override |
 |---|---|---|
 | Dashboard server | `4820` | `DASHBOARD_PORT=xxxx npm run dev` |
-| Client dev server | `5173` | Edit `client/vite.config.ts` |
+| Client dev server | `9200` | Edit `client/vite.config.ts` |

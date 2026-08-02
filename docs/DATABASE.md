@@ -650,7 +650,7 @@ CREATE INDEX IF NOT EXISTS idx_coach_observations_open
 | `playbook_practice_config.practice_id` | TEXT | NO | Primary key; matches a catalog practice's `id` (e.g. `session-token-ceiling`) |
 | `playbook_practice_config.enabled` | INTEGER | NO | `0`/`1` — a disabled practice is never evaluated by the engine |
 | `playbook_practice_config.config` | TEXT | NO | JSON blob of `{ fieldKey: number }` overrides, validated against that practice's own `fields` schema at the route layer, not here |
-| `coach_observations.scope_type` / `scope_id` | TEXT | scope_id: YES | What the practice fired for — `session`/`project`/`global` and the matching id (`session_id` in v1; `scope_id` is `NULL` for a future global-scoped practice) |
+| `coach_observations.scope_type` / `scope_id` | TEXT | scope_id: YES | What the practice fired for — `session`/`project`/`global` and the matching id (`session_id` for a session-scoped practice; `scope_id` is `NULL` for a global-scoped practice, e.g. `account-weekly-balance`, since it isn't about any one session) |
 | `coach_observations.kind` | TEXT | NO | `risk`/`info`/`good` — separate from `severity` so the Coach can recognize positive patterns, not just flag problems |
 | `coach_observations.values_json` | TEXT | NO | JSON payload a client-side i18n template (keyed by `practice_id`) interpolates into display copy — this app has no server-side i18n, so no English text lives on the row |
 | `coach_observations.status` | TEXT | NO | `open`/`acknowledged`/`dismissed`/`resolved`; the `idx_coach_observations_open` index is the engine's dedup lookup — a practice+scope with an already-`open` row never re-fires |

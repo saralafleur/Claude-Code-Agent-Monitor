@@ -26,6 +26,17 @@ const PRACTICE = {
   config: { thresholdTokens: 100_000_000 },
 };
 
+const ACCOUNT_BALANCE_PRACTICE = {
+  id: "account-weekly-balance",
+  category: "account-management",
+  scope: "global" as const,
+  kind: "info" as const,
+  defaultSeverity: "info",
+  fields: [{ key: "gapThresholdPct", type: "number" as const, default: 25, min: 1 }],
+  enabled: true,
+  config: { gapThresholdPct: 25 },
+};
+
 const listPractices = vi.fn();
 const updatePracticeConfig = vi.fn();
 
@@ -132,5 +143,53 @@ describe("PlaybookPage", () => {
       });
     });
     expect(await screen.findByText("Saved")).toBeInTheDocument();
+  });
+
+  it("renders one card per catalog practice", async () => {
+    listPractices.mockResolvedValue({ practices: [PRACTICE, ACCOUNT_BALANCE_PRACTICE] });
+    renderPage();
+    expect(await screen.findByText("Session Token Ceiling")).toBeInTheDocument();
+    expect(await screen.findByText("Account Rotation")).toBeInTheDocument();
+  });
+
+  it("renders account-weekly-balance's current gap threshold and live preview", async () => {
+    listPractices.mockResolvedValue({ practices: [ACCOUNT_BALANCE_PRACTICE] });
+    renderPage();
+    expect(await screen.findByDisplayValue("25")).toBeInTheDocument();
+    expect(await screen.findByText(/25% more weekly quota left/)).toBeInTheDocument();
+  });
+
+  it("updates account-weekly-balance's live preview as the gap field changes", async () => {
+    listPractices.mockResolvedValue({ practices: [ACCOUNT_BALANCE_PRACTICE] });
+    const user = userEvent.setup();
+    renderPage();
+    const input = await screen.findByDisplayValue("25");
+    await user.clear(input);
+    await user.type(input, "40");
+    await waitFor(() => {
+      expect(screen.getByText(/40% more weekly quota left/)).toBeInTheDocument();
+    });
+  });
+
+  it("saves an account-weekly-balance gap threshold change via api.playbook.updatePracticeConfig", async () => {
+    listPractices.mockResolvedValue({ practices: [ACCOUNT_BALANCE_PRACTICE] });
+    updatePracticeConfig.mockResolvedValue({
+      ...ACCOUNT_BALANCE_PRACTICE,
+      config: { gapThresholdPct: 30 },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const input = await screen.findByDisplayValue("25");
+    await user.clear(input);
+    await user.type(input, "30");
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(updatePracticeConfig).toHaveBeenCalledWith("account-weekly-balance", {
+        enabled: true,
+        config: { gapThresholdPct: 30 },
+      });
+    });
   });
 });

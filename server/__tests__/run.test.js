@@ -122,7 +122,7 @@ describe("/api/run", () => {
 
   it("allows localhost Origin", async () => {
     const { status } = await fetchJson("/api/run", {
-      headers: { Origin: "http://localhost:5173" },
+      headers: { Origin: "http://localhost:9200" },
     });
     assert.equal(status, 200);
   });

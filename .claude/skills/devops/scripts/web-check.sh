@@ -51,14 +51,14 @@ fi
 
 # --- Running state (dev server started via /devops web-up). Two ports
 # --- matter: Express (API/WS, 4820 by default) and Vite (the actual
-# --- frontend, 5173 by default) -- in dev mode server/index.js serves no
+# --- frontend, 9200 by default) -- in dev mode server/index.js serves no
 # --- frontend routes at all, so the browsable URL is Vite's port, not
 # --- Express's. See references/web-lifecycle.md's `up` section. ---
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
   pid="$(cat "$PID_FILE")"
   port="$(grep -oE 'listen on :[0-9]+|using [0-9]+ instead' "$LOG_FILE" 2>/dev/null | tail -1 | grep -oE '[0-9]+')"
   vite_port="$(grep -oE 'Local:\s+http://localhost:[0-9]+' "$LOG_FILE" 2>/dev/null | tail -1 | grep -oE '[0-9]+')"
-  line "web-running" "info" "running, PID $pid, frontend http://localhost:${vite_port:-5173} (API :${port:-4820})"
+  line "web-running" "info" "running, PID $pid, frontend http://localhost:${vite_port:-9200} (API :${port:-4820})"
 else
   line "web-running" "info" "not running"
 fi

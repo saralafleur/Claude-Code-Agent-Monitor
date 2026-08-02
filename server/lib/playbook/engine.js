@@ -6,10 +6,11 @@
  * an env-var kill switch) — deliberately, so anyone who already understands
  * that scheduler understands this one.
  *
- * v1 only evaluates session-scoped practices against currently-active
- * sessions; project/global-scoped evaluation isn't built yet (the schema
- * supports it — `coach_observations.scope_type` — for when a practice
- * needs it).
+ * Evaluates session-scoped practices against currently-active sessions, plus
+ * global-scoped practices once per tick (see `evaluateGlobal`) against
+ * dashboard-wide state (e.g. every enabled account's latest usage). Project
+ * scope isn't built yet — the schema supports it
+ * (`coach_observations.scope_type`) for whenever a practice needs it.
  *
  * Env knobs:
  *   DASHBOARD_PLAYBOOK_MODE  on (default) | off
@@ -102,7 +103,55 @@ function evaluateSession(dbModule, sessionId, enabledPractices) {
   return created;
 }
 
-/** One tick: enabled practices × active sessions (capped), broadcasting each new Observation. */
+/** Every enabled account's latest known weekly-quota-used percentage, for a
+ *  global-scoped practice's ctx — same "most recent capture" lookup
+ *  `routes/accounts.js`'s `serialize()` uses, just trimmed to the one field
+ *  account-weekly-balance needs. */
+function listAccountsWeeklyCtx(dbModule) {
+  const usageCapturesDb = require("../usage-captures-db");
+  return dbModule.stmts.listAccounts
+    .all()
+    .filter((a) => a.enabled)
+    .map((a) => {
+      const latest = usageCapturesDb.listCaptures({ accountId: a.id, limit: 1 })[0] || null;
+      return { id: a.id, label: a.label, weeklyUsedPct: latest?.week_window_pct ?? null };
+    });
+}
+
+/**
+ * Evaluates every enabled global-scoped practice once per tick (not per
+ * session) against dashboard-wide ctx, inserting (and returning) a new
+ * Observation for each that fires and has no already-`open` Observation for
+ * that exact practice — same dedup as `evaluateSession`, keyed with a null
+ * `scope_id` since a global observation isn't about any one session/project.
+ */
+function evaluateGlobal(dbModule, enabledPractices) {
+  const { stmts } = dbModule;
+  const created = [];
+  const globalPractices = enabledPractices.filter((p) => p.practice.scope === "global");
+  if (globalPractices.length === 0) return created;
+
+  const ctx = { accounts: listAccountsWeeklyCtx(dbModule) };
+
+  for (const { practice, config } of globalPractices) {
+    const result = practice.detect(ctx, config);
+    if (!result) continue;
+    const existing = stmts.getOpenCoachObservation.get(practice.id, "global", null, null);
+    if (existing) continue;
+    const info = stmts.insertCoachObservation.run(
+      practice.id,
+      "global",
+      null,
+      practice.kind,
+      practice.defaultSeverity,
+      JSON.stringify(result.values)
+    );
+    created.push(stmts.getCoachObservation.get(info.lastInsertRowid));
+  }
+  return created;
+}
+
+/** One tick: enabled practices × active sessions (capped) + global-scoped practices once, broadcasting each new Observation. */
 function tick(dbModule, opts = {}) {
   const enabledPractices = resolveEnabledPractices(dbModule);
   if (enabledPractices.length === 0) return [];
@@ -116,6 +165,11 @@ function tick(dbModule, opts = {}) {
     } catch {
       /* per-session fail-safe: one bad session must not stop the tick */
     }
+  }
+  try {
+    created.push(...evaluateGlobal(dbModule, enabledPractices));
+  } catch {
+    /* one bad global evaluation must not stop the tick */
   }
   if (opts.broadcast) {
     for (const observation of created) {
@@ -158,6 +212,7 @@ module.exports = {
   startPlaybookEngine,
   tick,
   evaluateSession,
+  evaluateGlobal,
   resolveEnabledPractices,
   sumSessionTokens,
 };

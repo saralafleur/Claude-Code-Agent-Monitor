@@ -54,6 +54,16 @@
       "unit": "tokens",
       "message": "会话上下文正在变大（{{tokens}} tokens）",
       "recommendation": "建议在继续之前先执行 /compact 或 /clear——请先复制保存当前上下文。"
+    },
+    "accountWeeklyBalance": {
+      "name": "账户轮换",
+      "description": "当两个或更多已连接账户的每周用量差距过大时发出提示，以便将工作切换到额度更充裕的账户，而不是单独耗尽一个账户。",
+      "fieldLabel": "差距阈值",
+      "unit": "%",
+      "previewLowLabel": "工作账户",
+      "previewHighLabel": "个人账户",
+      "message": "{{lowLabel}} 的每周额度比 {{highLabel}} 多剩 {{gapPct}}%（已用 {{lowPct}}% 对比 {{highPct}}%）",
+      "recommendation": "将当前工作切换到 {{lowLabel}}——轮换使用可以随时切换会话窗口，并保护两个账户的每周额度。"
     }
   }
 }

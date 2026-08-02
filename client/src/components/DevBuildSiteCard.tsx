@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 
 /** Fixed in `client/vite.config.ts`'s `server.port` - the dev server's own
  *  conventional port, unlike the backend port which can shift. */
-const DEV_PORT = 5173;
+const DEV_PORT = 9200;
 
 /** Full URL for the other site, same path/query, on the port it conventionally
  *  runs on - `__DASHBOARD_PORT__` for the built site (backend origin baked in

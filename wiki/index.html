@@ -2094,13 +2094,13 @@ npm run setup
 npm run install-hooks
 
 # Optional: develop in a preconfigured VS Code Dev Container / Codespace
-# (Node 22 + native build tools + Python, ports 4820/5173). Opt-in only —
+# (Node 22 + native build tools + Python, ports 4820/9200). Opt-in only —
 # host-based dev is unaffected. See .devcontainer/.
 
 # 3. Start in development mode
 npm run dev
 # → Express server on http://localhost:4820
-# → Vite dev server on http://localhost:5173
+# → Vite dev server on http://localhost:9200
 
 # 4. (Optional) Build and run the local MCP server
 npm run mcp:install
@@ -2110,7 +2110,7 @@ npm run mcp:start:http         # HTTP + SSE server on port 8819
 npm run mcp:start:repl         # interactive CLI with tab completion
 
 # 5. Open the dashboard
-# http://localhost:5173  (dev)
+# http://localhost:9200  (dev)
 # http://localhost:4820  (prod after npm run build && npm start)</code></pre>
 
           <h3>Alternative: Docker / Podman</h3>
@@ -5067,7 +5067,7 @@ ccam-export all --output backup.json</code></pre>
                         <div style="position: absolute; left: -31px; top: 4px; width: 13px; height: 13px; background: var(--bg-card); border: 2px solid var(--accent); border-radius: 50%;"></div>
                         <div class="t-label" style="font-weight: 600; color: #fff; font-size: 16px; margin-bottom: 8px;">Smart Auto-Detection & Connection</div>
                         <p style="font-size: 14px; color: var(--text-muted); margin: 0; line-height: 1.6;">
-                            Seamlessly scans ports <code>5173</code> (Vite Dev) and <code>4820</code> (Production) 
+                            Seamlessly scans ports <code>9200</code> (Vite Dev) and <code>4820</code> (Production) 
                             on localhost. Automatically toggles between <b>Online</b> and <b>Offline</b> 
                             modes in the sidebar as you start or stop your local server.
                         </p>
@@ -6637,7 +6637,7 @@ xattr -cr "/Applications/Claude Code Monitor.app"</code></pre>
                 subgraph dev["Development — 2 processes"]
                   D_CMD["npm run dev\n(concurrently)"]
                   D_SRV["node --watch server/index.js\nport 4820 — auto-restart"]
-                  D_VITE["vite dev server\nport 5173 — HMR"]
+                  D_VITE["vite dev server\nport 9200 — HMR"]
                   D_BROWSER["Browser"]
                   D_CMD --> D_SRV
                   D_CMD --> D_VITE
@@ -6676,7 +6676,7 @@ xattr -cr "/Applications/Claude Code Monitor.app"</code></pre>
                 </tr>
                 <tr>
                   <td>Client URL</td>
-                  <td><code>http://localhost:5173</code></td>
+                  <td><code>http://localhost:9200</code></td>
                   <td><code>http://localhost:4820</code></td>
                 </tr>
                 <tr>
@@ -7284,7 +7284,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=85" defer></script>
+    <script src="i18n-content.js?v=86" defer></script>
     <script src="script.js?v=34" defer></script>
     <script>
       (function () {

@@ -94,7 +94,7 @@ export function CoachPage() {
               key={o.id}
               practiceId={o.practice_id}
               kind={o.kind}
-              values={JSON.parse(o.values_json) as Record<string, number>}
+              values={JSON.parse(o.values_json) as Record<string, number | string>}
               scopeType={o.scope_type}
               scopeId={o.scope_id}
               detectedAt={o.detected_at}

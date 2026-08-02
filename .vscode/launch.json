@@ -16,7 +16,7 @@
       "type": "chrome",
       "request": "launch",
       "name": "Debug Client (Vite)",
-      "url": "http://localhost:5173",
+      "url": "http://localhost:9200",
       "webRoot": "${workspaceFolder}/client/src"
     }
   ],

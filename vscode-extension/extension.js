@@ -1,7 +1,7 @@
 /**
  * @file Main extension file for Claude Code Agent Monitor VSCode extension
  * Sets up the extension, registers commands, and manages the status bar item.
- * Implements a dynamic dashboard view that checks for active servers on ports 5173 and 4820.
+ * Implements a dynamic dashboard view that checks for active servers on ports 9200 and 4820.
  * Provides real-time status updates in the sidebar and status bar with background polling.
  *
  * @author Son Nguyen <hoangson091104@gmail.com>
@@ -46,7 +46,7 @@ function activate(context) {
       );
 
       const updateWebview = async () => {
-        const ports = [5173, 4820];
+        const ports = [9200, 4820];
         let activePort = null;
         for (const port of ports) {
           if (await checkPort(port)) {
@@ -76,8 +76,8 @@ function activate(context) {
   let openInBrowser = vscode.commands.registerCommand(
     "claude-code-agent-monitor.openInBrowser",
     async () => {
-      const isDevUp = await checkPort(5173);
-      const url = isDevUp ? "http://localhost:5173" : "http://localhost:4820";
+      const isDevUp = await checkPort(9200);
+      const url = isDevUp ? "http://localhost:9200" : "http://localhost:4820";
       vscode.env.openExternal(vscode.Uri.parse(url));
     }
   );
@@ -309,7 +309,7 @@ npm run setup</div>
                         </svg>
                         Troubleshooting
                     </h3>
-                    <p>Ensure no other services are occupying ports 5173 or 4820. If the problem persists, check the documentation.</p>
+                    <p>Ensure no other services are occupying ports 9200 or 4820. If the problem persists, check the documentation.</p>
                 </div>
                 
                 <button class="btn btn-primary" onclick="acquireVsCodeApi().postMessage({command:'retry'})">
