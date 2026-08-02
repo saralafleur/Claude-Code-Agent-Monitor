@@ -524,6 +524,23 @@ async function inferSession(dbModule, row, mode) {
       result.method,
       result.reason
     );
+
+    // Layer 4: give a classifier-detected detour a durable, resolvable
+    // identity the instant it's seen — a detour's identity does not survive
+    // re-inference of focus_inferences (one row per session), so the durable
+    // record must be created here, at classification time. Its own
+    // try/catch is the per-stage fail-safe: a disposition-record failure
+    // must never lose the inference already written above. This records a
+    // pending observation and nothing else — it must NEVER reach
+    // plan-writeback.applyDisposition, so classifying a session can never
+    // write AGENT-PLAN.md.
+    if (result.kind === "detour") {
+      try {
+        require("./detours").recordInferredDetour(dbModule, row, result);
+      } catch {
+        /* fail-safe: a disposition-record failure must never lose the inference */
+      }
+    }
   } catch {
     /* fail-safe per session */
   }

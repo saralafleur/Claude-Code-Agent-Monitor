@@ -22,7 +22,10 @@
  *
  * The dashboard mirrors that file into the `plans` / `plan_items` tables
  * (keyed by cwd; projects aggregate via the project_paths join, exactly like
- * sessions). The file is the source of truth — the dashboard never writes it.
+ * sessions). The file is the single source of truth, human-owned. The
+ * dashboard now appends to it through one audited path
+ * (server/lib/plan-writeback.js), and reads it back through this ingest like
+ * every other trigger.
  *
  * Identity is the item's `id:` line (see fallbackItemId() below for files
  * predating that convention), NOT its display number — the number is
@@ -85,6 +88,11 @@ const HEADING_RE = /^#{1,6}\s+(.+?)\s*#*\s*$/;
 const ID_LINE_RE = /^id\s*:\s*([a-zA-Z0-9_-]+)/i;
 const ACCEPTANCE_LINE_RE = /^acceptance\s*:/i;
 const DETAIL_LINE_RE = /^detail\s*:\s*(.*)$/i;
+// The exact boundary this parser splits a file into lines on. Exported so
+// plan-writeback.js's sanitizer neutralizes the SAME boundaries this parser
+// recognizes, rather than a hand-copied \r/\n literal that could drift from
+// this regex on a future change (WATCH-11).
+const LINE_SPLIT_RE = /\r?\n/;
 
 /**
  * Deterministic item id for a file that predates the `id:` convention —
@@ -114,7 +122,7 @@ const NUMBER_OFFSET_BASE = -1_000_000;
  * checkboxes and all other prose are ignored.
  */
 function parsePlanMarkdown(text) {
-  const lines = String(text).split(/\r?\n/);
+  const lines = String(text).split(LINE_SPLIT_RE);
   let title = null;
   const items = [];
   const seen = new Set();
@@ -238,6 +246,41 @@ function parsePlanMarkdown(text) {
 }
 
 /**
+ * Find the raw line-index range of one top-level item's block (its checkbox
+ * line plus every immediately-following continuation/sub-item line), by file
+ * number. The ONLY thing plan-writeback.js is allowed to know about where to
+ * splice a new sub-item in — so it never hand-rolls a second regex pass over
+ * the file; this stays the only place that knows what a "block" is. Pure —
+ * no I/O. `lines` is the file already split the same way parsePlanMarkdown
+ * splits it (via LINE_SPLIT_RE). Returns the exclusive end index (the index
+ * of the first line NOT part of the block), or -1 if the item number was not
+ * found among top-level checkbox lines.
+ */
+function findItemBlockEndLine(lines, itemNumber) {
+  let started = false;
+  let endIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(ITEM_RE);
+    if (m && parseInt(m[2], 10) === itemNumber) {
+      started = true;
+      endIndex = i + 1;
+      continue;
+    }
+    if (started) {
+      if (m) break; // a different top-level item line ends this block
+      const isSubOrContinuation = SUBITEM_RE.test(line) || /^\s+\S/.test(line);
+      if (isSubOrContinuation) {
+        endIndex = i + 1;
+        continue;
+      }
+      break;
+    }
+  }
+  return endIndex;
+}
+
+/**
  * Ingest the plan file for one cwd into the DB.
  *
  * Returns `{ changed, plan, items }` — `changed:false` means the file's hash
@@ -262,9 +305,14 @@ function ingestPlanForCwd(dbModule, cwd) {
       const existing = stmts.getPlanByCwd.get(cwd);
       if (!existing) return null;
       if (existing.missing_at)
-        return { changed: false, plan: existing, items: currentItems(stmts, cwd) };
+        return { ok: true, changed: false, plan: existing, items: currentItems(stmts, cwd) };
       stmts.markPlanMissing.run(new Date().toISOString(), cwd);
-      return { changed: true, plan: stmts.getPlanByCwd.get(cwd), items: currentItems(stmts, cwd) };
+      return {
+        ok: true,
+        changed: true,
+        plan: stmts.getPlanByCwd.get(cwd),
+        items: currentItems(stmts, cwd),
+      };
     }
 
     if (stat.size > MAX_FILE_BYTES) return existingAsUnchanged(stmts, cwd);
@@ -273,7 +321,7 @@ function ingestPlanForCwd(dbModule, cwd) {
     const hash = crypto.createHash("sha1").update(raw).digest("hex");
     const existing = stmts.getPlanByCwd.get(cwd);
     if (existing && existing.content_hash === hash && !existing.missing_at) {
-      return { changed: false, plan: existing, items: currentItems(stmts, cwd) };
+      return { ok: true, changed: false, plan: existing, items: currentItems(stmts, cwd) };
     }
 
     const parsed = parsePlanMarkdown(raw);
@@ -349,7 +397,12 @@ function ingestPlanForCwd(dbModule, cwd) {
       migrateFocusNumbersOnReorder(stmts, cwd, beforeNumberById, parsed.items);
     })();
 
-    return { changed: true, plan: stmts.getPlanByCwd.get(cwd), items: currentItems(stmts, cwd) };
+    return {
+      ok: true,
+      changed: true,
+      plan: stmts.getPlanByCwd.get(cwd),
+      items: currentItems(stmts, cwd),
+    };
   } catch {
     return null;
   }
@@ -390,7 +443,7 @@ function migrateFocusNumbersOnReorder(stmts, cwd, beforeNumberById, parsedItems)
 function existingAsUnchanged(stmts, cwd) {
   const existing = stmts.getPlanByCwd.get(cwd);
   if (!existing) return null;
-  return { changed: false, plan: existing, items: currentItems(stmts, cwd) };
+  return { ok: true, changed: false, plan: existing, items: currentItems(stmts, cwd) };
 }
 
 function currentItems(stmts, cwd) {
@@ -412,6 +465,10 @@ function attachDisplayNumbers(items) {
     if (!item.parent_item_id) {
       return {
         ...item,
+        // `number` is a plain alias of `item_number` — additive convenience
+        // field for callers that read the flat number off an item object
+        // without the DB column-name prefix (e.g. plan-writeback callers).
+        number: item.item_number,
         display_number: item.item_number == null ? null : String(item.item_number),
       };
     }
@@ -419,7 +476,7 @@ function attachDisplayNumbers(items) {
     siblingIndex.set(item.parent_item_id, ordinal);
     const parent = items.find((p) => p.item_id === item.parent_item_id);
     const parentNumber = parent && parent.item_number != null ? parent.item_number : "?";
-    return { ...item, display_number: `${parentNumber}.${ordinal}` };
+    return { ...item, number: item.item_number, display_number: `${parentNumber}.${ordinal}` };
   });
 }
 
@@ -442,4 +499,16 @@ module.exports = {
   planFileMtime,
   fallbackItemId,
   attachDisplayNumbers,
+  // Exports-only additions for plan-writeback.js (layer 4) — no behavior
+  // change, no new parse rule (DEC-10).
+  ID_LINE_RE,
+  ACCEPTANCE_LINE_RE,
+  DETAIL_LINE_RE,
+  LINE_SPLIT_RE,
+  MAX_FILE_BYTES,
+  MAX_ITEMS,
+  MAX_TEXT_LEN,
+  MAX_ACCEPTANCE_LEN,
+  MAX_DETAIL_LEN,
+  findItemBlockEndLine,
 };

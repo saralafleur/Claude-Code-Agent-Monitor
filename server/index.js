@@ -83,6 +83,8 @@ const focusReportRouter = require("./routes/focus-report");
 const monitorsRouter = require("./routes/monitors");
 const usageRouter = require("./routes/usage");
 const accountsRouter = require("./routes/accounts");
+const detoursRouter = require("./routes/detours");
+const decisionQueueRouter = require("./routes/decision-queue");
 
 function createApp() {
   const app = express();
@@ -118,6 +120,9 @@ function createApp() {
   app.use("/api/projects", projectsRouter);
   app.use("/api/plans", plansRouter);
   app.use("/api/focus", plansRouter.focusRouter);
+  // Layer 4 detour dispositions + layer 6 reconciliation decision queue.
+  app.use("/api/detours", detoursRouter);
+  app.use("/api/decision-queue", decisionQueueRouter);
   // Cross-project aggregate focus-time report (new, this effort) - distinct
   // from the "declared focus" hydrate endpoint mounted at /api/focus above
   // and from the single-project /api/projects/:id/focus-report route.
@@ -418,6 +423,17 @@ function startBackgroundServices() {
     startFocusInference();
   } catch (err) {
     console.warn("focus inference failed to start:", err.message);
+  }
+  // Layer 6: per-cwd reconciliation — deterministic rules decide whether to
+  // escalate (pace breach, detour volume, stale pending detours), then only
+  // for what the rules flagged, one batched LLM classification pass.
+  // Disable with DASHBOARD_RECONCILE_MODE=off (also the kill switch for
+  // unattended file writes) or DASHBOARD_RECONCILE_MS=0.
+  try {
+    const { startReconciliation } = require("./lib/reconciliation");
+    startReconciliation(broadcast);
+  } catch (err) {
+    console.warn("reconciliation failed to start:", err.message);
   }
   // Continuous discovery of sessions under ~/.claude/projects. The one-time
   // legacy backfill above runs only once (marker-gated), so a project added

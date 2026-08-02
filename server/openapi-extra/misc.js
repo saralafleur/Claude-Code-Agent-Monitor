@@ -39,6 +39,16 @@ const tags = [
     description:
       "User-named groupings of one or more session working directories (cwds). A thin label layer over existing session/cwd data — sessions carry no project_id column, so membership is derived by joining sessions.cwd against the folder mappings.",
   },
+  {
+    name: "Detours",
+    description:
+      "Layer 4: durable, resolvable detour dispositions (fold_in/new_item/deliberate/discard). fold_in/new_item auto-write into the cwd's AGENT-PLAN.md through the single audited plan-writeback.applyDisposition path (DEC-2/DEC-13).",
+  },
+  {
+    name: "Decision Queue",
+    description:
+      "Layer 6 reconciliation output: pace-alert / detour-volume / needs-review / write-outcome entries surfaced for Sara's review over HTTP and ccam. No UI consumer this round (WATCH-3).",
+  },
 ];
 
 const schemas = {
@@ -1859,6 +1869,173 @@ const paths = {
                 },
               },
             },
+          },
+        },
+      },
+    },
+  },
+  "/api/detours": {
+    get: {
+      tags: ["Detours"],
+      operationId: "listDetours",
+      summary: "List detour dispositions",
+      parameters: [
+        { name: "cwd", in: "query", schema: { type: "string" } },
+        { name: "project_id", in: "query", schema: { type: "string" } },
+        {
+          name: "status",
+          in: "query",
+          schema: { type: "string", enum: ["pending", "resolved", "conflict", "failed"] },
+        },
+        { name: "limit", in: "query", schema: { type: "integer" } },
+      ],
+      responses: {
+        200: {
+          description: "Matching disposition rows",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { detours: { type: "array", items: { type: "object" } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/detours/{id}/resolve": {
+    post: {
+      tags: ["Detours"],
+      operationId: "resolveDetour",
+      summary:
+        "Resolve a disposition by hand. For fold_in/new_item this calls plan-writeback.applyDisposition synchronously — the human-resolve DEC-13 trigger point.",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["disposition"],
+              properties: {
+                disposition: {
+                  type: "string",
+                  enum: ["fold_in", "new_item", "deliberate", "discard"],
+                },
+                note: { type: "string" },
+                proposed_text: { type: "string" },
+                proposed_acceptance: { type: "string" },
+                proposed_detail: { type: "string" },
+                proposed_parent_item_id: { type: "string" },
+                expected_hash: { type: "string", nullable: true },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Write outcome — write_status is 'none' for deliberate/discard",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  write_status: {
+                    type: "string",
+                    enum: ["none", "pending", "written", "failed", "conflict"],
+                  },
+                  resolved_item_id: { type: "string", nullable: true },
+                  write_error: { type: "string", nullable: true },
+                },
+              },
+            },
+          },
+        },
+        400: {
+          description: "Invalid disposition",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+          },
+        },
+        404: {
+          description: "No such disposition",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+          },
+        },
+      },
+    },
+  },
+  "/api/decision-queue": {
+    get: {
+      tags: ["Decision Queue"],
+      operationId: "listDecisionQueue",
+      summary: "List layer-6 reconciliation decision-queue items",
+      parameters: [
+        {
+          name: "status",
+          in: "query",
+          schema: { type: "string", enum: ["pending", "resolved", "dismissed"] },
+        },
+        { name: "kind", in: "query", schema: { type: "string" } },
+        { name: "cwd", in: "query", schema: { type: "string" } },
+        {
+          name: "project_id",
+          in: "query",
+          schema: { type: "string" },
+          description: "Filters on the project_id stamped onto each row at write time.",
+        },
+        { name: "limit", in: "query", schema: { type: "integer" } },
+      ],
+      responses: {
+        200: {
+          description: "Matching queue rows",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { queue: { type: "array", items: { type: "object" } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/decision-queue/{id}/resolve": {
+    post: {
+      tags: ["Decision Queue"],
+      operationId: "resolveDecisionQueueItem",
+      summary: "Act on a decision-queue item: resolve, dismiss, or retry_write a stuck write-back",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["action"],
+              properties: {
+                action: { type: "string", enum: ["resolve", "dismiss", "retry_write"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: "Updated queue item (and write outcome for retry_write)" },
+        400: {
+          description: "Invalid action",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+          },
+        },
+        404: {
+          description: "No such queue item",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
           },
         },
       },
