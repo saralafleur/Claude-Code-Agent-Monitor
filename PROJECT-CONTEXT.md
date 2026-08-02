@@ -94,6 +94,65 @@ was written about, and missed the second-order duplicate one call frame away —
 when a build introduces a new "one function does X for everybody" rule, scan for
 copies of *its helpers* too, not just of it.
 
+**Design-time pre-flag (2026-08-02, `intake/2026-08-02-practice-kind-override/`
+— NOT an occurrence, count unchanged at 5):** the "constant becomes a variable"
+form, on the Coach/Playbook surface. `resolvePracticeConfig()`'s own header
+comment claims the engine and the route "can never silently disagree about what's
+actually configured" — true for `practice.fields`, **false for `kind`/
+`defaultSeverity`, which bypass the resolver entirely.** Four independent
+hand-written readers of "this practice's effective kind" exist today:
+`engine.js` lines 97/98 (`evaluateSession`) and 145/146 (`evaluateGlobal`),
+`routes/playbook.js`'s `serializePractice()`, and `PlaybookPage.tsx` lines
+257/335 (the two cards' live-preview `<ObservationCard>`). They agree **only
+because the value cannot vary**; the kind-override feature makes it vary, and
+each un-updated site then fails invisibly in a different layer (pick "Warning",
+save 200 OK, preview card underneath still reads "Reminder"). Duplication of a
+constant is free until someone makes the constant configurable — that is the
+generalizable lesson here. Required cure before this ships: `resolvePracticeConfig()`
+returns the resolved kind/severity, no other file reads `practice.kind` /
+`practice.defaultSeverity` directly again, enforced by a static rogue-reader scan
+in the shape of `single-writer-guard.test.js` / `chronology-ordering.test.js`
+(2026-08-01) and proven red by injection per §9.3.
+
+Same intake, second-order form — **this entry's own 2026-08-01 lesson recurring
+one day later**: "scan for copies of its *helpers* too, not just of it." The
+Playbook shipped 2026-08-02 (`b6d372b`) with the "only known `fields[].key`, only
+finite numbers >= `min`" rule written **twice, independently** — in
+`resolvePracticeConfig()` (`practices.js`) and `validateConfigPatch()`
+(`routes/playbook.js`). Both walk `practice.fields`; neither calls the other. The
+two halves fail in opposite directions, which is what makes the pair dangerous:
+miss the route gate and every save 400s loudly (harmless); miss the resolver and
+the PUT **persists** while every read path ignores the stored value forever — the
+"saved but never applied" bug that passes a "does the PUT return 200?" smoke test.
+Preferred fix is extraction to one shared field-validator, not two synchronized
+copies. Re-check at build/QA time and increment only if a real divergence ships.
+
+**QA-pass note (2026-08-02, `team-qa` strategist, `intake/2026-08-02-practice-kind-override/`
+— count unchanged at 5, nothing built yet):** the planned cure is the right shape and
+is fully specified (single widened `resolvePracticeConfig()`, plus
+`playbook-resolver-guard.test.js` with three assertions and a written
+inject-a-rogue-reader red-proof procedure). Two things to verify at build, not at
+plan: (a) that the guard was *built and shown red*, not merely described, and (b)
+the **second-order copy this build introduces by design** — `playbookStore.ts`'s
+client-side `resolveKind`/`resolveSeverity` draft helper is a second implementation
+of the same precedence rule, and the structural guard (which scans for raw
+`practice.kind` reads) cannot see the two copies disagreeing. `unit-tests.md` §6
+tests the client copy against an *assumed* formula and says so. That is this entry's
+own 2026-08-01 lesson — "the guard caught the composer and missed the second-order
+duplicate one call frame away" — reproduced one day later on the same entry.
+Must-add: one shared `(catalogKind, override, draft) -> expected` case table driven
+through **both** the server resolver and the client helper. Coverage verdict for the
+intake was BLIND (see `intake/2026-08-02-practice-kind-override/qa/qa-assessment.md`),
+primarily for the §9.6 reason below, not for this entry.
+
+**Inverse-application warning for this surface (do not apply the criterion above
+by rote):** on the Coach/Playbook, `coach_observations.kind` (frozen at insert)
+and the live resolved kind (catalog + current override) are two legitimate,
+**intentionally divergent** views of the same-named field. The acceptance test is
+"changing the override does NOT change any existing Observation's stored kind,"
+**not** "the two values match." Never add a trigger, computed column, or backfill
+to re-sync historical Observations.
+
 **Known bounded exception:** `client/src/lib/windowedTotals.ts` —
 client-side re-slice of the same 10-minute `chunks` grid the Calendar's idle
 stripes already render from (not a re-derivation from raw events), bounding
@@ -302,3 +361,61 @@ column is writable, and a second migration run is a no-op.
 - Remember `DB_PATH` resolves to the **user-global** shared file, so a schema
   change from any worktree immediately reaches the real dashboard. Keep changes
   additive and nullable so a code-level back-out leaves a working database.
+- **This entry does not cover table *rebuilds*.** A `CHECK` constraint cannot be
+  added via `ALTER TABLE` at all, so the cure above is mechanically inapplicable
+  and the meta-test's `ALTER TABLE … ADD COLUMN` regex cannot see the migration.
+  See §9.6.
+
+### 9.6 NON-ATOMIC REBUILD (a half-run migration that looks finished)
+
+A `CREATE TABLE` change that `ALTER TABLE` cannot express (adding/loosening a
+`CHECK`, dropping `NOT NULL`) is done as a multi-statement table rebuild —
+rename/create, copy rows, drop old. The statements are **not** wrapped in a
+single transaction, and the next-boot idempotency guard reads the *current*
+table's shape (`sqlite_master.sql` text, or a `try { SELECT col } catch` probe).
+The rebuild's own first statement is what makes that guard's condition true. So
+if the process dies mid-sequence — OOM, `kill -9`, power loss, an operator
+Ctrl-C'ing a slow-feeling first boot after an upgrade — the next boot sees the
+new (empty) table, concludes the migration already ran, and never runs it again.
+Every historical row sits orphaned in `<table>_old`, unreferenced. **The app
+boots clean, throws nothing, logs nothing, and the data is simply gone from every
+view the product renders.** This is worse than a migration that never ran: a
+missing migration is loud and recoverable; this one is indistinguishable from
+success.
+
+**Flagged in:** `intake/2026-08-02-practice-kind-override/` (2026-08-02, found at
+QA pre-build review by `qa-risk-analyst`, before any code was written — the plan's
+Step 2.2 for the `coach_observations` severity-CHECK rebuild explicitly modelled
+itself on the weaker `plan_items` precedent). **Five latent live instances already
+shipped**, confirmed by direct read of `server/db.js`: six table rebuilds exist
+(lines 755, 822, 1063, 1439, 1481, 1589) and **only one — `agents`, line 1478 — is
+wrapped in a single `BEGIN; … COMMIT;`.** Zero queries anywhere in the file look
+for an orphaned `_old`/`_new` table.
+
+**Acceptance criterion:** a table rebuild is atomic — one transaction covering
+create, copy, drop and rename — such that a crash at any point rolls back to the
+pre-migration state on the next open. Proven by an **interruption test**, not only
+by the clean-completion test every existing migration test writes (see
+`agents-legacy-rebuild.test.js`, whose four cases all assume the rebuild
+finished). "Second boot is a no-op" against a *cleanly completed* first boot is
+not evidence about this failure mode.
+
+**How to comply:**
+- Copy `agents` (`server/db.js:1478-1514`), never `plan_items`/`token_usage`/
+  `webhook_targets`. Prefer **create-new → copy → drop-old → rename** over
+  rename-first: on rollback the original table is still there under its own name.
+- Set `PRAGMA foreign_keys = OFF` **outside and before** `BEGIN` — SQLite ignores
+  the pragma inside a transaction. `agents` already gets this right.
+- Belt: gate the rebuild on `hasNewShape && !orphanExists`, where `orphanExists`
+  checks `sqlite_master` for `<table>_old`/`<table>_new`. If it ever fires, log
+  loudly and **skip** — never throw. `db.js` runs at `require()` time, so a throw
+  bricks boot for every process (server, MCP, desktop, VS Code extension) against
+  the one shared `DB_PATH`.
+- Durable cure recommended (2026-08-02, not yet built): one
+  `rebuildTableAtomically({ table, createSql, copySelect, indexes })` helper so
+  atomicity stops being re-decided by hand per site, plus a `REBUILD_CASES`
+  registry-completeness meta-test in `db-migration.test.js` scanning
+  `ALTER TABLE (\w+) RENAME TO \1_old` / `CREATE TABLE (\w+)_new` and requiring
+  a legacy-DB case **and** an interruption case per site. Grandfather the five
+  existing sites with a dated reason (per `chronology-ordering.test.js`) rather
+  than weakening the scan; retrofit them as their own change, with a backup.
