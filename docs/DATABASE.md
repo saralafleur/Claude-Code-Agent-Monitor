@@ -668,7 +668,8 @@ CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    pinned INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE project_paths (
@@ -687,7 +688,8 @@ CREATE TABLE project_paths (
 | `id` | TEXT | NO | Primary key (UUID) |
 | `name` | TEXT | NO | User-assigned display name |
 | `created_at` | TEXT | NO | ISO 8601 creation timestamp |
-| `updated_at` | TEXT | NO | ISO 8601 timestamp of the last rename |
+| `updated_at` | TEXT | NO | ISO 8601 timestamp of the last rename or pin/unpin |
+| `pinned` | INTEGER | NO | `0`/`1` boolean. `1` floats the project to the top of `GET /api/projects` (`ORDER BY pinned DESC, name COLLATE NOCASE ASC`), ahead of the regular alphabetical order. Set via `PATCH /api/projects/:id` |
 
 **`project_paths` columns:**
 

@@ -2319,6 +2319,19 @@ export const api = {
         body: JSON.stringify({ name }),
       }),
     /**
+     * PATCH /api/projects/:id — pin or unpin a project. A pinned project
+     * floats to the top of the Projects page's list, ahead of the regular
+     * alphabetical/manual-drag order.
+     * @param id     The project id.
+     * @param pinned `true` to pin, `false` to unpin.
+     * @returns `{ project }` — the updated {@link Project}.
+     */
+    setPinned: (id: string, pinned: boolean) =>
+      request<{ project: Project }>(`/projects/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinned }),
+      }),
+    /**
      * DELETE /api/projects/:id — delete a project. Its folder mappings go with
      * it; the underlying sessions are untouched and fall back to unassigned.
      * @param id The project id.
@@ -3122,6 +3135,14 @@ export interface Account {
   last_error: string | null;
   last_capture_id: number | null;
   last_capture_at: string | null;
+  /** Inferred from real movement in this account's own session/weekly
+   *  rate-limit percentage between captures - a config-dir-independent
+   *  usage signal, unlike `last_capture_at` which only reflects manual
+   *  dashboard refreshes. Null until two comparable captures exist or no
+   *  rise was ever found in the retained lookback. */
+  last_used_at: string | null;
+  /** True when `last_used_at` is within the last 15 minutes. */
+  is_active: boolean;
   created_at: string;
   updated_at: string;
   /** Latest known percentages/resets, pulled from this account's most

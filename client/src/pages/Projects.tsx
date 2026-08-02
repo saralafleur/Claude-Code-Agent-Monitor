@@ -19,7 +19,11 @@
  * (native HTML5 drag-and-drop on the whole row); the display order persists
  * in localStorage per-browser, purely a personal arrangement — it has no
  * server-side representation and doesn't affect any other view. Unassigned
- * always stays pinned last and isn't part of the reorderable set.
+ * always stays last and isn't part of the reorderable set. A project can
+ * also be pinned (server-side, via the pin icon in its row) to float it
+ * above every unpinned project regardless of the manual drag order — pinned
+ * rows and unpinned rows each keep their own relative order, but the pinned
+ * group always renders first.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -49,6 +53,8 @@ import {
   BarChart3,
   ChevronDown,
   ChevronRight,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
@@ -202,11 +208,17 @@ export function Projects() {
   // persisted `orderIds`, else the server's alphabetical order. Any id not
   // present in whichever order list is source-of-truth right now (new
   // projects, or before any manual reorder) is appended in its existing
-  // relative order rather than dropped.
-  const orderedProjects = useMemo(
-    () => applyProjectOrder(projects, liveOrderIds ?? orderIds),
-    [projects, orderIds, liveOrderIds]
-  );
+  // relative order rather than dropped. Pinned projects are then partitioned
+  // to the front — the manual order still governs relative order *within*
+  // each group, so drag-reordering pinned projects among themselves (or
+  // unpinned among themselves) works, but a pinned project always renders
+  // above every unpinned one.
+  const orderedProjects = useMemo(() => {
+    const manualOrder = applyProjectOrder(projects, liveOrderIds ?? orderIds);
+    const pinned = manualOrder.filter((p) => p.pinned);
+    const unpinned = manualOrder.filter((p) => !p.pinned);
+    return [...pinned, ...unpinned];
+  }, [projects, orderIds, liveOrderIds]);
 
   function handleProjectDragStart(id: string) {
     setDraggedId(id);
@@ -296,6 +308,15 @@ export function Projects() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("errors.renameFailed"));
+    }
+  }
+
+  async function handlePinToggle(project: Project) {
+    try {
+      await api.projects.setPinned(project.id, !project.pinned);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("errors.pinFailed"));
     }
   }
 
@@ -521,6 +542,7 @@ export function Projects() {
                       .filter((p): p is Plan => Boolean(p))}
                     onOpenPlan={(plans, sess) => setOpenPlan({ plans, sessions: sess })}
                     onOpenReport={() => setOpenReport({ id: project.id, name: project.name })}
+                    onTogglePin={() => handlePinToggle(project)}
                     t={t}
                     editing={editingId === project.id}
                     editingName={editingName}
@@ -626,6 +648,8 @@ interface ProjectRowProps {
   onOpenPlan: (plans: Plan[], sessions: Session[]) => void;
   /** Opens the focus-time report popup, scoped to this project. */
   onOpenReport: () => void;
+  /** Toggles this project's pinned state. */
+  onTogglePin: () => void;
   t: (key: string, opts?: Record<string, unknown>) => string;
   editing: boolean;
   editingName: string;
@@ -665,6 +689,7 @@ function ProjectRow({
   plans,
   onOpenPlan,
   onOpenReport,
+  onTogglePin,
   t,
   editing,
   editingName,
@@ -735,6 +760,13 @@ function ProjectRow({
             </div>
           ) : (
             <div className="flex items-center gap-1.5 min-w-0">
+              {project.pinned && (
+                <Pin
+                  className="w-3 h-3 text-accent fill-current flex-shrink-0"
+                  role="img"
+                  aria-label={t("pinned")}
+                />
+              )}
               <h2 className="text-sm font-semibold text-gray-100 truncate">{project.name}</h2>
               <button
                 onClick={onStartEdit}
@@ -760,6 +792,21 @@ function ProjectRow({
         </td>
         <td className="px-3 py-3">
           <div className="flex items-center gap-1" draggable={false}>
+            <button
+              onClick={onTogglePin}
+              title={project.pinned ? t("unpin") : t("pin")}
+              className={`p-1 rounded-md flex-shrink-0 ${
+                project.pinned
+                  ? "text-accent hover:bg-accent/10"
+                  : "text-gray-500 hover:text-accent hover:bg-surface-3"
+              }`}
+            >
+              {project.pinned ? (
+                <Pin className="w-3.5 h-3.5 fill-current" />
+              ) : (
+                <PinOff className="w-3.5 h-3.5" />
+              )}
+            </button>
             {plans.length > 0 && (
               <button
                 onClick={() => onOpenPlan(plans, sessions)}

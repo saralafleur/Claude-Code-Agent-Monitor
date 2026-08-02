@@ -6,9 +6,11 @@
  * new session relationship. Exposes CRUD for projects plus add/remove folder
  * mapping endpoints, and returns aggregated session counts per project (and
  * for cwds not yet mapped to any project) so the client can render a live
- * "active projects" view without a separate stats round-trip. Also exposes
- * an "open terminal in one of this project's folders" action (macOS only,
- * see server/lib/terminal-focus.js) for the Kanban board's project picker.
+ * "active projects" view without a separate stats round-trip. A project can
+ * also be pinned (PATCH `pinned`), which floats it to the top of `listProjects`
+ * ahead of the regular alphabetical order. Also exposes an "open terminal in
+ * one of this project's folders" action (macOS only, see
+ * server/lib/terminal-focus.js) for the Kanban board's project picker.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -43,6 +45,13 @@ function cwdSessionStats() {
     )
     .all();
   return new Map(rows.map((r) => [r.cwd, r]));
+}
+
+// SQLite has no boolean type — `pinned` comes back as 0/1 from every prepared
+// statement. Normalize it to a real boolean at the response boundary so the
+// client never has to special-case the wire format.
+function serializeProject(project) {
+  return { ...project, pinned: !!project.pinned };
 }
 
 function aggregate(cwds, statsByCwd) {
@@ -81,7 +90,7 @@ router.get("/", (_req, res) => {
   const result = projects.map((project) => {
     const paths = pathsByProject.get(project.id) || [];
     return {
-      ...project,
+      ...serializeProject(project),
       paths,
       ...aggregate(
         paths.map((p) => p.cwd),
@@ -133,23 +142,41 @@ router.post("/", (req, res) => {
 
   const project = stmts.getProject.get(id);
   const paths = stmts.listProjectPaths.all(id);
-  res.status(201).json({ project: { ...project, paths } });
+  res.status(201).json({ project: { ...serializeProject(project), paths } });
 });
 
-// PATCH /api/projects/:id - rename a project.
+// PATCH /api/projects/:id - rename a project and/or toggle its pinned state.
+// At least one of `name`/`pinned` must be present; either can be sent alone.
 router.patch("/:id", (req, res) => {
   const existing = stmts.getProject.get(req.params.id);
   if (!existing) {
     return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
   }
-  const { name } = req.body || {};
-  if (!name || typeof name !== "string" || !name.trim()) {
-    return res.status(400).json({ error: { code: "INVALID_INPUT", message: "name is required" } });
+  const { name, pinned } = req.body || {};
+  if (name === undefined && pinned === undefined) {
+    return res.status(400).json({
+      error: { code: "INVALID_INPUT", message: "name or pinned is required" },
+    });
   }
-  stmts.renameProject.run(name.trim(), req.params.id);
+  if (name !== undefined) {
+    if (typeof name !== "string" || !name.trim()) {
+      return res
+        .status(400)
+        .json({ error: { code: "INVALID_INPUT", message: "name must be a non-empty string" } });
+    }
+    stmts.renameProject.run(name.trim(), req.params.id);
+  }
+  if (pinned !== undefined) {
+    if (typeof pinned !== "boolean") {
+      return res
+        .status(400)
+        .json({ error: { code: "INVALID_INPUT", message: "pinned must be a boolean" } });
+    }
+    stmts.setProjectPinned.run(pinned ? 1 : 0, req.params.id);
+  }
   const project = stmts.getProject.get(req.params.id);
   const paths = stmts.listProjectPaths.all(req.params.id);
-  res.json({ project: { ...project, paths } });
+  res.json({ project: { ...serializeProject(project), paths } });
 });
 
 // DELETE /api/projects/:id - delete a project. Its folder mappings cascade
@@ -186,7 +213,7 @@ router.post("/:id/paths", (req, res) => {
   stmts.insertProjectPath.run(req.params.id, trimmed);
   const project = stmts.getProject.get(req.params.id);
   const paths = stmts.listProjectPaths.all(req.params.id);
-  res.status(201).json({ project: { ...project, paths } });
+  res.status(201).json({ project: { ...serializeProject(project), paths } });
 });
 
 // DELETE /api/projects/:id/paths/:pathId - unmap a folder from this project
@@ -211,7 +238,7 @@ router.delete("/:id/paths/:pathId", (req, res) => {
   }
   const project = stmts.getProject.get(req.params.id);
   const paths = stmts.listProjectPaths.all(req.params.id);
-  res.json({ project: { ...project, paths } });
+  res.json({ project: { ...serializeProject(project), paths } });
 });
 
 // GET /api/projects/:id/focus-report - focus-time breakdown for every

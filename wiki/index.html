@@ -934,7 +934,7 @@
                     <strong>project</strong>, replacing the flat Agents/Sessions view with one
                     grouped by where the work actually happens. Projects list as a compact table
                     — one row per project with its name, session count, active count,
-                    last-activity, and quick plan/report/delete actions, drag-reorderable on the
+                    last-activity, and quick pin/plan/report/delete actions, drag-reorderable on the
                     row — instead of a full card each, so a machine with many projects doesn't
                     turn into a long vertical scroll. A project claims one or more working
                     directories — a folder belongs to at most one project — and membership is
@@ -944,8 +944,10 @@
                     mappings, any AGENT-PLAN.md checklist, and its sessions rendered as a
                     horizontally scrollable row of session cards — the same collapsed-by-default
                     treatment applies to each folder inside Unassigned. Create a project
-                    (optionally from an existing folder), rename it inline, add or remove folder
-                    mappings, or delete it — sessions are never deleted, they simply fall back to
+                    (optionally from an existing folder), rename it inline, pin it to float above
+                    every unpinned project regardless of the manual drag order (pinned state is
+                    server-shared, not per-browser), add or remove folder mappings, or delete it
+                    — sessions are never deleted, they simply fall back to
                     the <strong>Unassigned</strong> bucket.
                   </p>
                 </div>
@@ -1609,7 +1611,19 @@
                     reset. A <strong>Color thresholds</strong> card lets you
                     configure exactly where each green/yellow/orange/red band
                     starts, independently for the session and weekly scopes —
-                    shared live across every connected computer.
+                    shared live across every connected computer. Every
+                    enabled account also captures automatically every 15
+                    minutes (a disable-able background scheduler), so
+                    percentages stay fresh without a manual click. An
+                    <strong>Activity</strong> card shows whether you're
+                    actively using each account (used within the last 15
+                    minutes) or how long ago it was last used — inferred from
+                    whether that account's own session/weekly percentage
+                    actually rose between captures, not from anything tied to
+                    its <code>CLAUDE_CONFIG_DIR</code>, since real work is
+                    often done through whichever profile is logged into your
+                    default <code>~/.claude</code> instead of this account's
+                    own named config directory.
                   </p>
                 </div>
                 <div class="feature-card">
@@ -7284,7 +7298,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=86" defer></script>
+    <script src="i18n-content.js?v=89" defer></script>
     <script src="script.js?v=34" defer></script>
     <script>
       (function () {

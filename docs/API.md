@@ -1175,11 +1175,12 @@ The `/api/projects/*` namespace groups sessions by the folder(s) they run from i
   "active_count": 1,
   "last_activity": "2026-07-24T18:41:55.117Z",
   "created_at": "2026-07-01T09:15:00.000Z",
-  "updated_at": "2026-07-20T09:15:00.000Z"
+  "updated_at": "2026-07-20T09:15:00.000Z",
+  "pinned": false
 }
 ```
 
-`session_count`, `active_count`, and `last_activity` are aggregated server-side across every folder currently mapped to the project; `last_activity` is `null` when the project has no sessions yet.
+`session_count`, `active_count`, and `last_activity` are aggregated server-side across every folder currently mapped to the project; `last_activity` is `null` when the project has no sessions yet. `pinned` floats a project to the top of the list (see List Projects below) — set via PATCH, see Rename / Pin Project.
 
 #### List Projects
 
@@ -1187,7 +1188,7 @@ The `/api/projects/*` namespace groups sessions by the folder(s) they run from i
 GET /api/projects
 ```
 
-Returns every project plus an `unassigned` bucket for cwds that have sessions but aren't mapped to any project yet:
+Returns every project, ordered pinned-first then alphabetically (`pinned DESC, name COLLATE NOCASE ASC`), plus an `unassigned` bucket for cwds that have sessions but aren't mapped to any project yet:
 
 ```json
 {
@@ -1216,13 +1217,13 @@ POST /api/projects
 
 Returns `{ "project": Project }` with HTTP **201**. **400** `INVALID_INPUT` for a missing/blank `name` or a non-array `cwds`. **409** `ALREADY_MAPPED` if any requested `cwd` already belongs to another project (no partial creation — the whole request is rejected).
 
-#### Rename Project
+#### Rename / Pin Project
 
 ```http
 PATCH /api/projects/:id
 ```
 
-**Request Body:** `{ "name": string }` (required, non-blank). Returns `{ "project": Project }`, or **404** if the id is unknown.
+**Request Body:** `{ "name"?: string, "pinned"?: boolean }` — at least one of the two must be present; either can be sent alone (or both together). `name` must be non-blank when provided; `pinned` must be a real boolean. Returns `{ "project": Project }` (with `pinned` normalized to a real boolean), or **404** if the id is unknown, **400** `INVALID_INPUT` if neither field is present or a present field fails its own validation.
 
 #### Delete Project
 
@@ -1755,7 +1756,9 @@ Every capture is persisted regardless of parse success: `status` is `"ok"` (key 
 
 ### Accounts
 
-The `/api/accounts/*` namespace is a second, multi-account capture path alongside the tmux/TUI one above. Each account is just a `{ label, configDir }` pair — `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into. This dashboard never sees or stores a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` reads that credential live from the CLI's own storage (macOS Keychain, or a `.credentials.json` file on other platforms — see `server/lib/claude-cli-credentials.js`) and, if usable, fetches usage directly from `api.anthropic.com` (`server/lib/usage-fetch-oauth.js`), persisting the result into the same `usage_captures` table with `account_id` set. Same same-origin guard as `/api/usage` and `/api/run` since this makes a real outbound network call with a live token.
+The `/api/accounts/*` namespace is a second, multi-account capture path alongside the tmux/TUI one above. Each account is just a `{ label, configDir }` pair — `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into, used purely so this dashboard can hold a separate OAuth credential to poll that account's usage; real work is often done through whichever profile is logged into the *default* `~/.claude` dir instead, not through this named `configDir`. This dashboard never sees or stores a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` (and the automatic scheduler below) reads that credential live from the CLI's own storage (macOS Keychain, or a `.credentials.json` file on other platforms — see `server/lib/claude-cli-credentials.js`, via the shared `server/lib/account-capture.js`) and, if usable, fetches usage directly from `api.anthropic.com` (`server/lib/usage-fetch-oauth.js`), persisting the result into the same `usage_captures` table with `account_id` set. Same same-origin guard as `/api/usage` and `/api/run` since this makes a real outbound network call with a live token.
+
+Every enabled account is also captured automatically, on a tick (`server/lib/account-capture-scheduler.js`), so its rate-limit percentages — and the delta-based `last_used_at`/`is_active` below — stay fresh without a manual Refresh click. Default interval 15 minutes; disable with `DASHBOARD_ACCOUNT_CAPTURE_MODE=off` or override with `DASHBOARD_ACCOUNT_CAPTURE_MS`.
 
 ```http
 GET    /api/accounts                       List accounts + each one's latest known session/weekly rate-limit %
@@ -1768,6 +1771,8 @@ POST   /api/accounts/:id/login-terminal    Open a Terminal.app window running CL
 `POST /:id/capture` never returns a `500` for "not logged in yet": if the credential isn't usable (no login found, an expired token, or an unreadable/invalid stored credential), it responds `200` with `{ account, status: "not_found"|"expired"|"invalid", message }` instead — an expected, actionable state. On success it returns `201` with the freshly persisted `usage_captures` row (`status: "ok"`), or `201` with `status: "error"` if the credential was valid but the usage fetch itself failed (e.g. a revoked token). This app never attempts to refresh an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login; an expired login is reported as account status `needs_login`.
 
 `POST /:id/login-terminal` is the click-through fix for `needs_login`: it opens a brand-new Terminal.app window already running `CLAUDE_CONFIG_DIR=<this account's config dir> claude` (the same AppleScript machinery as `POST /api/sessions/:id/open-terminal`), so the user can walk through that profile's interactive login and close the window when done. In the UI this is what clicking an account row's **Needs login** badge calls. Returns `200 { ok: true }` on launch; typed failures map to `501` (`UNSUPPORTED_PLATFORM` — not macOS), `409` (`NO_CONFIG_DIR`), or `500` (`AUTOMATION_ERROR` — commonly a not-yet-granted macOS Automation permission).
+
+Every account object returned by `GET /api/accounts` (and the `account` embedded in `POST /:id/capture`'s response) also carries `last_used_at` and `is_active` — a real-usage gauge distinct from `last_capture_at`. `last_capture_at` only moves when someone clicks Refresh (or the scheduler ticks); `last_used_at`/`is_active` are inferred from movement in that account's own session/weekly rate-limit percentage between two consecutive `ok` captures (`server/lib/account-activity.js`'s `computeLastUsedAt`/`pctIncreased`) — a config-dir-independent signal, since the local CLAUDE_CONFIG_DIR the user happens to be working under is disconnected from which Anthropic account is actually being billed, but the percentage itself only moves when that account's quota is really consumed. A *lower* newer percentage (a session/weekly window rolling over) is never counted as usage. `last_used_at` is `null` until two comparable captures exist or no rise was ever found in the retained lookback (the most recent 500 captures). `is_active` is `true` when `last_used_at` is within the last 15 minutes, else `false`. Powers the Usage page's "Activity" card (`AccountActivityCard` in `client/src/pages/Usage.tsx`).
 
 ---
 

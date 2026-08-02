@@ -21,6 +21,7 @@ const mockProject: Project = {
   last_activity: "2026-06-10T12:00:00.000Z",
   created_at: "2026-06-01T00:00:00.000Z",
   updated_at: "2026-06-10T12:00:00.000Z",
+  pinned: false,
 };
 
 const mockProject2: Project = {
@@ -32,6 +33,7 @@ const mockProject2: Project = {
   last_activity: "2026-06-08T00:00:00.000Z",
   created_at: "2026-06-01T00:00:00.000Z",
   updated_at: "2026-06-08T00:00:00.000Z",
+  pinned: false,
 };
 
 const mockUnassigned: UnassignedProjectBucket = {
@@ -67,6 +69,7 @@ const mockSessions: Session[] = [
 const listMock = vi.fn();
 const createMock = vi.fn();
 const renameMock = vi.fn();
+const setPinnedMock = vi.fn();
 const removeMock = vi.fn();
 const addPathMock = vi.fn();
 const removePathMock = vi.fn();
@@ -79,6 +82,7 @@ vi.mock("../../lib/api", () => ({
       list: (...args: unknown[]) => listMock(...args),
       create: (...args: unknown[]) => createMock(...args),
       rename: (...args: unknown[]) => renameMock(...args),
+      setPinned: (...args: unknown[]) => setPinnedMock(...args),
       remove: (...args: unknown[]) => removeMock(...args),
       addPath: (...args: unknown[]) => addPathMock(...args),
       removePath: (...args: unknown[]) => removePathMock(...args),
@@ -114,6 +118,7 @@ describe("Projects page", () => {
     sessionsListMock.mockResolvedValue({ sessions: mockSessions, total: mockSessions.length });
     createMock.mockResolvedValue({ project: { ...mockProject, id: "proj-2" } });
     renameMock.mockResolvedValue({ project: { ...mockProject, name: "Renamed" } });
+    setPinnedMock.mockResolvedValue({ project: { ...mockProject, pinned: true } });
     removeMock.mockResolvedValue({ ok: true });
     addPathMock.mockResolvedValue({ project: mockProject });
     removePathMock.mockResolvedValue({ project: mockProject });
@@ -192,6 +197,33 @@ describe("Projects page", () => {
 
     await waitFor(() => {
       expect(renameMock).toHaveBeenCalledWith("proj-1", "Renamed Project");
+    });
+  });
+
+  it("pins a project via its row action", async () => {
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    fireEvent.click(screen.getByTitle("Pin to top"));
+
+    await waitFor(() => {
+      expect(setPinnedMock).toHaveBeenCalledWith("proj-1", true);
+    });
+  });
+
+  it("unpins an already-pinned project", async () => {
+    listMock.mockResolvedValue({
+      projects: [{ ...mockProject, pinned: true }],
+      unassigned: mockUnassigned,
+    });
+    setPinnedMock.mockResolvedValue({ project: { ...mockProject, pinned: false } });
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    fireEvent.click(screen.getByTitle("Unpin"));
+
+    await waitFor(() => {
+      expect(setPinnedMock).toHaveBeenCalledWith("proj-1", false);
     });
   });
 
@@ -338,6 +370,20 @@ describe("Projects page", () => {
 
     it("restores a previously persisted order on load", async () => {
       localStorage.setItem("projects-page-order", JSON.stringify(["proj-2", "proj-1"]));
+      renderPage();
+
+      await screen.findByText("Coaching Assistant");
+      expect(projectCardOrder()).toEqual(["Coaching Assistant", "Agent Monitor"]);
+    });
+
+    it("keeps a pinned project first even when the manual drag order would place it second", async () => {
+      // Manual order says Agent Monitor first, Coaching Assistant second — but
+      // Coaching Assistant is pinned, so it must still render first.
+      localStorage.setItem("projects-page-order", JSON.stringify(["proj-1", "proj-2"]));
+      listMock.mockResolvedValue({
+        projects: [mockProject, { ...mockProject2, pinned: true }],
+        unassigned: { cwds: [], session_count: 0, active_count: 0, last_activity: null },
+      });
       renderPage();
 
       await screen.findByText("Coaching Assistant");

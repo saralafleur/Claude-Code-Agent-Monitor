@@ -11,6 +11,9 @@
   "create": "생성",
   "cancel": "취소",
   "rename": "이름 변경",
+  "pin": "상단에 고정",
+  "unpin": "고정 해제",
+  "pinned": "고정됨",
   "viewPlan": "계획 보기",
   "viewReport": "포커스 시간 리포트 보기",
   "delete": "삭제",
@@ -39,6 +42,7 @@
     "renameFailed": "프로젝트 이름 변경에 실패했습니다",
     "deleteFailed": "프로젝트 삭제에 실패했습니다",
     "addFolderFailed": "폴더 추가에 실패했습니다",
-    "removeFolderFailed": "폴더 제거에 실패했습니다"
+    "removeFolderFailed": "폴더 제거에 실패했습니다",
+    "pinFailed": "고정 상태 업데이트에 실패했습니다"
   }
 }

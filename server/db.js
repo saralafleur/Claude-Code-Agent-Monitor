@@ -1217,6 +1217,16 @@ try {
   // Column already absent (fresh install, or already migrated) — nothing to do.
 }
 
+// Migrate: add `pinned` to projects — lets a user float a project to the top
+// of the Projects page's list regardless of the alphabetical/manual-drag
+// order. Additive + NOT NULL DEFAULT 0, so every historical project reads as
+// unpinned and the feature is invisible until a project is explicitly pinned.
+try {
+  db.prepare("SELECT pinned FROM projects LIMIT 1").get();
+} catch {
+  db.prepare("ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0").run();
+}
+
 // Remote data sources: other machines whose Claude Code history this dashboard
 // pulls in over SSH. Config only — NO secrets are stored here: authentication
 // always defers to the host's own SSH stack (~/.ssh/config, ssh-agent, keys,
@@ -2383,9 +2393,12 @@ const stmts = {
   // Projects
   insertProject: db.prepare("INSERT INTO projects (id, name) VALUES (?, ?)"),
   getProject: db.prepare("SELECT * FROM projects WHERE id = ?"),
-  listProjects: db.prepare("SELECT * FROM projects ORDER BY name COLLATE NOCASE ASC"),
+  listProjects: db.prepare("SELECT * FROM projects ORDER BY pinned DESC, name COLLATE NOCASE ASC"),
   renameProject: db.prepare(
     "UPDATE projects SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+  ),
+  setProjectPinned: db.prepare(
+    "UPDATE projects SET pinned = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
   ),
   deleteProject: db.prepare("DELETE FROM projects WHERE id = ?"),
   insertProjectPath: db.prepare("INSERT INTO project_paths (project_id, cwd) VALUES (?, ?)"),

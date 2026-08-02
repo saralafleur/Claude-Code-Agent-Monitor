@@ -11,6 +11,9 @@
   "create": "Tạo",
   "cancel": "Hủy",
   "rename": "Đổi tên",
+  "pin": "Ghim lên đầu",
+  "unpin": "Bỏ ghim",
+  "pinned": "Đã ghim",
   "viewPlan": "Xem kế hoạch",
   "viewReport": "Xem báo cáo thời gian tiêu điểm",
   "delete": "Xóa",
@@ -41,6 +44,7 @@
     "renameFailed": "Đổi tên dự án thất bại",
     "deleteFailed": "Xóa dự án thất bại",
     "addFolderFailed": "Thêm thư mục thất bại",
-    "removeFolderFailed": "Gỡ thư mục thất bại"
+    "removeFolderFailed": "Gỡ thư mục thất bại",
+    "pinFailed": "Cập nhật trạng thái ghim thất bại"
   }
 }

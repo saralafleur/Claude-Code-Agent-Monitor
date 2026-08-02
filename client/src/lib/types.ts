@@ -1653,6 +1653,11 @@ export interface Project {
   created_at: string;
   /** ISO timestamp the project was last renamed. */
   updated_at: string;
+  /** Whether this project is pinned to the top of the Projects page's list,
+   *  ahead of the regular alphabetical/manual-drag order. Optional so
+   *  fixtures/mocks predating this field still type-check; always present
+   *  (true or false) on a real API response. */
+  pinned?: boolean;
 }
 
 /** Sessions whose cwd isn't mapped to any {@link Project} yet, from GET

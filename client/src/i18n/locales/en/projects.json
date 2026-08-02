@@ -11,6 +11,9 @@
   "create": "Create",
   "cancel": "Cancel",
   "rename": "Rename",
+  "pin": "Pin to top",
+  "unpin": "Unpin",
+  "pinned": "Pinned",
   "viewPlan": "View plan",
   "viewReport": "View focus-time report",
   "delete": "Delete",
@@ -41,6 +44,7 @@
     "renameFailed": "Failed to rename project",
     "deleteFailed": "Failed to delete project",
     "addFolderFailed": "Failed to add folder",
-    "removeFolderFailed": "Failed to remove folder"
+    "removeFolderFailed": "Failed to remove folder",
+    "pinFailed": "Failed to update pinned state"
   }
 }

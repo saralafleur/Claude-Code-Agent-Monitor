@@ -214,6 +214,38 @@ const UPGRADE_CASES = [
       );
     },
   },
+  {
+    // Pin-to-top feature: projects gained a `pinned` column so a project can
+    // float above the regular alphabetical/manual-drag order on the Projects
+    // page. Additive + NOT NULL DEFAULT 0, mirroring the pattern of the
+    // detour_dispositions.project_id case above.
+    table: "projects",
+    column: "pinned",
+    legacySql: `
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      )
+    `,
+    seed(legacyDb) {
+      legacyDb
+        .prepare("INSERT INTO projects (id, name) VALUES (?, ?)")
+        .run("legacy-project-1", "Legacy Project");
+    },
+    assertLegacyRow(db) {
+      const row = db.prepare("SELECT pinned FROM projects WHERE id = ?").get("legacy-project-1");
+      assert.ok(row, "projects row should exist after migration");
+      assert.equal(row.pinned, 0, "pinned should default to 0 for legacy rows");
+    },
+    assertWritable(db) {
+      const { stmts } = require("../db");
+      stmts.setProjectPinned.run(1, "legacy-project-1");
+      const row = db.prepare("SELECT pinned FROM projects WHERE id = ?").get("legacy-project-1");
+      assert.equal(row.pinned, 1, "pinned should be settable on legacy rows");
+    },
+  },
   // color_thresholds' single yellow_at/orange_at/red_at set split into
   // independent session_*/weekly_* scopes (2026-08-01, same day the table
   // was introduced — a live reproduction of the "fresh install vs. upgraded
@@ -599,6 +631,82 @@ describe("Migration: color_thresholds session/weekly split", () => {
       .all()
       .filter((c) => c.name === "session_yellow_at").length;
     assert.equal(count2, 1, "should still have exactly one session_yellow_at column");
+    db2.close();
+  });
+});
+
+describe("Migration: projects.pinned", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find((uc) => uc.table === "projects" && uc.column === "pinned");
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-projects-pinned-test-${Date.now()}.db`);
+
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+
+    // Run the legacy projects schema (without pinned).
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("creates pinned column on legacy projects via ALTER TABLE", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(projects)").all();
+    const pinnedColumn = tableInfo.find((col) => col.name === "pinned");
+    assert.ok(pinnedColumn, "pinned column should exist after migration");
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate the column", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(projects)")
+      .all()
+      .filter((c) => c.name === "pinned").length;
+    assert.equal(count1, 1, "should have exactly one pinned column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(projects)")
+      .all()
+      .filter((c) => c.name === "pinned").length;
+    assert.equal(count2, 1, "should still have exactly one pinned column");
     db2.close();
   });
 });

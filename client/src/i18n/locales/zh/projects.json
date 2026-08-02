@@ -11,6 +11,9 @@
   "create": "创建",
   "cancel": "取消",
   "rename": "重命名",
+  "pin": "置顶",
+  "unpin": "取消置顶",
+  "pinned": "已置顶",
   "viewPlan": "查看计划",
   "viewReport": "查看焦点用时报告",
   "delete": "删除",
@@ -39,6 +42,7 @@
     "renameFailed": "重命名项目失败",
     "deleteFailed": "删除项目失败",
     "addFolderFailed": "添加文件夹失败",
-    "removeFolderFailed": "移除文件夹失败"
+    "removeFolderFailed": "移除文件夹失败",
+    "pinFailed": "更新置顶状态失败"
   }
 }

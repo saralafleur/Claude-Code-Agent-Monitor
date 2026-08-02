@@ -137,6 +137,53 @@ describe("Project CRUD", () => {
     assert.equal(deleted.status, 404);
   });
 
+  it("rejects a PATCH with neither name nor pinned", async () => {
+    const project = (await post("/api/projects", { name: "Empty Patch" })).body.project;
+    const res = await patch(`/api/projects/${project.id}`, {});
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  });
+
+  it("rejects a non-boolean pinned value", async () => {
+    const project = (await post("/api/projects", { name: "Bad Pin" })).body.project;
+    const res = await patch(`/api/projects/${project.id}`, { pinned: "yes" });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  });
+});
+
+describe("Pinning", () => {
+  it("defaults to unpinned, and pins/unpins via PATCH", async () => {
+    const created = await post("/api/projects", { name: "Pin Me" });
+    assert.equal(created.body.project.pinned, false);
+
+    const pinned = await patch(`/api/projects/${created.body.project.id}`, { pinned: true });
+    assert.equal(pinned.status, 200);
+    assert.equal(pinned.body.project.pinned, true);
+
+    const unpinned = await patch(`/api/projects/${created.body.project.id}`, { pinned: false });
+    assert.equal(unpinned.status, 200);
+    assert.equal(unpinned.body.project.pinned, false);
+  });
+
+  it("lists pinned projects first, ahead of alphabetical order", async () => {
+    const zebra = (await post("/api/projects", { name: "Zebra Project" })).body.project;
+    await post("/api/projects", { name: "Apple Project" });
+    await patch(`/api/projects/${zebra.id}`, { pinned: true });
+
+    const list = await fetch("/api/projects");
+    const names = list.body.projects.map((p) => p.name);
+    assert.equal(names[0], "Zebra Project"); // pinned, despite sorting after "Apple" alphabetically
+  });
+
+  it("PATCH can rename and pin in the same request", async () => {
+    const project = (await post("/api/projects", { name: "Combo" })).body.project;
+    const res = await patch(`/api/projects/${project.id}`, { name: "Combo Renamed", pinned: true });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.project.name, "Combo Renamed");
+    assert.equal(res.body.project.pinned, true);
+  });
+
   it("creates a project pre-attached to folders", async () => {
     const created = await post("/api/projects", {
       name: "Multi-folder",

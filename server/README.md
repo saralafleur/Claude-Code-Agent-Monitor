@@ -663,7 +663,7 @@ A user-named grouping of one or more session working directories (`routes/projec
 | -------- | ---------------------------------- | ----------- |
 | `GET`    | `/api/projects`                    | List every project (folders + aggregated session stats) plus the `unassigned` bucket |
 | `POST`   | `/api/projects`                    | Create a project; `cwds` optionally attaches folders immediately (`409 ALREADY_MAPPED` if any is claimed elsewhere) |
-| `PATCH`  | `/api/projects/:id`                | Rename a project |
+| `PATCH`  | `/api/projects/:id`                | Rename a project and/or set `pinned` (floats it to the top of `GET /api/projects`, ahead of the regular alphabetical order) |
 | `DELETE` | `/api/projects/:id`                | Delete a project; folder mappings cascade (`ON DELETE CASCADE`), sessions are untouched and fall back to unassigned |
 | `POST`   | `/api/projects/:id/paths`          | Map an additional folder onto a project |
 | `DELETE` | `/api/projects/:id/paths/:pathId`  | Unmap a folder (folder + its sessions are untouched) |
@@ -792,17 +792,19 @@ Every capture persists regardless of parse success (`status`: `ok`/`partial`/`er
 
 ### Accounts (`/api/accounts`)
 
-Named Claude accounts — a second, multi-account capture path alongside the tmux/TUI one above, sharing the same `usage_captures` table (scoped by `account_id`). An account is just `{ label, configDir }`: `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into. This server never sees a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` reads that credential live via `lib/claude-cli-credentials.js` (macOS Keychain, or a `.credentials.json` file elsewhere) and, if usable, fetches usage via `lib/usage-fetch-oauth.js` (a minimal request straight to Anthropic's own API, reading rate-limit percentages off the response headers). Same same-origin guard as `/api/usage`.
+Named Claude accounts — a second, multi-account capture path alongside the tmux/TUI one above, sharing the same `usage_captures` table (scoped by `account_id`). An account is just `{ label, configDir }`: `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into, held purely so this server can read a separate OAuth credential to poll that account's usage — real work is often done through whichever profile is logged into the *default* `~/.claude` dir instead. This server never sees a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` (and the automatic scheduler, `lib/account-capture-scheduler.js`) shares one capture flow (`lib/account-capture.js`) that reads that credential live via `lib/claude-cli-credentials.js` (macOS Keychain, or a `.credentials.json` file elsewhere) and, if usable, fetches usage via `lib/usage-fetch-oauth.js` (a minimal request straight to Anthropic's own API, reading rate-limit percentages off the response headers). Same same-origin guard as `/api/usage`. Every enabled account also captures automatically every `DASHBOARD_ACCOUNT_CAPTURE_MS` (default 15m; `DASHBOARD_ACCOUNT_CAPTURE_MODE=off` disables it), so percentages — and `last_used_at`/`is_active` below — stay fresh without a manual click.
 
 | Method   | Path                        | Description |
 | -------- | --------------------------- | ----------- |
-| `GET`    | `/api/accounts`             | List accounts + each one's latest known session/weekly rate-limit % |
+| `GET`    | `/api/accounts`             | List accounts + each one's latest known session/weekly rate-limit %, plus `last_used_at`/`is_active` (real-usage gauge inferred from percentage movement between captures — distinct from `last_capture_at`, which only reflects manual Refresh clicks) |
 | `POST`   | `/api/accounts`             | Add an account. Body: `{ label, configDir }`. `400` if `configDir` doesn't exist, `409` if already registered |
 | `DELETE` | `/api/accounts/:id`         | Remove an account (its past captures keep their now-orphaned `account_id`) |
 | `POST`   | `/api/accounts/:id/capture` | Read the credential and fetch + persist a fresh capture scoped to this account. `200` with `{ account, status, message }` (not a `500`) when the credential isn't usable yet (no login, expired, invalid) |
 | `POST`   | `/api/accounts/:id/login-terminal` | Open a new Terminal.app window already running `CLAUDE_CONFIG_DIR=<dir> claude` (macOS only, `lib/terminal-focus.js`'s `openLoginTerminalForConfigDir`) — the click-through behind the Usage page's "Needs login" badge. `501` off-macOS, `500` on an automation failure |
 
 This server never refreshes an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login. An expired/missing login surfaces as account status `needs_login`, resolved by running `CLAUDE_CONFIG_DIR=<dir> claude` once to (re-)authenticate that profile.
+
+`last_used_at` (`lib/account-activity.js`'s `computeLastUsedAt`) walks an account's captures newest-first for the most recent pair where the session or weekly percentage rose (`pctIncreased`) and returns that newer capture's timestamp — a percentage *drop* means a window reset, not usage, and never counts. `is_active` is `true` when `last_used_at` is within the last 15 minutes (`ACCOUNT_ACTIVE_THRESHOLD_MS`), else `false`; `last_used_at` is `null` until two comparable `ok` captures exist or no rise was found in the retained lookback (`ACCOUNT_ACTIVITY_LOOKBACK`, the most recent 500 captures). Powers the Usage page's "Activity" card.
 
 WebSocket message types added: `run_stream` (parsed stream-json envelope, including `stream_event` deltas from `--include-partial-messages`), `run_status` (status transitions), `run_input_ack` (stdin write confirmed), and `cc_config_changed` (broadcast by `lib/cc-watcher.js` on `fs.watch` events under `~/.claude/` and by `routes/cc-config.js` after every successful PUT/DELETE — debounced at 500 ms, payload `{ source: "dashboard"|"fs", action?, scope?, type?, name?, paths? }`).
 
