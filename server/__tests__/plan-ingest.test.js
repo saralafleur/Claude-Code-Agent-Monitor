@@ -441,3 +441,37 @@ describe("sub-items end to end (ingest + re-ingest)", () => {
     assert.equal(res.items[0].item_id, "parent002");
   });
 });
+
+describe("target_date survival + exports", () => {
+  it("preserves target_date across re-ingest, untouched by upsertPlanItem", () => {
+    writePlan("# Demo\n- [ ] 1. One\n- [x] 2. Two\n");
+    ingestPlanForCwd(dbModule, workDir);
+
+    // Set target_date on item 1
+    stmts.setPlanItemTargetDate.run("2026-08-15", workDir, 1);
+    let item1 = stmts.getPlanItem.get(workDir, 1);
+    assert.equal(item1.target_date, "2026-08-15", "target_date should be set");
+
+    // Edit the plan file (unrelated content)
+    writePlan("# Demo updated\n- [ ] 1. One — acceptance: updated\n- [x] 2. Two\n");
+    const res = ingestPlanForCwd(dbModule, workDir);
+    assert.equal(res.changed, true);
+
+    // Assert target_date is unchanged (not reset, not nulled)
+    item1 = stmts.getPlanItem.get(workDir, 1);
+    assert.equal(item1.target_date, "2026-08-15", "target_date should survive re-ingest unchanged");
+  });
+
+  it("exports ID_LINE_RE, ACCEPTANCE_LINE_RE, DETAIL_LINE_RE, LINE_SPLIT_RE, and MAX_* caps", () => {
+    const planIngest = require("../lib/plan-ingest");
+    assert.ok(planIngest.ID_LINE_RE, "should export ID_LINE_RE");
+    assert.ok(planIngest.ACCEPTANCE_LINE_RE, "should export ACCEPTANCE_LINE_RE");
+    assert.ok(planIngest.DETAIL_LINE_RE, "should export DETAIL_LINE_RE");
+    assert.ok(planIngest.LINE_SPLIT_RE, "should export LINE_SPLIT_RE");
+    assert.ok(planIngest.MAX_FILE_BYTES, "should export MAX_FILE_BYTES");
+    assert.ok(planIngest.MAX_ITEMS, "should export MAX_ITEMS");
+    assert.ok(planIngest.MAX_TEXT_LEN, "should export MAX_TEXT_LEN");
+    assert.ok(planIngest.MAX_ACCEPTANCE_LEN, "should export MAX_ACCEPTANCE_LEN");
+    assert.ok(planIngest.MAX_DETAIL_LEN, "should export MAX_DETAIL_LEN");
+  });
+});

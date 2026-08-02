@@ -567,7 +567,11 @@ db.exec(`
   -- distinct, so any number of sub-items coexist under the same cwd without
   -- colliding. parent_item_id is the parent's item_id (never its number, for
   -- the same reorder-safety reason item identity everywhere else is id-based)
-  -- and is NULL for a top-level item.
+  -- and is NULL for a top-level item. target_date (layer 5 pace tracking) is
+  -- an optional human-set YYYY-MM-DD calendar day, authored out-of-band via
+  -- POST /api/plans/items/target and "ccam focus target" — deliberately
+  -- excluded from upsertPlanItem's SET list, same as declared_done_at, so it
+  -- survives every re-ingest of the file untouched.
   CREATE TABLE IF NOT EXISTS plan_items (
     cwd TEXT NOT NULL,
     item_id TEXT NOT NULL,
@@ -580,6 +584,7 @@ db.exec(`
     position INTEGER NOT NULL DEFAULT 0,
     declared_done_at TEXT,
     declared_done_session TEXT,
+    target_date TEXT,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     PRIMARY KEY (cwd, item_id),
     FOREIGN KEY (cwd) REFERENCES plans(cwd) ON DELETE CASCADE
@@ -653,6 +658,83 @@ db.exec(`
     model TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   );
+
+  -- Layer 4: a detour's DECISION, durable and queryable, separate from the
+  -- classifier's re-derivable observation (focus_inferences.kind='detour').
+  -- The naming trap this comment exists to name: focus_inferences is
+  -- INFERRED (the classifier's guess); session_focus.detour_stack is
+  -- DECLARED (the agent said so) — this table covers both, tagged by the
+  -- "source" column, because either kind of detour needs the exact same
+  -- fold_in/new_item/deliberate/discard lifecycle and write audit.
+  -- No FK on session_id (audit trail must outlive session cleanup, same
+  -- rule as alert_events.session_id). The write-audit and proposed-content
+  -- columns land in this initial CREATE TABLE from the start (DEC-15,
+  -- WATCH-4) — SQLite cannot add a CHECK via ALTER TABLE ADD COLUMN at all,
+  -- so shipping the base shape first would cost a full rebuild for
+  -- write_status alone.
+  CREATE TABLE IF NOT EXISTS detour_dispositions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cwd TEXT NOT NULL,
+    project_id TEXT,                 -- stamped via project_paths at write time (getProjectPathByCwd), same pattern as decision_queue.project_id; no FK (audit trail)
+    session_id TEXT,
+    source TEXT NOT NULL CHECK(source IN ('inferred','declared')),
+    source_ref TEXT NOT NULL,
+    source_seen_at TEXT,
+    label TEXT,
+    item_id TEXT,
+    disposition TEXT NOT NULL DEFAULT 'pending'
+      CHECK(disposition IN ('pending','fold_in','new_item','deliberate','discard')),
+    decided_by TEXT CHECK(decided_by IN ('rule','llm','human')),
+    confidence REAL,
+    reason TEXT,
+    note TEXT,
+    -- proposed content: what the rule/LLM decided should be added. Sanitized
+    -- by plan-writeback.sanitizeLlmPlanText BEFORE composition (DEC-13).
+    proposed_text TEXT,
+    proposed_acceptance TEXT,
+    proposed_detail TEXT,
+    proposed_parent_item_id TEXT,
+    -- write audit (DEC-2 real write-back + DEC-13 auto-write). Every
+    -- auto-write must be diagnosable after the fact, because no human
+    -- confirmed it in the moment.
+    write_status TEXT NOT NULL DEFAULT 'none'
+      CHECK(write_status IN ('none','pending','written','failed','conflict')),
+    write_attempted_at TEXT,
+    write_completed_at TEXT,
+    write_error TEXT,
+    write_backup_path TEXT,
+    write_content_hash_before TEXT,
+    write_content_hash_after TEXT,
+    suggested_markdown TEXT,
+    resolved_item_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    resolved_at TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_detour_dispositions_src ON detour_dispositions(cwd, source, source_ref);
+  CREATE INDEX IF NOT EXISTS idx_detour_dispositions_cwd_created ON detour_dispositions(cwd, created_at);
+  CREATE INDEX IF NOT EXISTS idx_detour_dispositions_resolved_item ON detour_dispositions(resolved_item_id);
+
+  -- Layer 6: reconciliation's output queue — shaped like alert_events but
+  -- deliberately separate (different audience: Sara reviewing portfolio
+  -- health, not a fired alert rule; different trust boundary: some rows are
+  -- LLM-classified). kind's CHECK is widened to include writeback_conflict/
+  -- writeback_failed from the start (DEC-15/WATCH-4) since Layer 4's
+  -- write-back can also enqueue here.
+  CREATE TABLE IF NOT EXISTS decision_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cwd TEXT,
+    project_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('pace_alert','detour_volume','detour_disposition','writeback_conflict','writeback_failed')),
+    ref_id INTEGER,
+    item_id TEXT,
+    message TEXT NOT NULL,
+    payload TEXT,
+    input_digest TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved','dismissed')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    resolved_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_decision_queue_status_created ON decision_queue(status, created_at);
 `);
 
 // Migrate: give plan_items a stable item_id independent of item_number (see
@@ -788,6 +870,17 @@ db.exec(`
   );
 }
 
+// Migrate: give plan_items an optional human-set target date (layer 5 pace
+// tracking). Date-only YYYY-MM-DD, local calendar day. Additive and
+// nullable — no rename-rebuild needed (that dance exists only for NOT NULL
+// / PK changes SQLite can't ALTER). Deliberately NOT written by
+// upsertPlanItem, so it survives re-ingest exactly like declared_done_at.
+try {
+  db.prepare("SELECT target_date FROM plan_items LIMIT 1").get();
+} catch {
+  db.prepare("ALTER TABLE plan_items ADD COLUMN target_date TEXT").run();
+}
+
 // Migrate: link agent rows to a workflow run. Workflow inner-agents are already
 // ingested as subagents (same subagents/ dir); these columns add the grouping +
 // phase that the run journal provides. Additive, safe on existing DBs.
@@ -798,6 +891,22 @@ try {
   db.prepare("ALTER TABLE agents ADD COLUMN workflow_phase TEXT").run();
 }
 db.prepare("CREATE INDEX IF NOT EXISTS idx_agents_workflow ON agents(workflow_run_id)").run();
+
+// Migrate: stamp detour_dispositions.project_id (S6, 2026-08-01
+// reconciliation-pass fix). Additive, nullable, no CHECK — safe to ALTER on
+// an existing DB created before this column landed in the CREATE TABLE
+// above (this effort's own in-progress dev/test databases already have the
+// pre-project_id shape, so `CREATE TABLE IF NOT EXISTS` alone is not enough
+// once a DB has ever been created). Uses PRAGMA table_info rather than this
+// file's usual try/SELECT-LIMIT-1/catch idiom deliberately: detour_dispositions
+// is one of §9.2's bulk-insert tables the chronology-ordering static scan
+// checks every `SELECT ... LIMIT` against, and a column-existence probe is
+// not a "most recent N rows" query — PRAGMA sidesteps that scan entirely
+// instead of asking it to special-case a probe query.
+const detourDispositionsColumns = db.prepare("PRAGMA table_info(detour_dispositions)").all();
+if (!detourDispositionsColumns.some((col) => col.name === "project_id")) {
+  db.prepare("ALTER TABLE detour_dispositions ADD COLUMN project_id TEXT").run();
+}
 
 // Migrate: add the 1h-ephemeral cache-write rate column to model_pricing.
 // Older DBs predate the 5m/1h cache-write split. ADD COLUMN defaults every
@@ -2136,8 +2245,8 @@ const stmts = {
   ),
   // Conflict target is item_id (the stable identity), NOT item_number — an
   // item that moved from number 3 to number 5 across a reorder still matches
-  // its existing row here and gets UPDATEd in place, so declared_done_at
-  // (deliberately untouched below) survives. Only the file's own
+  // its existing row here and gets UPDATEd in place, so declared_done_at and
+  // target_date (deliberately untouched below) survive. Only the file's own
   // text/acceptance/detail/checked/position/number sync on every ingest.
   upsertPlanItem: db.prepare(
     `INSERT INTO plan_items (cwd, item_id, item_number, parent_item_id, text, acceptance, detail, checked, position, updated_at)
@@ -2186,6 +2295,13 @@ const stmts = {
   setPlanItemDeclaredDone: db.prepare(
     "UPDATE plan_items SET declared_done_at = ?, declared_done_session = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cwd = ? AND item_number = ?"
   ),
+  // Out-of-band target-date setter (layer 5 pace tracking, DEC-10). Never
+  // touched by upsertPlanItem/ingest — authored only via
+  // POST /api/plans/items/target and "ccam focus target". Passing null clears
+  // it.
+  setPlanItemTargetDate: db.prepare(
+    "UPDATE plan_items SET target_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cwd = ? AND item_number = ?"
+  ),
   // drift_* deliberately untouched: a fresh declaration must not silence the
   // drift badge - only the auditor writes those columns.
   upsertSessionFocus: db.prepare(
@@ -2223,18 +2339,22 @@ const stmts = {
     `SELECT f.* FROM session_focus f JOIN sessions s ON s.id = f.session_id
      WHERE s.status = 'active'`
   ),
+  // §9.2: sort by created_at (id tiebreak) before LIMIT — this query used to
+  // sort by `id DESC` alone, which silently picks the wrong row whenever
+  // events for a session are bulk-inserted after the fact (workflow-ingest.js)
+  // and land at an id that doesn't reflect their own created_at.
   latestTodoWriteEvent: db.prepare(
     `SELECT data, created_at FROM events
      WHERE session_id = ? AND event_type = 'PostToolUse' AND tool_name = 'TodoWrite'
-     ORDER BY id DESC LIMIT 1`
+     ORDER BY created_at DESC, id DESC LIMIT 1`
   ),
   recentEventSummaries: db.prepare(
     `SELECT event_type, tool_name, summary, created_at FROM events
-     WHERE session_id = ? AND created_at > ? ORDER BY id DESC LIMIT ?`
+     WHERE session_id = ? AND created_at > ? ORDER BY created_at DESC, id DESC LIMIT ?`
   ),
   listFocusEvents: db.prepare(
     `SELECT id, agent_id, summary, data, created_at FROM events
-     WHERE session_id = ? AND event_type = 'Focus' ORDER BY id DESC LIMIT ?`
+     WHERE session_id = ? AND event_type = 'Focus' ORDER BY created_at DESC, id DESC LIMIT ?`
   ),
   distinctSessionCwds: db.prepare(
     "SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL AND cwd != ''"
@@ -2276,6 +2396,95 @@ const stmts = {
     `INSERT INTO focus_summary_access_log
        (cache_key, level, outcome, project_id, session_id, unassigned, model, bullet_count, access_day, accessed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+
+  // ── Layer 4: detour_dispositions ──────────────────────────────────────
+  // The durability guarantee lives here: on conflict, only the OBSERVATION
+  // fields refresh (label, item_id, source_seen_at) — disposition,
+  // decided_by, confidence, reason, note, proposed_*, write_*,
+  // suggested_markdown, resolved_item_id, resolved_at are deliberately
+  // untouched, the same exclusion idiom upsertPlanItem uses for
+  // declared_done_at. Re-inference of a session must never clobber a
+  // decision already made about it, and must NEVER cause a second file
+  // write.
+  upsertDetourDisposition: db.prepare(
+    `INSERT INTO detour_dispositions (cwd, project_id, session_id, source, source_ref, source_seen_at, label, item_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(cwd, source, source_ref) DO UPDATE SET
+       label = excluded.label,
+       item_id = excluded.item_id,
+       source_seen_at = excluded.source_seen_at`
+  ),
+  getDetourDisposition: db.prepare("SELECT * FROM detour_dispositions WHERE id = ?"),
+  listDetourDispositions: db.prepare(
+    `SELECT * FROM detour_dispositions WHERE cwd = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+  ),
+  // §9.2: sort by created_at (id tiebreak) BEFORE any LIMIT.
+  listPendingDetours: db.prepare(
+    `SELECT * FROM detour_dispositions WHERE cwd = ? AND disposition = 'pending'
+     ORDER BY created_at ASC, id ASC LIMIT ?`
+  ),
+  // The underlying inference/declaration changed AFTER the decision was
+  // made — re-surface for review, never re-apply the write (a
+  // write_status='written' row here must not be dispatched a second time;
+  // applyDisposition's own idempotency is the second line of defense).
+  listStaleResolvedDetours: db.prepare(
+    `SELECT * FROM detour_dispositions
+     WHERE cwd = ? AND resolved_at IS NOT NULL AND source_seen_at > resolved_at
+     ORDER BY created_at ASC, id ASC LIMIT ?`
+  ),
+  resolveDetourDisposition: db.prepare(
+    `UPDATE detour_dispositions SET
+       disposition = ?, decided_by = ?, confidence = ?, reason = ?, note = ?,
+       proposed_text = ?, proposed_acceptance = ?, proposed_detail = ?, proposed_parent_item_id = ?
+     WHERE id = ?`
+  ),
+  markDetourWritePending: db.prepare(
+    `UPDATE detour_dispositions SET write_status = 'pending', write_attempted_at = ? WHERE id = ?`
+  ),
+  // One statement for the whole write outcome, so the row never ends up
+  // half-consistent (DEC-13's traceability requirement).
+  markDetourWriteResult: db.prepare(
+    `UPDATE detour_dispositions SET
+       write_status = ?, write_completed_at = ?, write_error = ?, resolved_item_id = ?,
+       suggested_markdown = ?, write_backup_path = ?, write_content_hash_before = ?,
+       write_content_hash_after = ?, resolved_at = ?
+     WHERE id = ?`
+  ),
+
+  // ── Layer 6: decision_queue ───────────────────────────────────────────
+  insertDecisionQueueItem: db.prepare(
+    `INSERT INTO decision_queue (cwd, project_id, kind, ref_id, item_id, message, payload, input_digest)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  // §9.2: sort by created_at (id tiebreak). No LIMIT here — this table is
+  // small and bounded (findOpenQueueItem prevents unbounded re-queuing);
+  // callers that want a page (the HTTP route) filter/slice in JS.
+  listDecisionQueue: db.prepare(`SELECT * FROM decision_queue ORDER BY created_at DESC, id DESC`),
+  getDecisionQueueItem: db.prepare("SELECT * FROM decision_queue WHERE id = ?"),
+  resolveDecisionQueueItem: db.prepare(
+    `UPDATE decision_queue SET status = ?, resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`
+  ),
+  // Anti-duplicate guard: a still-unfixed condition must not re-queue every
+  // tick. ref_id/item_id use IS so a NULL/NULL pair (a cwd-level condition
+  // with no specific detour/item) still matches itself. cwd is REQUIRED in
+  // the guard key: pace_alert/detour_volume rows carry ref_id=NULL AND
+  // item_id=NULL (a cwd-level condition, no specific detour/item), so
+  // without cwd in the WHERE clause every project's guard key collapses to
+  // the same (kind, NULL, NULL) tuple and only the first project's row is
+  // ever inserted — the rest are silently swallowed. See N1 in the
+  // 2026-08-01 adversarial review.
+  findOpenQueueItem: db.prepare(
+    `SELECT * FROM decision_queue WHERE cwd = ? AND kind = ? AND ref_id IS ? AND item_id IS ? AND status = 'pending'`
+  ),
+  // Cost-control digest gate (technical-plan.md §4 step 23(c)): an unchanged
+  // flagged-detour set that already has an open review row for this cwd must
+  // not spawn the LLM a second time. Mirrors focus-summary.js's
+  // cache-by-content-hash pattern, applied to the queue instead of a cache
+  // table. Scoped to kind so a pace_alert/detour_volume row (which never
+  // carries an input_digest) can never accidentally satisfy this gate.
+  findOpenQueueItemByDigest: db.prepare(
+    `SELECT * FROM decision_queue WHERE cwd = ? AND kind = ? AND input_digest = ? AND status = 'pending' ORDER BY created_at DESC, id DESC LIMIT 1`
   ),
 };
 

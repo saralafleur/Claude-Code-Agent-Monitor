@@ -630,7 +630,7 @@ Managed through the `/api/projects/*` routes. Every project mutation (create, re
 
 ### plans / plan_items
 
-Per-repo project plans mirrored **read-only** from `<cwd>/AGENT-PLAN.md` (Plan-Aware Monitoring). Keyed by cwd — like sessions, plans have no `project_id`; a project's plans aggregate through the `project_paths` join. The file is the human-owned source of truth: `checked` mirrors its checkbox, while `declared_done_*` records the agent's `ccam focus done N` claim and survives re-ingest (upserts never touch it). A plan file that disappears stamps `plans.missing_at` and keeps the row, because focus history still references its items; a file that parses to zero items keeps the last good state (far more likely a human mid-edit than an intentional wipe).
+Per-repo project plans mirrored from `<cwd>/AGENT-PLAN.md` (Plan-Aware Monitoring). Keyed by cwd — like sessions, plans have no `project_id`; a project's plans aggregate through the `project_paths` join. The file is the single source of truth, human-owned: `checked` mirrors its checkbox, while `declared_done_*` records the agent's `ccam focus done N` claim and `target_date` (an optional human-set `YYYY-MM-DD`, layer 5 pace tracking) is authored out-of-band via `POST /api/plans/items/target` / `ccam focus target` — all three survive re-ingest (`upsertPlanItem`'s `SET` clause never touches them). The dashboard now appends real content to the file itself through one audited path (`server/lib/plan-writeback.js`) when a layer-4 detour disposition is `fold_in`/`new_item`, then re-runs this same ingest — `plan_items` keeps exactly one writer either way. A plan file that disappears stamps `plans.missing_at` and keeps the row, because focus history still references its items; a file that parses to zero items keeps the last good state (far more likely a human mid-edit than an intentional wipe).
 
 ```sql
 CREATE TABLE plans (
@@ -684,6 +684,7 @@ CREATE TABLE plan_items (
 | `position` | INTEGER | NO | File order (items render in this order, not by number) |
 | `declared_done_at` | TEXT | YES | When an agent declared this item done (`ccam focus done N`), or NULL. Survives re-ingest |
 | `declared_done_session` | TEXT | YES | Declaring session id. **No FK on purpose** — the audit trail must outlive session deletion |
+| `target_date` | TEXT | YES | Optional human-set `YYYY-MM-DD` (local calendar day, layer 5 pace tracking), authored out-of-band via `POST /api/plans/items/target` / `ccam focus target` — never parsed from the file, survives re-ingest like `declared_done_at`. See `server/lib/pace.js` |
 | `updated_at` | TEXT | NO | ISO 8601 timestamp of the last change |
 
 ### session_focus
@@ -755,6 +756,116 @@ CREATE TABLE focus_inferences (
 | `method` | TEXT | NO | `llm` (headless `claude -p`) or `heuristic` (keyword overlap) |
 | `reason` | TEXT | YES | Classifier's one-line justification, or NULL |
 | `inferred_at` | TEXT | NO | ISO 8601 stamp of the verdict; a session active after this becomes eligible for re-classification |
+
+---
+
+### detour_dispositions
+
+**Layer 4**: a durable, resolvable decision about one detour — separate from `focus_inferences`' re-derivable observation, because a detour's identity does not survive re-inference of its session (one `focus_inferences` row per `session_id`, upserted every re-classification). `source` distinguishes an *inferred* detour (the classifier's guess, `source_ref` = `sessions.id`) from a *declared* one (`ccam focus bug|feature|push`, `source_ref` = `events.id`); either kind runs through the same `pending → fold_in|new_item|deliberate|discard` lifecycle. `fold_in`/`new_item` write real content into the cwd's `AGENT-PLAN.md` the moment they're decided (`server/lib/plan-writeback.js`'s `applyDisposition`) — the `write_*` audit columns and `resolved_item_id` (`plan_items.item_id`, not the integer PK, since it's the stable identity) make "which detour, which classification, when" answerable in one query in both directions. No FK on `session_id` — the audit trail must outlive session cleanup, same rule as `alert_events.session_id`. The `disposition`/`source`/`decided_by`/`write_status` `CHECK` constraints are complete as of the initial `CREATE TABLE` (SQLite cannot add a `CHECK` via `ALTER TABLE ADD COLUMN` — widening any of them later needs a full rebuild).
+
+```sql
+CREATE TABLE detour_dispositions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cwd TEXT NOT NULL,
+    project_id TEXT,
+    session_id TEXT,
+    source TEXT NOT NULL CHECK(source IN ('inferred','declared')),
+    source_ref TEXT NOT NULL,
+    source_seen_at TEXT,
+    label TEXT,
+    item_id TEXT,
+    disposition TEXT NOT NULL DEFAULT 'pending'
+        CHECK(disposition IN ('pending','fold_in','new_item','deliberate','discard')),
+    decided_by TEXT CHECK(decided_by IN ('rule','llm','human')),
+    confidence REAL,
+    reason TEXT,
+    note TEXT,
+    proposed_text TEXT,
+    proposed_acceptance TEXT,
+    proposed_detail TEXT,
+    proposed_parent_item_id TEXT,
+    write_status TEXT NOT NULL DEFAULT 'none'
+        CHECK(write_status IN ('none','pending','written','failed','conflict')),
+    write_attempted_at TEXT,
+    write_completed_at TEXT,
+    write_error TEXT,
+    write_backup_path TEXT,
+    write_content_hash_before TEXT,
+    write_content_hash_after TEXT,
+    suggested_markdown TEXT,
+    resolved_item_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    resolved_at TEXT
+);
+```
+
+**Columns (selected):**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, autoincrement |
+| `cwd` / `session_id` | TEXT | NO/YES | The plan and (when known) session this detour belongs to |
+| `project_id` | TEXT | YES | Stamped via `project_paths` (`getProjectPathByCwd`) at record time — an audit-trail convenience, no FK; lets `GET /api/detours?project_id=` and `writeback_conflict`/`writeback_failed` `decision_queue` rows resolve back to a project without a join |
+| `source` / `source_ref` | TEXT | NO | `inferred` (`source_ref` = `sessions.id`) or `declared` (`source_ref` = `events.id`); unique with `cwd` so re-observation upserts in place |
+| `disposition` | TEXT | NO | `pending` → one of `fold_in`/`new_item`/`deliberate`/`discard` — the verdict |
+| `decided_by` | TEXT | YES | `rule`, `llm`, or `human` |
+| `proposed_*` | TEXT | YES | What the rule/LLM/human decided should be added; sanitized by `plan-writeback.sanitizeLlmPlanText` before composition |
+| `write_status` | TEXT | NO | `none` (nothing to write) → `pending` → `written`/`failed`/`conflict` |
+| `write_backup_path` / `write_content_hash_before` / `_after` | TEXT | YES | The write audit — which backup, and the file's hash before/after |
+| `resolved_item_id` | TEXT | YES | The `plan_items.item_id` this disposition created, once `write_status = 'written'` |
+| `created_at` / `resolved_at` | TEXT | NO/YES | Observed vs. decided timestamps |
+
+**Indexes:**
+
+```sql
+CREATE UNIQUE INDEX idx_detour_dispositions_src ON detour_dispositions(cwd, source, source_ref);
+CREATE INDEX idx_detour_dispositions_cwd_created ON detour_dispositions(cwd, created_at);
+CREATE INDEX idx_detour_dispositions_resolved_item ON detour_dispositions(resolved_item_id);
+```
+
+Managed through `/api/detours/*`; see [docs/API.md](./API.md).
+
+---
+
+### decision_queue
+
+**Layer 6**: `server/lib/reconciliation.js`'s output — pace alerts, detour-volume flags, detours needing a human look, and stuck write-backs (`writeback_conflict`/`writeback_failed`, enqueued by `plan-writeback.applyDisposition` itself). Shaped like `alert_events` but deliberately separate: different audience (Sara reviewing portfolio health, not a fired alert rule) and a different trust boundary (some rows are LLM-classified). `kind`'s `CHECK` includes the write-back values from its initial `CREATE TABLE` for the same reason `detour_dispositions`' constraints do. No FK on `session_id`/`cwd` — an audit trail. `findOpenQueueItem` (`kind`+`ref_id`+`item_id`+`status='pending'`) prevents a still-unfixed condition from re-queuing every tick.
+
+```sql
+CREATE TABLE decision_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cwd TEXT,
+    project_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('pace_alert','detour_volume','detour_disposition','writeback_conflict','writeback_failed')),
+    ref_id INTEGER,
+    item_id TEXT,
+    message TEXT NOT NULL,
+    payload TEXT,
+    input_digest TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved','dismissed')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    resolved_at TEXT
+);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `kind` | TEXT | NO | `pace_alert`, `detour_volume`, `detour_disposition` (needs-review), `writeback_conflict`, or `writeback_failed` |
+| `ref_id` | INTEGER | YES | `detour_dispositions.id` for the detour/write-back kinds |
+| `item_id` | TEXT | YES | `plan_items.item_id` for `pace_alert` |
+| `message` | TEXT | NO | Plain-language, stakeholder-altitude summary |
+| `payload` | TEXT | YES | JSON: rule inputs, and for write-back kinds, the attempted markdown + file hash |
+| `status` | TEXT | NO | `pending` → `resolved`/`dismissed` |
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_decision_queue_status_created ON decision_queue(status, created_at);
+```
+
+Managed through `/api/decision-queue/*` and `ccam decisions`; see [docs/API.md](./API.md).
 
 ---
 

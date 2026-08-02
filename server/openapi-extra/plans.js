@@ -82,6 +82,12 @@ const schemas = {
       position: { type: "integer", description: "File order (numbering need not be contiguous)" },
       declared_done_at: { type: "string", nullable: true },
       declared_done_session: { type: "string", nullable: true },
+      target_date: {
+        type: "string",
+        nullable: true,
+        description:
+          "Optional human-set YYYY-MM-DD target date (layer 5 pace tracking), authored out-of-band via POST /api/plans/items/target — never written by ingest, so it survives every re-ingest of the file untouched.",
+      },
       updated_at: { type: "string" },
     },
   },
@@ -294,6 +300,57 @@ const paths = {
         400: { description: "cwd missing", content: { "application/json": { schema: errorRef } } },
         404: {
           description: "No AGENT-PLAN.md on disk and no stored plan",
+          content: { "application/json": { schema: errorRef } },
+        },
+      },
+    },
+  },
+  "/api/plans/items/target": {
+    post: {
+      tags: ["Plans"],
+      operationId: "setPlanItemTargetDate",
+      summary: "Set or clear a plan item's target date (layer 5 pace tracking)",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["cwd", "item_number"],
+              properties: {
+                cwd: { type: "string" },
+                item_number: { type: "integer", description: "Positive integer" },
+                target_date: {
+                  type: "string",
+                  nullable: true,
+                  description: "YYYY-MM-DD parsing to a real calendar date, or null to clear",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Updated plan item (broadcasts the existing plan_updated WebSocket type)",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  ok: { type: "boolean" },
+                  item: { $ref: "#/components/schemas/PlanItem" },
+                },
+              },
+            },
+          },
+        },
+        400: {
+          description: "cwd/item_number/target_date invalid",
+          content: { "application/json": { schema: errorRef } },
+        },
+        404: {
+          description: "No such plan item",
           content: { "application/json": { schema: errorRef } },
         },
       },

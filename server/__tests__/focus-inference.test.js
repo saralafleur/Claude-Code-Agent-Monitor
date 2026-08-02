@@ -533,6 +533,50 @@ describe("inferSession", () => {
     assert.equal(row.kind, "unclassified");
     assert.equal(row.reason, null);
   });
+
+  describe("recording detours does not write AGENT-PLAN.md", () => {
+    it("classification never writes AGENT-PLAN.md — file is byte-identical before/after", async () => {
+      // Create a test plan file
+      const testCwd = fs.mkdtempSync(path.join(os.tmpdir(), "focus-inference-no-write-"));
+      const planPath = path.join(testCwd, "AGENT-PLAN.md");
+      const planContent = "# Test Plan\n\n- [ ] 1. Do something\n";
+      fs.writeFileSync(planPath, planContent);
+
+      // Seed a session and infer a detour
+      const id = nextId("detour-no-write");
+      seedSession(id, { cwd: testCwd, endedAt: new Date().toISOString() });
+      addPrompt(id, "fix the database migration");
+
+      // Mock the LLM to return a detour
+      __injectSpawnForTest(
+        fakeSpawn({
+          stdout: envelope({
+            item_number: null,
+            detour_title: "Database migration issue",
+            confidence: 0.9,
+            reason: "no item covers this work",
+          }),
+        })
+      );
+
+      // Capture file bytes before inference
+      const bytesBefore = fs.readFileSync(planPath);
+
+      // Run classification (should record detour but NOT write the file)
+      await inferSession(dbModule, { id, cwd: testCwd }, "llm");
+
+      // Verify file is unchanged
+      const bytesAfter = fs.readFileSync(planPath);
+      assert.deepEqual(
+        bytesBefore,
+        bytesAfter,
+        "AGENT-PLAN.md should remain byte-identical after classification"
+      );
+
+      // Cleanup
+      fs.rmSync(testCwd, { recursive: true, force: true });
+    });
+  });
 });
 
 describe("focus-report inference fallback", () => {

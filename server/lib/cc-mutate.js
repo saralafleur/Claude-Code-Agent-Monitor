@@ -24,6 +24,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { getClaudeHome } = require("./claude-home");
 const { isUnder, MAX_FILE_BYTES } = require("./cc-discovery");
+const { atomicWriteFile } = require("./atomic-file");
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 // Auto-memory files are arbitrary flat *.md filenames inside a project's
@@ -211,41 +212,6 @@ function createBackup({ scope, type, target, kind, opts }) {
   return dst;
 }
 
-/**
- * Atomic write: tmp file → fsync (best-effort) → rename. Tmp is unlinked
- * on any failure path. Caller is responsible for ensuring parent dir exists.
- */
-function atomicWriteFile(filePath, content) {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  let fd;
-  try {
-    fd = fs.openSync(tmp, "wx");
-    fs.writeSync(fd, content);
-    try {
-      fs.fsyncSync(fd);
-    } catch {
-      // fsync may fail on some filesystems / tmpfs — non-fatal
-    }
-    fs.closeSync(fd);
-    fd = null;
-    fs.renameSync(tmp, filePath);
-  } catch (err) {
-    try {
-      if (fd != null) fs.closeSync(fd);
-    } catch {
-      /* ignore */
-    }
-    try {
-      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-    } catch {
-      /* ignore */
-    }
-    throw err;
-  }
-}
-
 // ── Public API ─────────────────────────────────────────────────────────
 
 /**
@@ -282,6 +248,11 @@ function writeArtifact(args) {
 
   if (r.kind === "dir") {
     fs.mkdirSync(r.target, { recursive: true });
+  } else {
+    // atomicWriteFile no longer creates the parent dir itself (see
+    // atomic-file.js) — a brand-new type's subdir (e.g. the very first
+    // output-style in a fresh CLAUDE_HOME) must still work.
+    fs.mkdirSync(path.dirname(r.filePath), { recursive: true });
   }
   atomicWriteFile(r.filePath, content);
 

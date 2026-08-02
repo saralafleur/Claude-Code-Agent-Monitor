@@ -1068,6 +1068,10 @@ async function cmdFocus(flags, positional) {
     return renderFocusStatus(sessionId);
   }
 
+  if (sub === "target") {
+    return cmdFocusTarget(flags, positional);
+  }
+
   if (!WRITE_VERBS.has(sub)) {
     console.error(
       c.red(`✖ Unknown focus verb: ${sub} (set | push | pop | done | bug | feature | status)`)
@@ -1133,6 +1137,101 @@ async function cmdFocus(flags, positional) {
   const res = await post(`/api/sessions/${encodeURIComponent(sessionId)}/focus`, body);
   const suffix = res.deduped ? c.dim(" (already current — no change)") : "";
   console.log(`${c.green("✔")} focus ${sub} recorded for ${sessionId.slice(0, 12)}…${suffix}`);
+}
+
+const TARGET_DATE_ARG_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** `ccam focus target <n> <YYYY-MM-DD> | --clear` — set or clear a plan
+ *  item's target date (layer 5 pace tracking), via
+ *  POST /api/plans/items/target. Reuses the same session/cwd resolution
+ *  cmdFocus's other verbs use. */
+async function cmdFocusTarget(flags, positional) {
+  const n = parseInt(positional[1], 10);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error(c.red("✖ Usage: ccam focus target <item-number> <YYYY-MM-DD> | --clear"));
+    process.exit(1);
+  }
+
+  let targetDate = null;
+  if (!flags.clear) {
+    const dateArg = positional[2];
+    const parsed = dateArg ? new Date(`${dateArg}T00:00:00`) : null;
+    if (
+      !dateArg ||
+      !TARGET_DATE_ARG_RE.test(dateArg) ||
+      !parsed ||
+      Number.isNaN(parsed.getTime())
+    ) {
+      console.error(
+        c.red(`✖ Invalid date: ${dateArg || "(missing)"} — expected YYYY-MM-DD or --clear`)
+      );
+      process.exit(1);
+    }
+    targetDate = dateArg;
+  }
+
+  const sessionId = await resolveFocusSession(flags);
+  const focusRes = await tryGet(`/api/sessions/${encodeURIComponent(sessionId)}/focus`);
+  const sess = await tryGet(`/api/sessions/${encodeURIComponent(sessionId)}`);
+  const cwd = focusRes?.focus?.cwd || sess?.session?.cwd;
+  if (!cwd) {
+    console.error(c.red("✖ Could not resolve a working directory for this session"));
+    process.exit(1);
+  }
+
+  await post("/api/plans/items/target", { cwd, item_number: n, target_date: targetDate });
+  console.log(
+    targetDate
+      ? `${c.green("✔")} Target date for item ${n} set to ${targetDate}`
+      : `${c.green("✔")} Target date for item ${n} cleared`
+  );
+}
+
+/**
+ * `ccam decisions [ack|dismiss|retry] <id>` — view and act on the layer-6
+ * reconciliation decision queue (server/routes/decision-queue.js). A thin
+ * HTTP client over the route layer, the same shape as `ccam focus done <n>`.
+ */
+async function cmdDecisions(flags, positional) {
+  const sub = positional[0];
+
+  if (!sub) {
+    const data = await get("/api/decision-queue");
+    const rows = (data.queue || data.items || []).map((q) => [
+      q.id,
+      q.kind,
+      q.status,
+      fmtTime(q.created_at),
+      (q.message || "").slice(0, 60),
+    ]);
+    if (!rows.length) {
+      console.log(c.dim("No decisions in the queue."));
+      return;
+    }
+    table(["ID", "Kind", "Status", "Created", "Message"], rows);
+    return;
+  }
+
+  const ACTIONS = {
+    ack: "resolve",
+    dismiss: "dismiss",
+    retry: "retry_write",
+    retry_write: "retry_write",
+  };
+  const action = ACTIONS[sub];
+  if (!action) {
+    console.error(c.red(`✖ Unknown decisions action: ${sub} (ack | dismiss | retry)`));
+    process.exit(1);
+  }
+  const id = positional[1];
+  if (!id) {
+    console.error(c.red(`✖ Usage: ccam decisions ${sub} <id>`));
+    process.exit(1);
+  }
+  const r = await post(`/api/decision-queue/${encodeURIComponent(id)}/resolve`, { action });
+  console.log(
+    `${c.green("✔")} decisions ${sub} ${id}${r?.write_status ? ` (${r.write_status})` : ""}`
+  );
 }
 
 // ── Alerts & webhooks ───────────────────────────────────────────────────────
@@ -1681,6 +1780,20 @@ const COMMAND_GROUPS = [
       ],
       ["focus pop", "", "Resolve the current detour (bug/feature or plain)"],
       ["focus done <n>", "", "Declare a plan item complete (file checkbox stays human-owned)"],
+      [
+        "focus target <n>",
+        "<YYYY-MM-DD> | --clear",
+        "Set or clear a plan item's target date (pace tracking)",
+      ],
+    ],
+  ],
+  [
+    "Decisions",
+    [
+      ["decisions", "", "List pending decision-queue items (layer 6 reconciliation)"],
+      ["decisions ack <id>", "", "Resolve a decision-queue item"],
+      ["decisions dismiss <id>", "", "Dismiss a decision-queue item"],
+      ["decisions retry <id>", "", "Retry a stuck write-back (writeback_conflict/failed)"],
     ],
   ],
   [
@@ -2497,7 +2610,8 @@ const SUBCOMMANDS = {
   pricing: ["set", "delete", "reset"],
   webhooks: ["test"],
   import: ["rescan", "path"],
-  focus: ["status", "set", "push", "pop", "done", "bug", "feature"],
+  focus: ["status", "set", "push", "pop", "done", "bug", "feature", "target"],
+  decisions: ["", "ack", "dismiss", "retry"],
 };
 
 /** Run one parsed command. Returns the handler's promise; may throw
@@ -2538,6 +2652,8 @@ async function runCommand(argv) {
       return cmdCost(flags);
     case "focus":
       return cmdFocus(flags, positional);
+    case "decisions":
+      return cmdDecisions(flags, positional);
     case "alerts":
       return cmdAlerts(flags, positional);
     case "rules":
@@ -2573,6 +2689,8 @@ async function runCommand(argv) {
     case "--version":
     case "-v":
       return cmdVersion();
+    case "commands":
+      return replCommandsList();
     case "help":
     case "--help":
     case "-h":

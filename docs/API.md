@@ -1214,7 +1214,7 @@ DELETE /api/projects/:id/paths/:pathId
 
 ### Plans & Focus
 
-**Plan-Aware Monitoring**: each monitored repo may keep a human-approved `AGENT-PLAN.md` at its root (a `# Title` plus numbered checkbox items like `- [ ] 4. Migrate auth — acceptance: login works via SSO`). The dashboard mirrors it **read-only** into the `plans`/`plan_items` tables, keyed by cwd — the file is the source of truth and is never written by the server. Sessions declare which item they are serving with `ccam focus set|push|bug|feature|pop|done`, normally parsed off the `PostToolUse` hook stream; the endpoints below are the read surface plus the explicit (non-hook) write path.
+**Plan-Aware Monitoring**: each monitored repo may keep a human-approved `AGENT-PLAN.md` at its root (a `# Title` plus numbered checkbox items like `- [ ] 4. Migrate auth — acceptance: login works via SSO`). The dashboard mirrors it into the `plans`/`plan_items` tables, keyed by cwd. The file is still the single source of truth, human-owned — the dashboard now appends to it through one audited path (`server/lib/plan-writeback.js`) when a detour disposition is `fold_in`/`new_item` (POST `/api/detours/:id/resolve` or the layer-6 reconciliation tick), and reads it back through the same ingest as every other trigger. Sessions declare which item they are serving with `ccam focus set|push|bug|feature|pop|done`, normally parsed off the `PostToolUse` hook stream; the endpoints below are the read surface plus the explicit (non-hook) write path.
 
 **Plan shape** (`plan` + `items`):
 
