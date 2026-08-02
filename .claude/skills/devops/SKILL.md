@@ -1,6 +1,6 @@
 ---
 name: devops
-argument-hint: "[desktop-setup|setup | desktop-build | desktop-remove | web-setup | web-build|build | web-up|up | web-down|down | docker-up|docker | docker-down | status]"
+argument-hint: "[desktop-setup|setup | desktop-build | desktop-remove | web-setup | web-build|build | web-up|up | web-down|down | web-restart|restart | docker-up|docker | docker-down | status]"
 description: >
   Claude Code Agent Monitor's DevOps toolbox — commands for the desktop
   Electron app, the native web-app dev stack (Express + Vite), and the
@@ -14,7 +14,8 @@ description: >
   no packaging): `web-setup` — installs root+client deps only; `web-build`
   (alias `build`) — runs the production client build; `web-up` (alias
   `up`) — starts the dev server in the background; `web-down` (alias
-  `down`) — stops it. Docker commands (the containerized production
+  `down`) — stops it; `web-restart` (alias `restart`) — stops then starts
+  it (down + up in one step). Docker commands (the containerized production
   build): `docker-up` (alias `docker`) — builds and starts the
   `agent-monitor` container from the root docker-compose.yml, verifying
   the response really comes from the container; `docker-down` — stops and
@@ -68,7 +69,8 @@ Rules:
 Typical gates here: `/devops desktop-build` before overwriting the app
 currently installed in `/Applications`; `/devops desktop-remove` before
 deleting it; a second, separate gate in `desktop-remove` asking whether to
-also purge app data. The web-app commands (`web-build`/`web-up`/`web-down`)
+also purge app data. The web-app commands
+(`web-build`/`web-up`/`web-down`/`web-restart`)
 and the Docker commands (`docker-up`/`docker-down`) do NOT gate — none of
 them touch an installed app or user data, only a local dev-server process
 or container that's cheap to restart/rebuild. Mark each gate in the
@@ -76,8 +78,8 @@ procedure docs with `🟧🟧🟧 HUMAN GATE REQUIRED 🟧🟧🟧` above the de
 
 ## Command routing
 
-Parse the argument after `/devops`. **Bare `build`/`up`/`down` default to
-the web app, not desktop** — say `desktop-build` explicitly to reach that
+Parse the argument after `/devops`. **Bare `build`/`up`/`down`/`restart`
+default to the web app, not desktop** — say `desktop-build` explicitly to reach that
 one; there's no `up`/`down` shorthand for it anymore. The Docker commands
 have their own `docker-up`/`docker` / `docker-down` names — they don't
 overload bare `up`/`down`.
@@ -91,6 +93,7 @@ overload bare `up`/`down`.
 | `web-build`, `build` | Run the production client build (`npm run build`) — follow `references/web-lifecycle.md` |
 | `web-up`, `up` | Start the web-app dev server (Express + Vite HMR) in the background — follow `references/web-lifecycle.md` |
 | `web-down`, `down` | Stop the backgrounded web-app dev server — follow `references/web-lifecycle.md` |
+| `web-restart`, `restart` | Restart the web-app dev server (`web-down` then `web-up`) — follow `references/web-lifecycle.md` |
 | `docker-up`, `docker` | Build and start the containerized production build (`docker compose up -d --build`) — follow `references/docker-lifecycle.md` |
 | `docker-down` | Stop and remove the container (`docker compose down`) — follow `references/docker-lifecycle.md` |
 | `status` | Report current state of everything this skill manages — follow `references/status.md` |
@@ -134,7 +137,7 @@ no Electron-ABI native rebuild — the web app runs on the host Node
 directly. Full procedure in `references/web-setup.md`; audit script at
 `scripts/web-setup-check.sh`.
 
-### web-build (alias: build), web-up (alias: up), web-down (alias: down)
+### web-build (alias: build), web-up (alias: up), web-down (alias: down), web-restart (alias: restart)
 
 The fast iteration loop for anything scoped to `client/` or `server/` —
 Vite HMR reloads sub-second, versus roughly a minute for a full
@@ -144,9 +147,12 @@ bundle — not required for dev mode, useful as a production-parity check).
 background, tracked via a PID file at `~/.claude/.ccam-web-dev.pid`, and
 verifies with a live `/api/health` check. `web-down` stops it via `SIGTERM`
 (the project's own `scripts/dev.js` forwards this cleanly to both the
-server and Vite). None of the three gate — they touch no installed app and
-no user data. Full procedure in `references/web-lifecycle.md`; shared
-audit script at `scripts/web-check.sh`.
+server and Vite). `web-restart` chains the two — the `web-down` procedure
+then the `web-up` procedure — skipping the down half if nothing is running
+(so it's a plain start in that case). None of the four gate — they touch
+no installed app and no user data. Full procedure in
+`references/web-lifecycle.md`; shared audit script at
+`scripts/web-check.sh`.
 
 ### docker-up (alias: docker), docker-down
 
@@ -185,7 +191,7 @@ doc in `references/<command>.md`, an entry in the frontmatter
 show up in `status`. Keep the audit/plan/install/verify structure. If a
 new command shares build/install state with `desktop-build` or
 `desktop-remove`, reuse `scripts/desktop-check.sh`; if it shares state with
-`web-build`/`web-up`/`web-down`, reuse `scripts/web-check.sh`; if it shares
+`web-build`/`web-up`/`web-down`/`web-restart`, reuse `scripts/web-check.sh`; if it shares
 state with `docker-up`/`docker-down`, reuse `scripts/docker-check.sh` —
 don't add a new script for state something already tracks (see
 `references/status.md`'s note on shared scripts).

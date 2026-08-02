@@ -21,6 +21,10 @@
  *     drives /status and /usage, persists the parsed row. Takes ~10-15s.
  *   - GET/POST/DELETE /api/accounts, POST /api/accounts/:id/capture -
  *     manage named accounts and trigger a per-account capture.
+ *   - POST /api/accounts/:id/login-terminal - clicking a row's "Needs
+ *     login" badge opens a Terminal.app window already running
+ *     `CLAUDE_CONFIG_DIR=<dir> claude`, so the user can walk through that
+ *     profile's login and close the window when done (macOS only).
  *   - GET /api/usage?accountId= - one account's own capture history, used
  *     by its row's expand-in-place section.
  *
@@ -55,7 +59,13 @@ import type {
   Account,
   AccountStatus,
 } from "../lib/api";
-import { formatDateTimeFull, timeAgo, formatModelName } from "../lib/format";
+import {
+  formatDateTimeFull,
+  timeAgo,
+  formatModelName,
+  formatMs,
+  formatMsLong,
+} from "../lib/format";
 
 function formatCost(cost: number | null): string {
   if (cost == null || !Number.isFinite(cost)) return "—";
@@ -136,7 +146,7 @@ function StatusBadge({ status }: { status: UsageCaptureStatus }) {
   );
 }
 
-function AccountStatusBadge({ status }: { status: AccountStatus }) {
+function AccountStatusBadge({ status, onLogin }: { status: AccountStatus; onLogin?: () => void }) {
   const { t } = useTranslation("usage");
   if (status === "ok") {
     return (
@@ -146,8 +156,27 @@ function AccountStatusBadge({ status }: { status: AccountStatus }) {
     );
   }
   if (status === "needs_login") {
+    // Rendered as a clickable span (not a nested <button>: this badge lives
+    // inside the row's expand button, and buttons can't nest) - clicking it
+    // opens a terminal already running `CLAUDE_CONFIG_DIR=<dir> claude` so
+    // the user can walk through the login instead of copy/pasting the
+    // command; stopPropagation keeps the click from also toggling the row.
     return (
-      <span className="badge bg-amber-500/10 border-amber-500/30 text-amber-400">
+      <span
+        role={onLogin ? "button" : undefined}
+        title={onLogin ? t("accounts.status.needsLoginHint") : undefined}
+        onClick={
+          onLogin
+            ? (e) => {
+                e.stopPropagation();
+                onLogin();
+              }
+            : undefined
+        }
+        className={`badge bg-amber-500/10 border-amber-500/30 text-amber-400 ${
+          onLogin ? "cursor-pointer hover:bg-amber-500/25" : ""
+        }`}
+      >
         <KeyRound className="w-3 h-3" /> {t("accounts.status.needsLogin")}
       </span>
     );
@@ -190,6 +219,7 @@ function AccountRow({
   refreshTick,
   onCapture,
   onRemoveClick,
+  onLogin,
 }: {
   account: Account;
   captureBusy: boolean;
@@ -197,6 +227,7 @@ function AccountRow({
   refreshTick: number;
   onCapture: (id: string) => void;
   onRemoveClick: (id: string) => void;
+  onLogin: (id: string) => void;
 }) {
   const { t } = useTranslation("usage");
   const [expanded, setExpanded] = useState(false);
@@ -244,7 +275,7 @@ function AccountRow({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm text-gray-100 font-medium truncate">{account.label}</span>
-              <AccountStatusBadge status={account.status} />
+              <AccountStatusBadge status={account.status} onLogin={() => onLogin(account.id)} />
             </div>
             <p className="text-[11px] text-gray-500 truncate mt-0.5">
               <span className="font-mono">{account.config_dir}</span>
@@ -320,6 +351,9 @@ function AccountsPanel({
   const [captureBusyIds, setCaptureBusyIds] = useState<Set<string>>(new Set());
   const [refreshAllBusy, setRefreshAllBusy] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  // Only failures need surfacing here - a successful login-terminal launch
+  // is self-evident (a Terminal window just opened over the dashboard).
+  const [loginError, setLoginError] = useState<string | null>(null);
   // Bumped after every capture so an expanded account row's own history
   // re-fetches, independent of the parent's `onChanged` (accounts list refresh).
   const [refreshTick, setRefreshTick] = useState(0);
@@ -372,6 +406,15 @@ function AccountsPanel({
       setRefreshAllBusy(false);
       setRefreshTick((n) => n + 1);
       onChanged();
+    }
+  };
+
+  const handleLogin = async (id: string) => {
+    setLoginError(null);
+    try {
+      await api.accounts.loginTerminal(id);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : t("accounts.loadFailed"));
     }
   };
 
@@ -444,6 +487,7 @@ function AccountsPanel({
       )}
 
       {error && <p className="px-4 py-3 text-xs text-red-400">{error}</p>}
+      {loginError && <p className="px-4 py-3 text-xs text-red-400">{loginError}</p>}
 
       {!loading && !error && accounts.length === 0 ? (
         <p className="px-4 py-6 text-xs text-gray-500 text-center">{t("accounts.empty")}</p>
@@ -457,6 +501,7 @@ function AccountsPanel({
             refreshTick={refreshTick}
             onCapture={handleCapture}
             onRemoveClick={handleRemoveClick}
+            onLogin={handleLogin}
           />
         ))
       )}
@@ -522,7 +567,12 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
             minute: "2-digit",
           })
         : null;
-    return { account, pct, spanDays, resetWhen };
+    // The large centered countdown ("2d 5h 30m") - day/hour/minute, since
+    // weekly resets are usually days out and a hint of hours/minutes still
+    // matters once it's close.
+    const countdown =
+      pct != null && validReset ? formatMsLong(resetDate!.getTime() - today.getTime()) : null;
+    return { account, pct, spanDays, resetWhen, countdown };
   });
 
   const furthestResetDays = Math.max(0, ...rows.map((r) => r.spanDays ?? 0));
@@ -559,12 +609,12 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
               </div>
             ))}
           </div>
-          {rows.map(({ account, pct, spanDays, resetWhen }) => {
+          {rows.map(({ account, pct, spanDays, resetWhen, countdown }) => {
             const visibleDays = spanDays != null ? Math.min(spanDays, dayCount) : 0;
 
             return (
               <div key={account.id} className="border-t border-border first:border-t-0 py-1.5">
-                <div className="flex items-center h-5">
+                <div className="flex items-center h-9">
                   <div
                     style={{ width: RESET_CALENDAR_LABEL_PX }}
                     className="flex-shrink-0 pr-2 flex items-center justify-between gap-1"
@@ -578,7 +628,7 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
                       </span>
                     )}
                   </div>
-                  <div className="relative h-5" style={{ width: trackWidth }}>
+                  <div className="relative h-9" style={{ width: trackWidth }}>
                     <div className="absolute inset-0 flex">
                       {days.map((_, i) => (
                         <div
@@ -590,10 +640,17 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
                     </div>
                     {pct != null && spanDays != null && (
                       <div
-                        className={`absolute top-0.5 h-4 rounded ${weeklyPctColor(pct)}`}
+                        className={`absolute top-0.5 h-8 rounded ${weeklyPctColor(pct)}`}
                         style={{ left: 0, width: `${visibleDays * RESET_CALENDAR_DAY_PX - 2}px` }}
                         title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
                       />
+                    )}
+                    {countdown && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-1">
+                        <span className="text-base sm:text-lg font-bold text-gray-100 bg-surface-1/80 rounded px-2 py-0.5 leading-tight whitespace-nowrap">
+                          {countdown}
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -658,6 +715,10 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
       pct != null && validReset
         ? resetDate!.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
         : null;
+    // The large centered countdown ("3h 24m") - hour/minute only, since the
+    // session window resets within at most ~5h.
+    const countdown =
+      pct != null && validReset ? formatMs(resetDate!.getTime() - now.getTime()) : null;
 
     // The weekly countdown bar: fills from "now" (top) down to the weekly
     // reset instant, then stops - it does NOT span the full visible window
@@ -688,6 +749,7 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
       pct,
       hoursUntil,
       resetWhen,
+      countdown,
       weeklyPct: account.latest_week_window_pct,
       weeklyHoursUntil,
       weeklyResetWhen,
@@ -725,6 +787,7 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
               pct,
               hoursUntil,
               resetWhen,
+              countdown,
               weeklyPct,
               weeklyHoursUntil,
               weeklyResetWhen,
@@ -758,6 +821,13 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
                         style={{ top: `${hoursUntil * SESSION_TIMELINE_HOUR_PX - 2}px` }}
                         title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
                       />
+                    )}
+                    {countdown && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-1">
+                        <span className="text-base sm:text-lg font-bold text-gray-100 bg-surface-1/80 rounded px-2 py-0.5 leading-tight text-center">
+                          {countdown}
+                        </span>
+                      </div>
                     )}
                   </div>
                   <div

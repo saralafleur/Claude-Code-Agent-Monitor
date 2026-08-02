@@ -1,7 +1,8 @@
-# web-build / web-up / web-down — the web-app dev stack
+# web-build / web-up / web-down / web-restart — the web-app dev stack
 
 Aliases (bare, unqualified — reassigned away from the desktop commands):
-`build` → `web-build`, `up` → `web-up`, `down` → `web-down`.
+`build` → `web-build`, `up` → `web-up`, `down` → `web-down`,
+`restart` → `web-restart`.
 
 Goal: the fast iteration loop — Vite HMR reloads sub-second, versus roughly
 a minute for a full `desktop-build` cycle. Use this for anything scoped to
@@ -31,7 +32,7 @@ that could collide with some other project's `vite`.
 
 State: PID file `~/.claude/.ccam-web-dev.pid`, log `~/.claude/.ccam-web-dev.log` (mirrors this project's own convention of keeping runtime state under `~/.claude/` — see `server/lib/server-info.js` / `~/.claude/.agent-dashboard.json`).
 
-## Shared audit (Phase 1 for all three actions below)
+## Shared audit (Phase 1 for all four actions below)
 
 ```bash
 zsh <skill-base-dir>/scripts/web-check.sh
@@ -159,6 +160,34 @@ cleanly. The `SIGKILL` fallback only fires if something hangs past 5s.
 **Verify:** re-run the shared audit — `web-running` reads "not running".
 Confirm the port is free: `lsof -nP -iTCP:<port> -sTCP:LISTEN` returns
 nothing for the port `up` was using (skip if it was never captured).
+
+## restart (alias: `restart`)
+
+**Plan:** stop the tracked dev server, then start a fresh one — the `down`
+procedure followed by the `up` procedure, in one command. Use after
+changing something HMR can't pick up (server-side code without a watcher
+restart, `scripts/dev.js` itself, env assumptions) or when the running
+instance looks wedged. Non-destructive, no gate — same reasoning as `up`
+and `down` individually.
+
+Unlike `up`, an already-running server does NOT short-circuit this command
+— a running instance is precisely what gets stopped and replaced. If the
+audit shows `web-running` as "not running", say so and skip straight to
+the `up` half — a restart of a stopped server is just a start, not an
+error.
+
+**Execute:** run the `down` Execute block (skip if nothing was running),
+confirm the process is actually gone (its old port freed), then run the
+`up` Execute block from the same section above. Do not interleave — the
+old instance must be dead before the new one starts, or the new server
+will see port 4820 held by the dying process and bind a fallback port for
+no reason.
+
+**Verify:** identical to `up`'s Verify — re-run the shared audit
+(`web-running` shows a fresh PID and both ports), curl `/api/health` on
+the Express port and `/` on the Vite port, and report the frontend URL
+labeled **(hot-reload)**. Mention the new PID; if the ports changed from
+the pre-restart ones, say so.
 
 ## Notes
 

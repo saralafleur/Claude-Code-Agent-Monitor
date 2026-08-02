@@ -1680,13 +1680,16 @@ Every capture is persisted regardless of parse success: `status` is `"ok"` (key 
 The `/api/accounts/*` namespace is a second, multi-account capture path alongside the tmux/TUI one above. Each account is just a `{ label, configDir }` pair — `configDir` is a `CLAUDE_CONFIG_DIR` the user already ran `claude login` into. This dashboard never sees or stores a password, browser session cookie, or the account's own OAuth token — `POST /:id/capture` reads that credential live from the CLI's own storage (macOS Keychain, or a `.credentials.json` file on other platforms — see `server/lib/claude-cli-credentials.js`) and, if usable, fetches usage directly from `api.anthropic.com` (`server/lib/usage-fetch-oauth.js`), persisting the result into the same `usage_captures` table with `account_id` set. Same same-origin guard as `/api/usage` and `/api/run` since this makes a real outbound network call with a live token.
 
 ```http
-GET    /api/accounts                  List accounts + each one's latest known session/weekly rate-limit %
-POST   /api/accounts                  Add an account — Body: { label, configDir }
-DELETE /api/accounts/:id              Remove an account (its past captures keep their now-orphaned account_id)
-POST   /api/accounts/:id/capture      Read the account's CLI credential and fetch + persist a fresh usage snapshot
+GET    /api/accounts                       List accounts + each one's latest known session/weekly rate-limit %
+POST   /api/accounts                       Add an account — Body: { label, configDir }
+DELETE /api/accounts/:id                   Remove an account (its past captures keep their now-orphaned account_id)
+POST   /api/accounts/:id/capture           Read the account's CLI credential and fetch + persist a fresh usage snapshot
+POST   /api/accounts/:id/login-terminal    Open a Terminal.app window running CLAUDE_CONFIG_DIR=<dir> claude (macOS only)
 ```
 
-`POST /:id/capture` never returns a `500` for "not logged in yet": if the credential isn't usable (no login found, an expired token, or an unreadable/invalid stored credential), it responds `200` with `{ account, status: "not_found"|"expired"|"invalid", message }` instead — an expected, actionable state. On success it returns `201` with the freshly persisted `usage_captures` row (`status: "ok"`), or `201` with `status: "error"` if the credential was valid but the usage fetch itself failed (e.g. a revoked token). This app never attempts to refresh an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login; an expired login is reported as account status `needs_login`, fixed by running `CLAUDE_CONFIG_DIR=<dir> claude` once to re-authenticate.
+`POST /:id/capture` never returns a `500` for "not logged in yet": if the credential isn't usable (no login found, an expired token, or an unreadable/invalid stored credential), it responds `200` with `{ account, status: "not_found"|"expired"|"invalid", message }` instead — an expected, actionable state. On success it returns `201` with the freshly persisted `usage_captures` row (`status: "ok"`), or `201` with `status: "error"` if the credential was valid but the usage fetch itself failed (e.g. a revoked token). This app never attempts to refresh an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login; an expired login is reported as account status `needs_login`.
+
+`POST /:id/login-terminal` is the click-through fix for `needs_login`: it opens a brand-new Terminal.app window already running `CLAUDE_CONFIG_DIR=<this account's config dir> claude` (the same AppleScript machinery as `POST /api/sessions/:id/open-terminal`), so the user can walk through that profile's interactive login and close the window when done. In the UI this is what clicking an account row's **Needs login** badge calls. Returns `200 { ok: true }` on launch; typed failures map to `501` (`UNSUPPORTED_PLATFORM` — not macOS), `409` (`NO_CONFIG_DIR`), or `500` (`AUTOMATION_ERROR` — commonly a not-yet-granted macOS Automation permission).
 
 ---
 

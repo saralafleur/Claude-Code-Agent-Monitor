@@ -57,6 +57,7 @@
       "idle": "尚未捕获",
       "ok": "正常",
       "needsLogin": "需要登录",
+      "needsLoginHint": "点击打开终端并登录此账户",
       "error": "错误"
     },
     "calendar": {

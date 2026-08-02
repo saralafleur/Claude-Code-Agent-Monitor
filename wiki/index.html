@@ -1558,7 +1558,10 @@
                     that login's own OAuth credential straight from the CLI's storage (Keychain,
                     or a file on non-macOS) and calls Anthropic's API directly, so tracking a
                     second or third account needs no browser session cookie, password, or extra
-                    login flow.
+                    login flow. A missing or expired login shows a clickable
+                    <strong>Needs login</strong> badge (macOS) that opens a new Terminal window
+                    already running <code>CLAUDE_CONFIG_DIR=&lt;dir&gt; claude</code> —
+                    re-authenticating is just a login walk-through and closing the window.
                   </p>
                 </div>
                 <div class="feature-card">
@@ -7233,7 +7236,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=81" defer></script>
+    <script src="i18n-content.js?v=82" defer></script>
     <script src="script.js?v=33" defer></script>
     <script>
       (function () {

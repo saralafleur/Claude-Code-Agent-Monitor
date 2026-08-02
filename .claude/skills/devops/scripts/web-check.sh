@@ -1,7 +1,8 @@
 #!/bin/zsh
 # @file Read-only audit of build/run state for the web app (Express server +
-# Vite client dev stack) -- shared by the web-build, web-up, and web-down
-# commands. Prints one "KEY | STATUS | DETAIL" line per check; exits 0
+# Vite client dev stack) -- shared by the web-build, web-up, web-down, and
+# web-restart commands. Prints one "KEY | STATUS | DETAIL" line per check;
+# exits 0
 # always. Safe to run any time -- changes nothing.
 # @author Son Nguyen <hoangson091104@gmail.com>
 

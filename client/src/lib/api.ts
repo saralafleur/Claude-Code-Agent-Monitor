@@ -1783,6 +1783,16 @@ export const api = {
         `/accounts/${encodeURIComponent(id)}/capture`,
         { method: "POST" }
       ),
+    /**
+     * POST /api/accounts/:id/login-terminal - open a new Terminal.app window
+     * running `CLAUDE_CONFIG_DIR=<this account's config dir> claude` (macOS
+     * only), dropping the user into that profile's interactive login flow.
+     * The click-through behind the Usage page's "Needs login" badge.
+     */
+    loginTerminal: (id: string) =>
+      request<{ ok: true }>(`/accounts/${encodeURIComponent(id)}/login-terminal`, {
+        method: "POST",
+      }),
   },
 
   // ────────────────────────────────── Alerts API ──────────────────────────────

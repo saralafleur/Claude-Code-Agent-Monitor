@@ -9,10 +9,13 @@
  * to fetch usage via server/lib/usage-fetch-oauth.js, and persists the
  * result into the existing `usage_captures` table scoped by `account_id`.
  *
- *   GET    /api/accounts             — list accounts + each one's latest known %s
- *   POST   /api/accounts             — add an account { label, configDir }
- *   DELETE /api/accounts/:id         — remove an account (capture history kept)
- *   POST   /api/accounts/:id/capture — fetch + persist a fresh capture for one account
+ *   GET    /api/accounts                    — list accounts + each one's latest known %s
+ *   POST   /api/accounts                    — add an account { label, configDir }
+ *   DELETE /api/accounts/:id                — remove an account (capture history kept)
+ *   POST   /api/accounts/:id/capture        — fetch + persist a fresh capture for one account
+ *   POST   /api/accounts/:id/login-terminal — open a Terminal.app window running
+ *                                             `CLAUDE_CONFIG_DIR=<dir> claude` so the
+ *                                             user can log this profile in (macOS only)
  *
  * Security model: same loopback-Origin guard as `/api/usage` and `/api/run`
  * — `/:id/capture` makes a real outbound network call using a live OAuth
@@ -33,6 +36,11 @@ const { sameOriginGuard } = require("../lib/origin-guard");
 const claudeCliCredentials = require("../lib/claude-cli-credentials");
 const usageFetchOauth = require("../lib/usage-fetch-oauth");
 const usageCapturesDb = require("../lib/usage-captures-db");
+// Required as a module object (not destructured) so tests can swap
+// `terminalFocus.openLoginTerminalForConfigDir` and this route picks the
+// stub up at call time — same idiom routes/projects.js and routes/sessions.js
+// use for their own terminal-focus calls.
+const terminalFocus = require("../lib/terminal-focus");
 
 const router = Router();
 
@@ -60,13 +68,16 @@ function serialize(row) {
   };
 }
 
-/** Human-readable fallback for a credential status that has no explicit message. */
+/** Human-readable fallback for a credential status that has no explicit
+ *  message. Points at the clickable "Needs login" badge (which opens a
+ *  terminal via POST /:id/login-terminal) rather than making the user
+ *  copy/paste the CLAUDE_CONFIG_DIR command themselves. */
 function describeCredentialStatus(status, configDir) {
   if (status === "not_found") {
-    return `No Claude CLI login found for ${configDir}. Run 'CLAUDE_CONFIG_DIR=${configDir} claude' once to log in.`;
+    return `No Claude CLI login found for ${configDir}. Click 'Needs login' to open a terminal and log in.`;
   }
   if (status === "expired") {
-    return `Access token expired. Run 'CLAUDE_CONFIG_DIR=${configDir} claude' once to refresh this profile's login.`;
+    return `Access token expired. Click 'Needs login' to open a terminal and refresh this profile's login.`;
   }
   return `Stored credential for ${configDir} looks invalid.`;
 }
@@ -181,6 +192,33 @@ router.post("/:id/capture", async (req, res) => {
   );
 
   return res.status(201).json(capture);
+});
+
+// Maps server/lib/terminal-focus.js's typed failure codes to HTTP status —
+// same idiom routes/projects.js's OPEN_TERMINAL_STATUS uses.
+const LOGIN_TERMINAL_STATUS = {
+  UNSUPPORTED_PLATFORM: 501,
+  NO_CONFIG_DIR: 409,
+  AUTOMATION_ERROR: 500,
+};
+
+/**
+ * POST /:id/login-terminal — opens a brand-new Terminal.app window running
+ * `CLAUDE_CONFIG_DIR=<this account's config dir> claude` (macOS only), so
+ * the user can walk through that profile's interactive login and just close
+ * the window when done — the click-through counterpart of the "Needs login"
+ * badge's advice. Doesn't touch the account row's status: the login only
+ * takes effect on the next capture, which re-reads the credential anyway.
+ */
+router.post("/:id/login-terminal", (req, res) => {
+  const account = stmts.getAccount.get(req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: { code: "ENOTFOUND", message: "account not found" } });
+  }
+  const result = terminalFocus.openLoginTerminalForConfigDir(account.config_dir);
+  if (result.ok) return res.json({ ok: true });
+  const status = LOGIN_TERMINAL_STATUS[result.code] || 500;
+  res.status(status).json({ error: { code: result.code, message: result.message } });
 });
 
 module.exports = router;

@@ -10,8 +10,8 @@ skill manages in right now?" Never installs, fixes, or changes anything.
    `desktop-setup`; `web-setup-check.sh` belongs to `web-setup`.
    `desktop-check.sh` is shared by `desktop-build` and `desktop-remove` —
    report those two together under one section. `web-check.sh` is shared
-   by `web-build`, `web-up`, and `web-down` — report those three together
-   under one section. `docker-check.sh` is shared by `docker-up` and
+   by `web-build`, `web-up`, `web-down`, and `web-restart` — report those
+   four together under one section. `docker-check.sh` is shared by `docker-up` and
    `docker-down` — report those two together under one section. No shared
    script's commands get repeated tables.
 
@@ -81,7 +81,7 @@ skill manages in right now?" Never installs, fixes, or changes anything.
 | desktop-setup | ✅ ready | — |
 | desktop-build / desktop-remove | ✅ ready | — |
 | web-setup | ✅ ready | — |
-| web-build / web-up / web-down | ✅ ready | — |
+| web-build / web-up / web-down / web-restart | ✅ ready | — |
 | docker-up / docker-down | ✅ ready | — |
 
 <details per command: audit table or non-ok rows>

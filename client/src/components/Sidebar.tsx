@@ -1,6 +1,6 @@
 /**
  * @file Sidebar.tsx
- * @description Defines the Sidebar component that provides navigation links to different sections of the application, displays the connection status, and includes a toggle button for collapsing or expanding the sidebar. The component uses React Router's NavLink for navigation and Lucide icons for visual representation. The collapsed state of the sidebar is stored in localStorage to persist user preferences across sessions. The Projects nav row also carries a "new session" icon button (expanded state only) that opens the shared OpenTerminalModal project/session picker, mirroring the Kanban board's own entry point to it.
+ * @description Defines the Sidebar component that provides navigation links to different sections of the application, displays the connection status, and includes a toggle button for collapsing or expanding the sidebar. The component uses React Router's NavLink for navigation and Lucide icons for visual representation. The collapsed state of the sidebar is stored in localStorage to persist user preferences across sessions. A "new session" icon button opens the shared OpenTerminalModal project/session picker, mirroring the Kanban board's own entry point to it - when expanded it sits beside the Projects nav row, and when collapsed it becomes its own icon-only row directly above the Projects icon.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -479,10 +479,10 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
                   </NavLink>
                 );
                 // Second entry point for the project → session picker
-                // (OpenTerminalModal), right of the Projects row itself -
-                // only when expanded, matching every other secondary
-                // sidebar control (scroll chevrons, language grid, footer
-                // links) which are hidden while collapsed for space.
+                // (OpenTerminalModal). Expanded: sits right of the Projects
+                // row itself. Collapsed: there's no room beside the icon, so
+                // it becomes its own icon-only row directly above Projects
+                // instead of disappearing.
                 if (to === "/projects" && !collapsed) {
                   return (
                     <div key={to} className="flex items-center gap-1.5">
@@ -496,6 +496,22 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
                       >
                         <SquareTerminal className="w-4 h-4" />
                       </button>
+                    </div>
+                  );
+                }
+                if (to === "/projects" && collapsed) {
+                  return (
+                    <div key={to} className="space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => setOpenTerminalPickerOpen(true)}
+                        title={t("nav:newSession")}
+                        aria-label={t("nav:newSession")}
+                        className="w-full flex items-center justify-center px-2 py-2.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-200 hover:bg-surface-3 border border-transparent transition-colors duration-150"
+                      >
+                        <SquareTerminal className="w-4 h-4 flex-shrink-0" />
+                      </button>
+                      {navLink}
                     </div>
                   );
                 }

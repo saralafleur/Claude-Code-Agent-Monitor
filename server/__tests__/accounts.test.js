@@ -8,7 +8,10 @@
  * (persists a usage_captures row scoped to the account), an expired/missing
  * login (200 with an actionable "needs_login" status, no capture row), and
  * a usage-fetch failure (still persists an error-status capture row, same
- * as the legacy tmux capture path already does for its own failures).
+ * as the legacy tmux capture path already does for its own failures). Also
+ * covers POST /:id/login-terminal (the clickable "Needs login" badge): the
+ * account's config_dir is what gets handed to terminal-focus, and the typed
+ * failure codes map to their documented HTTP statuses.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -248,6 +251,66 @@ describe("/api/accounts/:id/capture credential outcomes", () => {
     const row = list.body.accounts.find((a) => a.id === accountId);
     assert.equal(row.status, "error");
     assert.ok(row.last_error);
+  });
+});
+
+describe("POST /api/accounts/:id/login-terminal", () => {
+  const terminalFocus = require("../lib/terminal-focus");
+  let configDir;
+  let accountId;
+
+  before(async () => {
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), "ccam-acct-login-"));
+    const res = await post("/api/accounts", { label: "Login Test", configDir });
+    accountId = res.body.account.id;
+  });
+  after(() => {
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  it("404s for an unknown account id", async () => {
+    const res = await post("/api/accounts/acct_nope/login-terminal", {});
+    assert.equal(res.status, 404);
+  });
+
+  it("rejects a cross-origin attempt (it launches a real terminal)", async () => {
+    const res = await post(
+      `/api/accounts/${accountId}/login-terminal`,
+      {},
+      { Origin: "https://evil.example" }
+    );
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error.code, "EBADORIGIN");
+  });
+
+  it("opens a login terminal for the account's config dir and returns { ok: true }", async () => {
+    let seenConfigDir;
+    mock.method(terminalFocus, "openLoginTerminalForConfigDir", (dir) => {
+      seenConfigDir = dir;
+      return { ok: true };
+    });
+    const res = await post(`/api/accounts/${accountId}/login-terminal`, {});
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { ok: true });
+    assert.equal(seenConfigDir, configDir);
+  });
+
+  it("maps each typed failure code to its documented HTTP status", async () => {
+    const cases = [
+      ["UNSUPPORTED_PLATFORM", 501],
+      ["NO_CONFIG_DIR", 409],
+      ["AUTOMATION_ERROR", 500],
+    ];
+    for (const [code, status] of cases) {
+      mock.method(terminalFocus, "openLoginTerminalForConfigDir", () => ({
+        ok: false,
+        code,
+        message: `msg:${code}`,
+      }));
+      const res = await post(`/api/accounts/${accountId}/login-terminal`, {});
+      assert.equal(res.status, status, `${code} should map to ${status}`);
+      assert.equal(res.body.error.code, code);
+    }
   });
 });
 

@@ -6,8 +6,11 @@
  * focus-stolen. Also opens a brand-new Terminal.app window and starts a
  * fresh `claude` instance there — in a session's working directory (for
  * starting a second session against the same project without hunting down
- * the existing tab), or in any arbitrary folder (for the Projects "open
- * terminal in folder" picker, which has no session in the picture at all).
+ * the existing tab), in any arbitrary folder (for the Projects "open
+ * terminal in folder" picker, which has no session in the picture at all),
+ * or with CLAUDE_CONFIG_DIR pointed at an account profile (for the Usage
+ * page's "Needs login" action, which drops the user into that profile's
+ * interactive login flow).
  * Fail-safe by design, same posture as session-liveness.js:
  * every unresolvable step (no pid recorded, pid no longer alive, no tty, no
  * cwd recorded, not on macOS, Terminal automation not yet authorized)
@@ -17,6 +20,7 @@
  */
 
 const { execFileSync } = require("node:child_process");
+const os = require("node:os");
 const path = require("node:path");
 const { isClaudeCommand } = require("./session-liveness");
 
@@ -260,6 +264,48 @@ function openTerminalForCwd(cwd, name) {
 }
 
 /**
+ * Opens a brand-new Terminal.app window and starts `claude` with
+ * `CLAUDE_CONFIG_DIR` pointed at `configDir` — the Usage page's "Needs
+ * login" action, which drops the user straight into the interactive login
+ * flow for that account profile instead of making them copy/paste the
+ * command themselves. Runs from the user's home directory: unlike the
+ * session/project variants there's no meaningful working directory in the
+ * picture, and the login flow doesn't care where it runs.
+ * @param {string|null|undefined} configDir The account's CLAUDE_CONFIG_DIR.
+ * @returns {{ok: true} | {ok: false, code: string, message: string}}
+ */
+function openLoginTerminalForConfigDir(configDir) {
+  if (process.platform !== "darwin") {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_PLATFORM",
+      message: "Opening a new terminal is only supported on macOS (Terminal.app).",
+    };
+  }
+  if (!configDir) {
+    return {
+      ok: false,
+      code: "NO_CONFIG_DIR",
+      message: "No config directory was provided.",
+    };
+  }
+
+  const cdCommand = `cd ${exports.shellQuote(os.homedir())}`;
+  const claudeCommand = `CLAUDE_CONFIG_DIR=${exports.shellQuote(configDir)} claude`;
+  try {
+    exports.runOpenTerminalScript(cdCommand, claudeCommand);
+  } catch (err) {
+    const detail = err && err.stderr ? String(err.stderr).trim() : err.message;
+    return {
+      ok: false,
+      code: "AUTOMATION_ERROR",
+      message: `Terminal automation failed (${detail}). If this is the first attempt, grant Terminal automation access in System Settings > Privacy & Security > Automation.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Opens a brand-new Terminal.app window in `session`'s working directory and
  * starts a fresh `claude` instance in it — the counterpart to
  * `focusTerminalForSession` for starting a second session against the same
@@ -313,4 +359,5 @@ exports.focusTerminalForSession = focusTerminalForSession;
 exports.shellQuote = shellQuote;
 exports.runOpenTerminalScript = runOpenTerminalScript;
 exports.openTerminalForCwd = openTerminalForCwd;
+exports.openLoginTerminalForConfigDir = openLoginTerminalForConfigDir;
 exports.openTerminalForSession = openTerminalForSession;

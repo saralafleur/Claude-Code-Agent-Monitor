@@ -1,10 +1,12 @@
 /**
  * @file Sidebar.openTerminal.test.tsx
- * @description Tests the Sidebar's "New session…" icon button next to the
- * Projects nav row: a second entry point to the shared OpenTerminalModal
- * project/session picker (the Kanban board header owns the first one, see
- * KanbanBoard.openTerminalMenu.test.tsx). Only proves the button wires up to
- * the modal and that it's hidden while the sidebar is collapsed — the
+ * @description Tests the Sidebar's "New session…" icon button, a second
+ * entry point to the shared OpenTerminalModal project/session picker (the
+ * Kanban board header owns the first one, see
+ * KanbanBoard.openTerminalMenu.test.tsx). When expanded it sits next to the
+ * Projects nav row; when collapsed it becomes its own icon-only row directly
+ * above the Projects icon rather than disappearing. Only proves the button
+ * wires up to the modal and repositions correctly across both states — the
  * picker's own mechanics are covered by OpenTerminalModal's own test file.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
@@ -78,9 +80,14 @@ describe("Sidebar - New session button", () => {
     expect(openTerminalMock).toHaveBeenCalledWith("proj-1", "/repo/agent-monitor");
   });
 
-  it("is hidden while the sidebar is collapsed", () => {
+  it("appears as its own row directly above the Projects icon while collapsed", () => {
     renderSidebar(true);
 
-    expect(screen.queryByTitle("New session…")).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation");
+    const newSessionButton = screen.getByTitle("New session…");
+    const projectsLink = screen.getByTitle("Projects");
+    const items = Array.from(nav.querySelectorAll("a, button"));
+
+    expect(items.indexOf(projectsLink)).toBe(items.indexOf(newSessionButton) + 1);
   });
 });

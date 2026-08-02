@@ -57,6 +57,7 @@
       "idle": "Not captured yet",
       "ok": "OK",
       "needsLogin": "Needs login",
+      "needsLoginHint": "Click to open a terminal and log in to this account",
       "error": "Error"
     },
     "calendar": {

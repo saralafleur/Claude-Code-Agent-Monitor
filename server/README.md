@@ -770,6 +770,7 @@ Named Claude accounts — a second, multi-account capture path alongside the tmu
 | `POST`   | `/api/accounts`             | Add an account. Body: `{ label, configDir }`. `400` if `configDir` doesn't exist, `409` if already registered |
 | `DELETE` | `/api/accounts/:id`         | Remove an account (its past captures keep their now-orphaned `account_id`) |
 | `POST`   | `/api/accounts/:id/capture` | Read the credential and fetch + persist a fresh capture scoped to this account. `200` with `{ account, status, message }` (not a `500`) when the credential isn't usable yet (no login, expired, invalid) |
+| `POST`   | `/api/accounts/:id/login-terminal` | Open a new Terminal.app window already running `CLAUDE_CONFIG_DIR=<dir> claude` (macOS only, `lib/terminal-focus.js`'s `openLoginTerminalForConfigDir`) — the click-through behind the Usage page's "Needs login" badge. `501` off-macOS, `500` on an automation failure |
 
 This server never refreshes an expired access token itself — doing so could consume the CLI's own refresh token and break the user's real `claude` login. An expired/missing login surfaces as account status `needs_login`, resolved by running `CLAUDE_CONFIG_DIR=<dir> claude` once to (re-)authenticate that profile.
 

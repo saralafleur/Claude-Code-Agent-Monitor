@@ -42,6 +42,7 @@ const real = {
   focusTerminalForSession: terminalFocus.focusTerminalForSession,
   runOpenTerminalScript: terminalFocus.runOpenTerminalScript,
   openTerminalForSession: terminalFocus.openTerminalForSession,
+  openLoginTerminalForConfigDir: terminalFocus.openLoginTerminalForConfigDir,
 };
 function restoreTerminalFocus() {
   Object.assign(terminalFocus, real);
@@ -311,6 +312,67 @@ describe("openTerminalForSession — full branching", () => {
         cwd: "/repo/agent-monitor",
         source: "local",
       });
+      assert.equal(r.ok, false);
+      assert.equal(r.code, "UNSUPPORTED_PLATFORM");
+    } finally {
+      Object.defineProperty(process, "platform", original);
+    }
+  });
+});
+
+describe("openLoginTerminalForConfigDir — full branching", () => {
+  beforeEach(() => {
+    terminalFocus.runOpenTerminalScript = () => "";
+  });
+
+  it("succeeds and builds a `cd <home>` + CLAUDE_CONFIG_DIR-prefixed claude command", () => {
+    let seenCd, seenClaude;
+    terminalFocus.runOpenTerminalScript = (cdCommand, claudeCommand) => {
+      seenCd = cdCommand;
+      seenClaude = claudeCommand;
+      return "";
+    };
+    const r = terminalFocus.openLoginTerminalForConfigDir("/Users/dev/.claude-accounts/primary");
+    assert.deepEqual(r, { ok: true });
+    assert.equal(seenCd, `cd '${os.homedir()}'`);
+    assert.equal(seenClaude, "CLAUDE_CONFIG_DIR='/Users/dev/.claude-accounts/primary' claude");
+  });
+
+  it("shell-quotes a config dir with an embedded single quote", () => {
+    let seenClaude;
+    terminalFocus.runOpenTerminalScript = (_cd, claudeCommand) => {
+      seenClaude = claudeCommand;
+      return "";
+    };
+    terminalFocus.openLoginTerminalForConfigDir("/tmp/it's a dir");
+    assert.equal(seenClaude, "CLAUDE_CONFIG_DIR='/tmp/it'\\''s a dir' claude");
+  });
+
+  it("NO_CONFIG_DIR when no config dir is provided", () => {
+    for (const configDir of [null, undefined, ""]) {
+      const r = terminalFocus.openLoginTerminalForConfigDir(configDir);
+      assert.equal(r.ok, false);
+      assert.equal(r.code, "NO_CONFIG_DIR");
+    }
+  });
+
+  it("AUTOMATION_ERROR when the AppleScript invocation throws", () => {
+    terminalFocus.runOpenTerminalScript = () => {
+      const err = new Error("execution error");
+      err.stderr = "osascript: Not authorized to send Apple events to Terminal.";
+      throw err;
+    };
+    const r = terminalFocus.openLoginTerminalForConfigDir("/Users/dev/.claude-accounts/primary");
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "AUTOMATION_ERROR");
+    assert.match(r.message, /not authorized/i);
+  });
+
+  it("UNSUPPORTED_PLATFORM off-macOS", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const r = terminalFocus.openLoginTerminalForConfigDir("/Users/dev/.claude-accounts/primary");
       assert.equal(r.ok, false);
       assert.equal(r.code, "UNSUPPORTED_PLATFORM");
     } finally {

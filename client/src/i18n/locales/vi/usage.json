@@ -57,6 +57,7 @@
       "idle": "Chưa ghi lại",
       "ok": "OK",
       "needsLogin": "Cần đăng nhập",
+      "needsLoginHint": "Nhấp để mở terminal và đăng nhập vào tài khoản này",
       "error": "Lỗi"
     },
     "calendar": {
