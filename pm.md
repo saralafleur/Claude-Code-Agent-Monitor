@@ -84,8 +84,15 @@ This framing was walked through and explicitly confirmed by Sara
    - In short: rules decide *whether* to look; the LLM decides *what to do*
      once flagged.
    - Likely implementation shape: a scheduled/looped agent pass per project
-     (not a live continuous process) — candidates are the existing
-     `/loop` mechanism or a scheduled cron agent.
+     (not a live continuous process). **Correction (2026-08-01, team-intake):**
+     no `/loop` mechanism exists in this repo (verified by grep across
+     `.claude/`, `server/`, `scripts/`) — the actual in-repo precedent is the
+     in-process `setInterval` scheduler pattern already used twice
+     (`startFocusInference()` in `server/lib/focus-inference.js`,
+     `startUpdateScheduler()` in `server/update-scheduler.js`), both wired
+     from `server/index.js`. See
+     `intake/2026-08-01-build-project-manager/technical-plan.md` (DEC-4/Q4)
+     for the concrete plan.
 
 7. **Portfolio rollup UI** — one row per project: objective progress %, pace
    flag, cost, and a decision-queue badge if layer 6 flagged anything.
