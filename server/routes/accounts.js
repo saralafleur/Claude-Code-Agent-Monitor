@@ -4,10 +4,21 @@
  * multi-account Usage feature — each account just points at a
  * `CLAUDE_CONFIG_DIR` the user has already run `claude login` into (see
  * server/lib/claude-cli-credentials.js). No secret is ever stored or
- * accepted here: `POST /:id/capture` reads that account's OAuth credential
- * live from the OS keychain (or, on Linux, a file) at request time, uses it
- * to fetch usage via server/lib/usage-fetch-oauth.js, and persists the
- * result into the existing `usage_captures` table scoped by `account_id`.
+ * accepted here: `POST /:id/capture` (and the automatic scheduler,
+ * server/lib/account-capture-scheduler.js) reads that account's OAuth
+ * credential live from the OS keychain (or, on Linux, a file) via
+ * server/lib/account-capture.js, which persists the result into the
+ * existing `usage_captures` table scoped by `account_id`. Each listed
+ * account also carries `last_used_at`/`is_active`: real usage is often
+ * done through whichever profile is logged into the *default* `~/.claude`
+ * dir, not through this account's own named CLAUDE_CONFIG_DIR (that dir
+ * exists only to hold a separate OAuth credential this dashboard can poll),
+ * so `last_used_at` is inferred from movement in the account's own
+ * session/weekly rate-limit percentage between captures (see
+ * server/lib/account-activity.js) rather than from anything
+ * CLAUDE_CONFIG_DIR-local — and, deliberately, not from `last_capture_at`,
+ * which only reflects manual dashboard refreshes, not actual account
+ * activity.
  *
  *   GET    /api/accounts                    — list accounts + each one's latest known %s
  *   POST   /api/accounts                    — add an account { label, configDir }
@@ -33,8 +44,8 @@ const os = require("os");
 
 const { stmts } = require("../db");
 const { sameOriginGuard } = require("../lib/origin-guard");
-const claudeCliCredentials = require("../lib/claude-cli-credentials");
-const usageFetchOauth = require("../lib/usage-fetch-oauth");
+const { captureAccount } = require("../lib/account-capture");
+const { computeLastUsedAt, isAccountActive } = require("../lib/account-activity");
 const usageCapturesDb = require("../lib/usage-captures-db");
 // Required as a module object (not destructured) so tests can swap
 // `terminalFocus.openLoginTerminalForConfigDir` and this route picks the
@@ -48,6 +59,7 @@ router.use(sameOriginGuard);
 
 function serialize(row) {
   const latest = usageCapturesDb.listCaptures({ accountId: row.id, limit: 1 })[0] || null;
+  const lastUsedAt = computeLastUsedAt(row.id);
   return {
     id: row.id,
     label: row.label,
@@ -59,6 +71,8 @@ function serialize(row) {
     last_error: row.last_error,
     last_capture_id: row.last_capture_id,
     last_capture_at: row.last_capture_at,
+    last_used_at: lastUsedAt,
+    is_active: isAccountActive(lastUsedAt),
     created_at: row.created_at,
     updated_at: row.updated_at,
     latest_session_window_pct: latest?.session_window_pct ?? null,
@@ -66,20 +80,6 @@ function serialize(row) {
     latest_week_window_pct: latest?.week_window_pct ?? null,
     latest_week_reset_raw: latest?.week_reset_raw ?? null,
   };
-}
-
-/** Human-readable fallback for a credential status that has no explicit
- *  message. Points at the clickable "Needs login" badge (which opens a
- *  terminal via POST /:id/login-terminal) rather than making the user
- *  copy/paste the CLAUDE_CONFIG_DIR command themselves. */
-function describeCredentialStatus(status, configDir) {
-  if (status === "not_found") {
-    return `No Claude CLI login found for ${configDir}. Click 'Needs login' to open a terminal and log in.`;
-  }
-  if (status === "expired") {
-    return `Access token expired. Click 'Needs login' to open a terminal and refresh this profile's login.`;
-  }
-  return `Stored credential for ${configDir} looks invalid.`;
 }
 
 // GET / — list all accounts with their latest known usage percentages.
@@ -142,11 +142,11 @@ router.delete("/:id", (req, res) => {
 });
 
 /**
- * Trigger a fresh capture for one account: read its OAuth credential live
- * (never stored by this app), and if usable, fetch usage and persist a
- * usage_captures row. If the credential isn't usable (no login yet, expired,
- * or an unreadable/invalid stored credential), that's an expected, actionable
- * state — reported as 200, not a 500 — since nothing on this server is broken.
+ * Trigger a fresh capture for one account (same shared flow the automatic
+ * scheduler uses — see server/lib/account-capture.js). If the credential
+ * isn't usable (no login yet, expired, or an unreadable/invalid stored
+ * credential), that's an expected, actionable state — reported as 200, not
+ * a 500 — since nothing on this server is broken.
  */
 router.post("/:id/capture", async (req, res) => {
   const account = stmts.getAccount.get(req.params.id);
@@ -154,44 +154,17 @@ router.post("/:id/capture", async (req, res) => {
     return res.status(404).json({ error: { code: "ENOTFOUND", message: "account not found" } });
   }
 
-  const cred = await claudeCliCredentials.readCredential(account.config_dir);
+  const result = await captureAccount(account);
 
-  if (cred.status !== "ok") {
-    const accountStatus = cred.status === "invalid" ? "error" : "needs_login";
-    const message = cred.message || describeCredentialStatus(cred.status, account.config_dir);
-    stmts.setAccountCredentialStatus.run(accountStatus, message, account.id);
+  if (result.credStatus !== "ok") {
     return res.status(200).json({
       account: serialize(stmts.getAccount.get(account.id)),
-      status: cred.status,
-      message,
+      status: result.credStatus,
+      message: result.message,
     });
   }
 
-  const usage = await usageFetchOauth.fetchUsageViaOAuth(cred.accessToken);
-  const capture = usageCapturesDb.recordCapture({
-    cwd: account.config_dir,
-    status: usage.status === "ok" ? "ok" : "error",
-    errorMessage: usage.errorMessage,
-    accountId: account.id,
-    accountEmail: cred.accountEmail,
-    accountOrg: cred.accountOrg,
-    sessionWindowPct: usage.sessionWindowPct,
-    sessionWindowResetRaw: usage.sessionWindowResetRaw,
-    weekWindowPct: usage.weekWindowPct,
-    weekResetRaw: usage.weekResetRaw,
-  });
-
-  stmts.setAccountCaptureResult.run(
-    usage.status === "ok" ? "ok" : "error",
-    usage.status === "ok" ? null : usage.errorMessage,
-    capture.id,
-    capture.captured_at,
-    cred.accountEmail,
-    cred.accountOrg,
-    account.id
-  );
-
-  return res.status(201).json(capture);
+  return res.status(201).json(result.capture);
 });
 
 // Maps server/lib/terminal-focus.js's typed failure codes to HTTP status —

@@ -60,6 +60,13 @@
       "needsLoginHint": "Click to open a terminal and log in to this account",
       "error": "Error"
     },
+    "activity": {
+      "title": "Activity",
+      "subtitle": "Whether you're actively using each account, inferred from real movement in its own rate-limit percentages between captures.",
+      "active": "Active",
+      "lastUsedLabel": "Last used",
+      "never": "Never used"
+    },
     "calendar": {
       "title": "Weekly reset countdown",
       "subtitle": "How many days until each account's weekly window resets."

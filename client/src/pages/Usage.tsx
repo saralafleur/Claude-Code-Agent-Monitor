@@ -28,6 +28,13 @@
  *   - GET /api/usage?accountId= - one account's own capture history, used
  *     by its row's expand-in-place section.
  *
+ * Also renders `AccountActivityCard`, a quick per-account gauge of whether
+ * you're actively using it (or how long since you last did), driven by each
+ * account's own `is_active`/`last_used_at` fields from GET /api/accounts -
+ * inferred server-side from real movement in that account's own session/
+ * weekly rate-limit percentage between captures (server/lib/account-
+ * activity.js), not from anything tied to its CLAUDE_CONFIG_DIR.
+ *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -727,6 +734,54 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One row per account, showing whether it's actively being used right now
+ * (its own session/weekly rate-limit percentage rose within the last 15 min
+ * - see `is_active`/`last_used_at`, server/lib/account-activity.js) or, if
+ * not, how long ago it was last used. A quick "which of my accounts am I
+ * actually working in" gauge, independent of both this dashboard's own
+ * capture history (which only reflects manual Refresh clicks, not real
+ * usage) and this account's own CLAUDE_CONFIG_DIR (real work is often done
+ * through whichever profile is logged into the default `~/.claude` instead).
+ */
+function AccountActivityCard({ accounts }: { accounts: Account[] }) {
+  const { t } = useTranslation("usage");
+  if (accounts.length === 0) return null;
+
+  return (
+    <div className="card p-4">
+      <h2 className="text-sm font-semibold text-gray-200">{t("accounts.activity.title")}</h2>
+      <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.activity.subtitle")}</p>
+      <div className="space-y-2">
+        {accounts.map((account) => (
+          <div key={account.id} className="flex items-center gap-2 text-xs">
+            <span
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                account.is_active ? "bg-emerald-500" : "bg-gray-600"
+              }`}
+            />
+            <span className="text-gray-200 truncate flex-1 min-w-0">{account.label}</span>
+            {account.is_active ? (
+              <span className="badge bg-emerald-500/10 border-emerald-500/30 text-emerald-400 flex-shrink-0">
+                {t("accounts.activity.active")}
+              </span>
+            ) : account.last_used_at ? (
+              <span className="text-gray-500 flex items-center gap-1.5 flex-shrink-0">
+                {t("accounts.activity.lastUsedLabel")}
+                <span className="font-mono font-bold text-gray-100 bg-surface-1/80 rounded px-2 py-0.5 leading-none">
+                  {timeAgo(account.last_used_at)}
+                </span>
+              </span>
+            ) : (
+              <span className="text-gray-500 flex-shrink-0">{t("accounts.activity.never")}</span>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1484,7 +1539,10 @@ export function Usage() {
       {accounts.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
           <SessionResetTimeline accounts={accounts} />
-          <AccountsResetCalendar accounts={accounts} />
+          <div className="space-y-4">
+            <AccountActivityCard accounts={accounts} />
+            <AccountsResetCalendar accounts={accounts} />
+          </div>
         </div>
       )}
 

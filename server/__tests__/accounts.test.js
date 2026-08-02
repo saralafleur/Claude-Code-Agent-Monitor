@@ -11,7 +11,12 @@
  * as the legacy tmux capture path already does for its own failures). Also
  * covers POST /:id/login-terminal (the clickable "Needs login" badge): the
  * account's config_dir is what gets handed to terminal-focus, and the typed
- * failure codes map to their documented HTTP statuses.
+ * failure codes map to their documented HTTP statuses. Also covers the
+ * `last_used_at`/`is_active` fields (null with 0-1 captures, active once a
+ * capture shows the percentage rose, unaffected by a later drop since a
+ * drop is a window reset, not usage) — the underlying inference logic
+ * (`pctIncreased`/`computeLastUsedAt`/`isAccountActive`) has its own
+ * dedicated unit tests in account-activity.test.js.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -311,6 +316,81 @@ describe("POST /api/accounts/:id/login-terminal", () => {
       assert.equal(res.status, status, `${code} should map to ${status}`);
       assert.equal(res.body.error.code, code);
     }
+  });
+});
+
+describe("account activity (last_used_at / is_active)", () => {
+  let configDir;
+  let accountId;
+
+  before(async () => {
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), "ccam-acct-activity-"));
+    const res = await post("/api/accounts", { label: "Activity Test", configDir });
+    accountId = res.body.account.id;
+  });
+  after(() => {
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  // The shared afterEach(mock.restoreAll()) above wipes any mock after the
+  // test that set it up finishes, so — same as the credential-outcomes
+  // block above — each test that needs a capture re-establishes its own
+  // mocks rather than relying on a describe-level `before()`.
+  async function captureWithPct(sessionPct) {
+    mock.method(claudeCliCredentials, "readCredential", async () => ({
+      status: "ok",
+      accessToken: "sk-ant-oat-fake",
+      accountEmail: "activity@example.com",
+      accountOrg: null,
+    }));
+    const usageFetchOauth = require("../lib/usage-fetch-oauth");
+    mock.method(usageFetchOauth, "fetchUsageViaOAuth", async () => ({
+      status: "ok",
+      sessionWindowPct: sessionPct,
+      sessionWindowResetRaw: null,
+      weekWindowPct: 0,
+      weekResetRaw: null,
+      httpStatus: 200,
+      errorMessage: null,
+    }));
+    await post(`/api/accounts/${accountId}/capture`, {});
+  }
+
+  it("reports null last_used_at and inactive before any capture happens", async () => {
+    const list = await get("/api/accounts");
+    const row = list.body.accounts.find((a) => a.id === accountId);
+    assert.equal(row.last_used_at, null);
+    assert.equal(row.is_active, false);
+  });
+
+  it("still reports null after a single capture — nothing to diff against yet", async () => {
+    await captureWithPct(10);
+
+    const list = await get("/api/accounts");
+    const row = list.body.accounts.find((a) => a.id === accountId);
+    assert.equal(row.last_used_at, null);
+    assert.equal(row.is_active, false);
+  });
+
+  it("reports active with a recent last_used_at once a capture shows the percentage rose", async () => {
+    await captureWithPct(25); // rose from 10 → real quota consumption
+
+    const list = await get("/api/accounts");
+    const row = list.body.accounts.find((a) => a.id === accountId);
+    assert.ok(row.last_used_at);
+    assert.equal(row.is_active, true);
+  });
+
+  it("does not treat a percentage drop (a window reset) as fresh activity", async () => {
+    const before = (await get("/api/accounts")).body.accounts.find(
+      (a) => a.id === accountId
+    ).last_used_at;
+
+    await captureWithPct(0); // session window rolled over, not new usage
+
+    const list = await get("/api/accounts");
+    const row = list.body.accounts.find((a) => a.id === accountId);
+    assert.equal(row.last_used_at, before);
   });
 });
 

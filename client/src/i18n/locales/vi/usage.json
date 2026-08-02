@@ -60,6 +60,13 @@
       "needsLoginHint": "Nhấp để mở terminal và đăng nhập vào tài khoản này",
       "error": "Lỗi"
     },
+    "activity": {
+      "title": "Hoạt động",
+      "subtitle": "Bạn có đang sử dụng từng tài khoản hay không, được suy ra từ việc tỷ lệ phần trăm giới hạn của chính tài khoản đó có thực sự thay đổi giữa các lần ghi lại hay không.",
+      "active": "Đang hoạt động",
+      "lastUsedLabel": "Dùng lần cuối",
+      "never": "Chưa từng sử dụng"
+    },
     "calendar": {
       "title": "Đếm ngược đến lúc đặt lại hàng tuần",
       "subtitle": "Còn bao nhiêu ngày nữa đến khi cửa sổ hàng tuần của mỗi tài khoản được đặt lại."

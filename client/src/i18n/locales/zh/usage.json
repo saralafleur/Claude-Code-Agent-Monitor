@@ -60,6 +60,13 @@
       "needsLoginHint": "点击打开终端并登录此账户",
       "error": "错误"
     },
+    "activity": {
+      "title": "活动状态",
+      "subtitle": "依据该账户自身的速率限制百分比在两次捕获之间是否真的发生了变化，判断你当前是否正在使用它。",
+      "active": "使用中",
+      "lastUsedLabel": "上次使用于",
+      "never": "从未使用"
+    },
     "calendar": {
       "title": "每周重置倒计时",
       "subtitle": "距离每个账户的每周窗口重置还有多少天。"

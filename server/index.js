@@ -459,6 +459,17 @@ function startBackgroundServices() {
   } catch (err) {
     console.warn("playbook engine failed to start:", err.message);
   }
+  // Automatic per-account usage capture: keeps every named account's
+  // rate-limit %'s fresh (server/lib/account-capture-scheduler.js) without a
+  // manual Refresh click — also what lets the Usage page's "Activity" card
+  // infer real usage from percentage movement between captures. Disable with
+  // DASHBOARD_ACCOUNT_CAPTURE_MODE=off or DASHBOARD_ACCOUNT_CAPTURE_MS=0.
+  try {
+    const { startAccountCaptureScheduler } = require("./lib/account-capture-scheduler");
+    startAccountCaptureScheduler();
+  } catch (err) {
+    console.warn("account capture scheduler failed to start:", err.message);
+  }
   // Continuous discovery of sessions under ~/.claude/projects. The one-time
   // legacy backfill above runs only once (marker-gated), so a project added
   // later whose sessions never flow through hooks would otherwise stay invisible
