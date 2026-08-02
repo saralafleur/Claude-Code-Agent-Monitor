@@ -66,7 +66,9 @@
     },
     "sessionTimeline": {
       "title": "Thời điểm đặt lại phiên",
-      "subtitle": "Thời điểm trong ngày mà cửa sổ phiên của mỗi tài khoản được đặt lại, trong 24 giờ tới."
+      "subtitle": "Thời điểm trong ngày mà cửa sổ phiên của mỗi tài khoản được đặt lại, trong 24 giờ tới.",
+      "cappedByWeekly": "Bị giới hạn bởi hạn mức tuần (còn {{pct}}%)",
+      "weeklyResetsIn": "Hạn mức tuần đặt lại sau {{when}}"
     }
   }
 }

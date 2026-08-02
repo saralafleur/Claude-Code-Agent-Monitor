@@ -66,7 +66,9 @@
     },
     "sessionTimeline": {
       "title": "세션 리셋 시각",
-      "subtitle": "앞으로 24시간 동안 각 계정의 세션 윈도우가 리셋되는 시각입니다."
+      "subtitle": "앞으로 24시간 동안 각 계정의 세션 윈도우가 리셋되는 시각입니다.",
+      "cappedByWeekly": "주간 한도로 제한됨 ({{pct}}% 남음)",
+      "weeklyResetsIn": "주간 리셋까지 {{when}}"
     }
   }
 }

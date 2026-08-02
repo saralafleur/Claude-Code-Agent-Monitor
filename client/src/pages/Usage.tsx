@@ -743,6 +743,21 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
       hasWeeklyData && weeklyHoursUntil < SESSION_TIMELINE_HOURS
         ? weeklyResetDate!.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
         : null;
+    // Full day/hour/minute countdown to the weekly reset, for the
+    // "capped by weekly" callout - the session-lane axis only covers the
+    // next 24h, but the weekly reset itself is usually days out, so this
+    // needs its own duration rather than anything the axis already shows.
+    const weeklyCountdown = hasWeeklyData
+      ? formatMsLong(weeklyResetDate!.getTime() - now.getTime())
+      : null;
+
+    // True when the weekly window, not this session window, is the real
+    // ceiling on how much can still be used - the session looks fresh
+    // (well under half used) while the weekly window is nearly tapped out,
+    // so a viewer glancing only at the session bar would be misled into
+    // thinking there's plenty of room left this session.
+    const weeklyPct = account.latest_week_window_pct;
+    const cappedByWeekly = weeklyPct != null && weeklyPct >= 80 && pct != null && pct < 50;
 
     return {
       account,
@@ -750,9 +765,11 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
       hoursUntil,
       resetWhen,
       countdown,
-      weeklyPct: account.latest_week_window_pct,
+      weeklyPct,
       weeklyHoursUntil,
       weeklyResetWhen,
+      weeklyCountdown,
+      cappedByWeekly,
     };
   });
 
@@ -791,6 +808,8 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
               weeklyPct,
               weeklyHoursUntil,
               weeklyResetWhen,
+              weeklyCountdown,
+              cappedByWeekly,
             }) => (
               <div
                 key={account.id}
@@ -842,6 +861,20 @@ function SessionResetTimeline({ accounts }: { accounts: Account[] }) {
                 {resetWhen && (
                   <p className="text-[11px] text-gray-500 mt-1 text-center">
                     {pct}% · {resetWhen}
+                  </p>
+                )}
+                {cappedByWeekly && (
+                  <p
+                    className={`text-[10px] font-semibold mt-0.5 text-center ${weeklyPctTextColor(weeklyPct)}`}
+                  >
+                    {t("accounts.sessionTimeline.cappedByWeekly", {
+                      pct: Math.max(0, 100 - (weeklyPct ?? 100)),
+                    })}
+                  </p>
+                )}
+                {cappedByWeekly && weeklyCountdown && (
+                  <p className="text-[10px] text-gray-500 text-center">
+                    {t("accounts.sessionTimeline.weeklyResetsIn", { when: weeklyCountdown })}
                   </p>
                 )}
               </div>

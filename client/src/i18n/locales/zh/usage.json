@@ -66,7 +66,9 @@
     },
     "sessionTimeline": {
       "title": "会话重置时刻",
-      "subtitle": "未来 24 小时内，每个账户的会话窗口将在一天中的什么时刻重置。"
+      "subtitle": "未来 24 小时内，每个账户的会话窗口将在一天中的什么时刻重置。",
+      "cappedByWeekly": "受周限额限制（剩余 {{pct}}%）",
+      "weeklyResetsIn": "周限额将在 {{when}} 后重置"
     }
   }
 }

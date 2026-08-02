@@ -66,7 +66,9 @@
     },
     "sessionTimeline": {
       "title": "Session reset times",
-      "subtitle": "What time of day each account's session window resets, over the next 24h."
+      "subtitle": "What time of day each account's session window resets, over the next 24h.",
+      "cappedByWeekly": "Capped by weekly ({{pct}}% left)",
+      "weeklyResetsIn": "Weekly resets in {{when}}"
     }
   }
 }
