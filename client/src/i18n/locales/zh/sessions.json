@@ -42,5 +42,6 @@
     "deleting": "正在删除…",
     "deleteActiveTitle": "无法删除正在进行的会话——请等待其完成或被判定为放弃后再删除。",
     "deleteFailed": "删除会话失败"
-  }
+  },
+  "remoteSourceBadgeTitle": "采集自远程机器"
 }

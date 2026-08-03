@@ -15,6 +15,7 @@ const run = require("./openapi-extra/run");
 const push = require("./openapi-extra/push");
 const misc = require("./openapi-extra/misc");
 const plans = require("./openapi-extra/plans");
+const projectPlans = require("./openapi-extra/project-plans");
 const terminalFocus = require("./openapi-extra/terminal-focus");
 const playbookCoach = require("./openapi-extra/playbook-coach");
 // Enriched overrides of already-documented endpoints — same operationId, tags,
@@ -50,6 +51,7 @@ module.exports = combine(
   push,
   misc,
   plans,
+  projectPlans,
   terminalFocus,
   playbookCoach,
   overrideSessionsAgents,

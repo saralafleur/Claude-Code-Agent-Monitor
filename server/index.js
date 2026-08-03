@@ -89,6 +89,7 @@ const accountsRouter = require("./routes/accounts");
 const detoursRouter = require("./routes/detours");
 const decisionQueueRouter = require("./routes/decision-queue");
 const portfolioRouter = require("./routes/portfolio");
+const projectPlansRouter = require("./routes/project-plans");
 
 function createApp() {
   const app = express();
@@ -127,6 +128,11 @@ function createApp() {
   // Layer 4 detour dispositions + layer 6 reconciliation decision queue.
   app.use("/api/detours", detoursRouter);
   app.use("/api/decision-queue", decisionQueueRouter);
+  // Portfolio-layer plan lifecycle + value ledger (project_plans /
+  // project_plan_items / value_claims) — a namespace deliberately SEPARATE
+  // from /api/plans above; the two plan surfaces never blend in one
+  // response (R1, technical-plan.md §3.3).
+  app.use("/api/project-plans", projectPlansRouter);
   // Layer 7 portfolio rollup read model (Project Manager page).
   app.use("/api/portfolio", portfolioRouter);
   // Cross-project aggregate focus-time report (new, this effort) - distinct

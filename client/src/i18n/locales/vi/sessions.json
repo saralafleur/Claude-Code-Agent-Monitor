@@ -42,5 +42,6 @@
     "deleting": "Đang xóa…",
     "deleteActiveTitle": "Không thể xóa một phiên đang hoạt động — hãy đợi phiên hoàn tất hoặc bị bỏ dở trước.",
     "deleteFailed": "Không thể xóa phiên"
-  }
+  },
+  "remoteSourceBadgeTitle": "Được thu thập từ một máy từ xa"
 }

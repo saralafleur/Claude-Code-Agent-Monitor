@@ -74,16 +74,195 @@ const GRANDFATHERED_QUERIES = [
   },
 ];
 
+// §9.7 HAND-SCOPED STRUCTURAL SCAN durable cure (T3.14, DEC-9): the scan's
+// scope is DERIVED from the real artifact set — every direct `*.js` child of
+// `server/lib/` and `server/routes/` — plus `server/db.js` (outside both
+// glob roots, always included). Every derived file MUST carry an explicit
+// disposition below: `"scanned"` (the SQL-shape scan below runs against it,
+// with GRANDFATHERED_QUERIES as the only per-query exception list) or
+// `{status: "grandfathered", dated, reason}` (excluded from the scan
+// entirely, with a dated, reviewed reason — never a silent skip). Adding a
+// 6th `server/lib/*.js` (or `server/routes/*.js`) file with no entry here
+// breaks the scan on SCOPE, not on SQL shape, until someone dispositions it.
+//
+// DEC-9's bounded fallback, invoked here: deriving the scope surfaced six
+// pre-existing files this build did not introduce and does not own fixing.
+// Five are verified-fine false positives against this scanner's specific
+// technique (count-ranked leaderboards it already grandfathers two of via
+// GRANDFATHERED_QUERIES, an existence/dedup check, and a nested-subquery
+// table-name false match). The sixth, `server/lib/focus-report.js`, is a
+// genuine, PRE-EXISTING §9.2-shaped risk this scan was never previously wide
+// enough to see — recorded honestly as deferred, not waved through as fine.
+// See intake/2026-08-02-plan-lifecycle-value-ledger/decisions.md, the DEC-9
+// bounded-fallback row appended 2026-08-02.
+const FILE_DISPOSITIONS = {
+  "server/db.js": "scanned",
+  "server/lib/account-activity.js": "scanned",
+  "server/lib/account-capture-scheduler.js": "scanned",
+  "server/lib/account-capture.js": "scanned",
+  "server/lib/alerts.js": "scanned",
+  "server/lib/archive.js": "scanned",
+  "server/lib/atomic-file.js": "scanned",
+  "server/lib/cc-discovery.js": "scanned",
+  "server/lib/cc-mutate.js": "scanned",
+  "server/lib/cc-watcher.js": "scanned",
+  "server/lib/claude-cli-credentials.js": "scanned",
+  "server/lib/claude-home.js": "scanned",
+  "server/lib/consumption-rate.js": "scanned",
+  "server/lib/cwd-identity.js": "scanned",
+  "server/lib/dashboard-runs.js": "scanned",
+  "server/lib/data-transfer.js": "scanned",
+  "server/lib/decision-queue-enqueue.js": "scanned",
+  "server/lib/detours.js": "scanned",
+  "server/lib/focus-audit.js": "scanned",
+  "server/lib/focus-commands.js": "scanned",
+  "server/lib/focus-summary.js": "scanned",
+  "server/lib/git-env.js": "scanned",
+  "server/lib/git-refs.js": "scanned",
+  "server/lib/intake-scan.js": "scanned",
+  "server/lib/origin-guard.js": "scanned",
+  "server/lib/pace.js": "scanned",
+  "server/lib/plan-ingest.js": "scanned",
+  "server/lib/plan-lifecycle.js": "scanned",
+  "server/lib/plan-writeback.js": "scanned",
+  "server/lib/portfolio.js": "scanned",
+  "server/lib/pricing-constants.js": "scanned",
+  "server/lib/push.js": "scanned",
+  "server/lib/reconciliation.js": "scanned",
+  "server/lib/redoc.js": "scanned",
+  "server/lib/remote-sync.js": "scanned",
+  "server/lib/repo-topology.js": "scanned",
+  "server/lib/run-spawner.js": "scanned",
+  "server/lib/security.js": "scanned",
+  "server/lib/server-info.js": "scanned",
+  "server/lib/session-liveness.js": "scanned",
+  "server/lib/source-filter.js": "scanned",
+  "server/lib/stream-json-parser.js": "scanned",
+  "server/lib/terminal-focus.js": "scanned",
+  "server/lib/token-usage.js": "scanned",
+  "server/lib/transcript-cache.js": "scanned",
+  "server/lib/trunk-drift.js": "scanned",
+  "server/lib/update-check.js": "scanned",
+  "server/lib/usage-capture.js": "scanned",
+  "server/lib/usage-captures-db.js": "scanned",
+  "server/lib/usage-fetch-oauth.js": "scanned",
+  "server/lib/value-ledger.js": "scanned",
+  "server/lib/webhook-providers.js": "scanned",
+  "server/lib/webhooks.js": "scanned",
+  "server/lib/workflow-ingest.js": "scanned",
+  "server/routes/accounts.js": "scanned",
+  "server/routes/agents.js": "scanned",
+  "server/routes/alerts.js": "scanned",
+  "server/routes/analytics.js": "scanned",
+  "server/routes/cc-config.js": "scanned",
+  "server/routes/coach.js": "scanned",
+  "server/routes/color-thresholds.js": "scanned",
+  "server/routes/decision-queue.js": "scanned",
+  "server/routes/detours.js": "scanned",
+  "server/routes/events.js": "scanned",
+  "server/routes/focus-report.js": "scanned",
+  "server/routes/import.js": "scanned",
+  "server/routes/metrics.js": "scanned",
+  "server/routes/monitors.js": "scanned",
+  "server/routes/plans.js": "scanned",
+  "server/routes/playbook.js": "scanned",
+  "server/routes/portfolio.js": "scanned",
+  "server/routes/pricing.js": "scanned",
+  "server/routes/project-plans.js": "scanned",
+  "server/routes/projects.js": "scanned",
+  "server/routes/push.js": "scanned",
+  "server/routes/remote-sources.js": "scanned",
+  "server/routes/run.js": "scanned",
+  "server/routes/sessions.js": "scanned",
+  "server/routes/settings.js": "scanned",
+  "server/routes/stats.js": "scanned",
+  "server/routes/updates.js": "scanned",
+  "server/routes/usage.js": "scanned",
+  "server/routes/webhooks.js": "scanned",
+  "server/lib/focus-inference.js": {
+    status: "grandfathered",
+    dated: "2026-08-02",
+    reason:
+      "listCandidates() LIMITs over `sessions` ordered by `s.updated_at DESC`, not by row id — the scanner's substring table-name match is fooled by nested `events`/`focus_inferences` correlated subqueries (NOT EXISTS/EXISTS guards) that never themselves carry the LIMIT. Verified-fine false positive of this scan's own technique.",
+  },
+  "server/lib/focus-report.js": {
+    status: "grandfathered",
+    dated: "2026-08-02",
+    reason:
+      "GENUINE, PRE-EXISTING risk, NOT introduced by this build and out of this effort's change set: resolveSessionStart()'s `SELECT created_at FROM events WHERE session_id = ? ORDER BY id ASC LIMIT 1` fallback is not chronology-corrected — contrast the same file's sibling query a few lines below, which fetches ALL of a session's events id-ordered and then explicitly re-sorts them numerically by created_at before use, with its own comment naming exactly this failure mode (bulk-ingested Workflow-tool events landing at whatever row id was next). Recorded as a tracked defect candidate, not waved through as fine — see the DEC-9 bounded-fallback decisions.md row for the remainder-tracking obligation.",
+  },
+  "server/lib/scoped-stats.js": {
+    status: "grandfathered",
+    dated: "2026-08-02",
+    reason:
+      "toolUsageCounts() is the exact same top-N tool-usage leaderboard shape as db.js's two already-reviewed GRANDFATHERED_QUERIES entries (GROUP BY tool_name ORDER BY count DESC LIMIT 20) — count-ranked, not a recency window.",
+  },
+  "server/routes/hooks.js": {
+    status: "grandfathered",
+    dated: "2026-08-02",
+    reason:
+      "Both flagged queries are `SELECT 1 FROM events WHERE ... LIMIT 1` existence/dedup checks (APIError and TurnDuration ingestion), not a 'most recent N' window — any matching row satisfies an existence check, so row order is immaterial.",
+  },
+  "server/routes/workflows.js": {
+    status: "grandfathered",
+    dated: "2026-08-02",
+    reason:
+      "All three flagged queries (tool-to-tool transition counts, tool-usage counts, error-summary counts) are GROUP BY ... ORDER BY count DESC top-N leaderboards — the same count-ranked shape as db.js's two reviewed GRANDFATHERED_QUERIES entries, not recency windows.",
+  },
+};
+
 describe("chronology-ordering: static SQL-shape scan", () => {
   it("every LIMITed query over a bulk-inserted table orders by created_at before LIMIT", () => {
-    // This is a pure source-code scan - no database needed
-    const filesToScan = [
+    // Scope is DERIVED from the real artifact set, never hand-typed (§9.7).
+    const libDir = path.resolve(__dirname, "..", "lib");
+    const routesDir = path.resolve(__dirname, "..", "routes");
+    const derivedFiles = [
       "server/db.js",
-      "server/lib/detours.js",
-      "server/lib/reconciliation.js",
-      "server/routes/detours.js",
-      "server/routes/decision-queue.js",
+      ...fs
+        .readdirSync(libDir, { withFileTypes: true })
+        .filter((e) => e.isFile() && e.name.endsWith(".js"))
+        .map((e) => `server/lib/${e.name}`),
+      ...fs
+        .readdirSync(routesDir, { withFileTypes: true })
+        .filter((e) => e.isFile() && e.name.endsWith(".js"))
+        .map((e) => `server/routes/${e.name}`),
     ];
+
+    // Every derived file must have an explicit disposition, and vice versa —
+    // this is the assertion that makes a 6th undispositioned lib/route file
+    // break the scan on scope, and that a stale disposition entry (file
+    // renamed/removed) gets caught too.
+    const dispositioned = new Set(Object.keys(FILE_DISPOSITIONS));
+    const derived = new Set(derivedFiles);
+    for (const filePath of derivedFiles) {
+      assert.ok(
+        dispositioned.has(filePath),
+        `${filePath} has no disposition in FILE_DISPOSITIONS — every server/lib/*.js and server/routes/*.js file (plus server/db.js) must be explicitly "scanned" or dated-grandfathered with a reason (§9.7).`
+      );
+    }
+    for (const filePath of dispositioned) {
+      assert.ok(
+        derived.has(filePath),
+        `FILE_DISPOSITIONS names ${filePath}, which no longer exists under server/lib/*.js, server/routes/*.js, or server/db.js — remove its stale entry.`
+      );
+    }
+
+    // The four new portfolio-layer files (§9.7 same-commit registration)
+    // must all be scanned, not grandfathered.
+    for (const filePath of [
+      "server/lib/value-ledger.js",
+      "server/lib/cwd-identity.js",
+      "server/lib/plan-lifecycle.js",
+      "server/routes/project-plans.js",
+    ]) {
+      assert.equal(
+        FILE_DISPOSITIONS[filePath],
+        "scanned",
+        `${filePath} must be registered as "scanned", not grandfathered`
+      );
+    }
+
+    const filesToScan = derivedFiles.filter((f) => FILE_DISPOSITIONS[f] === "scanned");
 
     const bulkInsertTables = [
       "events",

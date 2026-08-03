@@ -10,10 +10,43 @@
  */
 
 import { describe, it, expect } from "vitest";
+import fs from "fs";
+import path from "path";
 import i18n from "i18next";
 import enProjectDetail from "../locales/en/projectDetail.json";
 
 const LOCALES = ["en", "ko", "vi", "zh"] as const;
+
+// i18next's own plural-suffix vocabulary (https://www.i18next.com/translation-function/plurals)
+// — stripped from a key's trailing segment before comparing key sets across
+// locales, since not every locale needs every plural form (vi/zh have no
+// grammatical plural at all) and that must never register as divergence.
+const PLURAL_SUFFIX_RE = /_(zero|one|two|few|many|other)$/;
+
+function flattenKeys(obj: unknown, prefix = ""): string[] {
+  if (obj === null || typeof obj !== "object") return [prefix];
+  const keys: string[] = [];
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      keys.push(...flattenKeys(v, path));
+    } else {
+      keys.push(path);
+    }
+  }
+  return keys;
+}
+
+function normalizedKeySet(obj: unknown): Set<string> {
+  return new Set(flattenKeys(obj).map((k) => k.replace(PLURAL_SUFFIX_RE, "")));
+}
+
+const LOCALES_DIR = path.join(__dirname, "..", "locales");
+const NAMESPACES = fs
+  .readdirSync(path.join(LOCALES_DIR, "en"))
+  .filter((f) => f.endsWith(".json"))
+  .map((f) => f.replace(/\.json$/, ""))
+  .sort();
 
 describe("i18n resources", () => {
   it("should provide Vietnamese translations for navigation keys", async () => {
@@ -199,5 +232,46 @@ describe("i18n resources", () => {
         expect(value).not.toContain("7");
       });
     }
+  });
+
+  describe("whole-namespace key-set parity (O-8 / E1 — portfolio layer i18n)", () => {
+    it("E1.1: all namespaces × 4 locales have identical key sets (plural-suffix-aware)", () => {
+      expect(NAMESPACES.length).toBeGreaterThan(0);
+      const mismatches: string[] = [];
+
+      for (const ns of NAMESPACES) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enResource = require(`../locales/en/${ns}.json`);
+        const enKeys = normalizedKeySet(enResource);
+
+        for (const locale of LOCALES) {
+          if (locale === "en") continue;
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const resource = require(`../locales/${locale}/${ns}.json`);
+          const keys = normalizedKeySet(resource);
+
+          const missing = [...enKeys].filter((k) => !keys.has(k));
+          const extra = [...keys].filter((k) => !enKeys.has(k));
+          if (missing.length || extra.length) {
+            mismatches.push(
+              `${ns}/${locale}: missing [${missing.join(", ")}] extra [${extra.join(", ")}]`
+            );
+          }
+        }
+      }
+
+      expect(mismatches).toEqual([]);
+    });
+
+    it("E1.2: sessions:remoteSourceBadgeTitle exists in all four locales (DEC-2 fix)", () => {
+      for (const locale of LOCALES) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const resource = require(`../locales/${locale}/sessions.json`);
+        expect(
+          resource.remoteSourceBadgeTitle,
+          `${locale} must have remoteSourceBadgeTitle`
+        ).toBeTruthy();
+      }
+    });
   });
 });

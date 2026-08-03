@@ -2095,6 +2095,73 @@ changes," `WATCH-3`); layer 7 is the first client consumer.
 
 ---
 
+## Portfolio Plan Lifecycle & Value Ledger
+
+A portfolio layer answering "what value did this project deliver, and did we
+clear the milestone?" from recorded state instead of archaeology — additive,
+keyed by `project_id`, and deliberately a **different layer** from the
+cwd-keyed `plans`/`plan_items` mirror above (that legacy layer, its poll,
+write-back path, and the focus stack are all untouched by this layer).
+
+Three new tables (`project_plans`, `project_plan_items`, `value_claims` — see
+[docs/DATABASE.md](docs/DATABASE.md)) hold **closable generations** of a
+plan: `succeeds_plan_id` chains one generation to the next, and the ordinal
+is always **derived** by walking that chain in `server/lib/plan-lifecycle.js`
+— nothing stores it, so nothing can drift. `plan-lifecycle.js` also owns the
+**DEC-P2 import inversion**: an existing repo's ingested `AGENT-PLAN.md`
+(read via the same `plans`/`plan_items` rows `plan-ingest.js` already
+maintains — this layer never parses markdown itself) becomes generation 1,
+idempotent on `(project_id, content_hash)` — **never on cwd**, so a
+case-variant or symlinked alias of one physical directory imports exactly
+once. `closePlan` is the **single closure composer**: one transaction, one
+row updated (`status='open'` guarded in the `WHERE` clause so a race is a
+detectable no-op, never a silent double-write), broadcasting
+`project_plan_updated` + `value_claim_updated`. There is no reopen path and
+no delete path for a closed plan or any of its claims.
+
+**The value pool** is live-derived, never persisted (`server/lib/value-ledger.js`
+— the single home for every number this layer computes, mirroring the
+`pace.js`/`DISPOSITIONS` precedent): a **mechanical** tier from intake
+initiatives (`server/lib/intake-scan.js`) and the live
+`detectTrunkDrift()` direct-to-trunk feed (`server/lib/trunk-drift.js`,
+consumed live — never a second, hand-rolled trunk walker), a **judgment**
+tier from `detour_dispositions`, and a **correlational** tier that suggests,
+but never auto-claims, a focus-session-bracketed trunk commit. A unit's
+identity is `(value_source, value_ref, source_cwd)` regardless of which feed
+produced it — a `detour_dispositions` row with `source='trunk_drift'` (not
+yet possible; that `CHECK` still excludes it pending trunk-drift's own
+Phase 1b) maps to the *same* unit the live trunk feed already emits, so the
+day that lands, its rows collapse into the live feed's units instead of
+double-counting the health metric. Every cwd this layer touches is
+canonicalized through `server/lib/cwd-identity.js` — the sole home for
+`fs.realpathSync`/`git rev-parse --show-toplevel`/`--git-common-dir` in this
+layer, folding worktree checkouts to their parent repo root and surfacing
+case-variant duplicates (e.g. two `project_paths` rows for the same
+case-insensitive directory) as `identityWarnings` on the pool response
+rather than silently double-counting them.
+
+**Claiming** work into a plan item (`POST /api/project-plans/:id/claims`)
+writes the *only* persisted judgment this layer has — `value_claims` — with a
+reference + one-line summary snapshot only, never artifact content. A unit
+counts as out of the pool at its first claim (the ratchet); it may still be
+claimed into additional items (many-to-many), guarded against a duplicate
+claim of the same unit into the same item by a `UNIQUE` index. Closure state
+is never copied onto a claim row — every "is this closed?" question is a join
+to `project_plans.status`.
+
+Routes live at `/api/project-plans` (`server/routes/project-plans.js`),
+deliberately a separate namespace from `/api/plans` so the two plan surfaces
+never blend in one response. `ccam ledger plans|pool|health|history|import|claim|close`
+is the CLI surface — every derived number it prints comes from the API
+response verbatim, never recomputed client-side (proven by
+`server/__tests__/ledger-metrics-parity.test.js`, which drives one seeded DB
+through both the real route and a real spawned `ccam` process and asserts
+identical values). The optional `<PlanLedgerPanel>` UI component is gated
+behind a manual checkpoint (Sara judging the live pool "signal, not noise"
+on real data) and has not shipped yet.
+
+---
+
 ## Agent Extension Layer
 
 The repository includes a triple extension strategy:
