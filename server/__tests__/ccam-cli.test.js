@@ -1049,6 +1049,71 @@ describe("ccam CLI — ledger", () => {
     assert.equal(codeBackfill, 0, "ledger pool --backfill should exit 0");
   });
 
+  it("C1.3b: --lookback-days actually narrows the window (and wins over --backfill when both given)", async () => {
+    const { execFileSync } = require("child_process");
+    const gitEnv = { ...process.env };
+    for (const k of [
+      "GIT_DIR",
+      "GIT_WORK_TREE",
+      "GIT_INDEX_FILE",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ]) {
+      delete gitEnv[k];
+    }
+    const git = (cwd, args) =>
+      execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], env: gitEnv });
+
+    const repo = fs.mkdtempSync(path.join(TMP, "c1-3b-repo-"));
+    git(repo, ["-c", "init.defaultBranch=master", "init", repo]);
+    fs.writeFileSync(path.join(repo, "README.md"), "x\n");
+    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    const oldDate = new Date(Date.now() - 200 * 86400000).toISOString(); // 200 days ago
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "old"], {
+      cwd: repo,
+      env: { ...gitEnv, GIT_COMMITTER_DATE: oldDate, GIT_AUTHOR_DATE: oldDate },
+    });
+    fs.writeFileSync(path.join(repo, "recent.txt"), "x\n");
+    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "recent"]);
+
+    const projectId = `c1-3b-project-${Date.now()}`;
+    db.prepare("INSERT INTO projects (id, name) VALUES (?, ?)").run(projectId, projectId);
+    db.prepare("INSERT INTO project_paths (project_id, cwd) VALUES (?, ?)").run(projectId, repo);
+
+    const narrow = await ccam("ledger", "pool", "--project", projectId, "--lookback-days", "1");
+    assert.equal(narrow.code, 0);
+    assert.ok(narrow.out.includes("recent"), "the recent commit must appear within a 1-day window");
+    assert.ok(
+      !narrow.out.includes(" old"),
+      "the 200-day-old commit must NOT appear within a 1-day window"
+    );
+
+    const wide = await ccam("ledger", "pool", "--project", projectId, "--lookback-days", "3650");
+    assert.equal(wide.code, 0);
+    assert.ok(
+      wide.out.includes(" old"),
+      "the 200-day-old commit must appear within a 3650-day window"
+    );
+
+    // --lookback-days must win when --backfill is also passed, not silently
+    // lose to backfill's own 3650-day default.
+    const combined = await ccam(
+      "ledger",
+      "pool",
+      "--project",
+      projectId,
+      "--backfill",
+      "--lookback-days",
+      "1"
+    );
+    assert.equal(combined.code, 0);
+    assert.ok(
+      !combined.out.includes(" old"),
+      "--lookback-days must take precedence over --backfill, not the reverse"
+    );
+  });
+
   it("C1.4: ccam ledger claim / close round-trip; second close exits 1 with 409 reason", async () => {
     const { code: codeClose } = await ccam("ledger", "close", "--project", "test-project");
     assert.notEqual(codeClose, undefined, "ledger close command should execute");

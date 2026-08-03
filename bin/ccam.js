@@ -1295,6 +1295,14 @@ async function cmdLedger(flags, positional) {
     case "pool": {
       const params = new URLSearchParams({ project_id: projectId });
       if (flags.backfill) params.set("backfill", "1");
+      // --lookback-days wins over --backfill when both are given (an explicit
+      // window is a more specific request than "everything"); the route
+      // itself only reads lookbackDays when backfill is absent, so pass just
+      // one.
+      if (flags["lookback-days"]) {
+        params.delete("backfill");
+        params.set("lookbackDays", flags["lookback-days"]);
+      }
       const data = await get(`/api/project-plans/pool?${params}`);
       const rows = (data.units || []).map((u) => [
         u.value_source,
@@ -1961,7 +1969,7 @@ const COMMAND_GROUPS = [
       ["ledger plans", "--project <id|name>", "List a project's portfolio plans (open + closed)"],
       [
         "ledger pool",
-        "--project <id|name> [--backfill]",
+        "--project <id|name> [--backfill|--lookback-days <n>]",
         "Live unclaimed value pool + identity warnings",
       ],
       [
