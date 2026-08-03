@@ -315,10 +315,39 @@ DB-free (architect §4 Option 3).
 ## WATCH-1 — A fast-forward-merged, then-deleted branch is indistinguishable from direct-trunk work
 
 - **Item / area:** `server/lib/trunk-drift.js` detection predicate (DEC-5)
-- **Status:** PARKED (accepted limitation, shipping knowingly)
+- **Status:** PARKED (accepted limitation, shipping knowingly) — **superseded
+  2026-08-03, see below: the scope of the accepted risk widened.**
 - **Raised:** 2026-08-02 · **Decided:** 2026-08-02 · **Decided by:** intake
   tech lead
 - **Recurring-issue link:** —
+
+> **Update (2026-08-03) — DEC-5 clause 3 removed entirely, by
+> `2026-08-03-trunk-drift-open-branch-blindness`.** Found via the
+> `plan-lifecycle-value-ledger` effort's slice-4 checkpoint against real
+> Coaching Assistant data: clause 3 (`--not --exclude=<trunk> --branches`)
+> doesn't just protect the ff-merge-branch-still-exists case this WATCH row
+> names — it excludes trunk's *entire* history shared with *any* other local
+> branch that merely exists, regardless of how much or little that branch has
+> diverged. A concurrently-open effort worktree (a completely ordinary,
+> frequent state for this kind of project) was enough to blind the detector
+> across its whole lookback window, not just anything related to that branch.
+> Traced the topology and confirmed: a fast-forward-merged-but-undeleted
+> branch and a freshly-created-but-not-yet-started branch are **provably
+> indistinguishable** from git alone (same merge-base, zero commits ahead
+> either way) — there is no narrower fix that protects one without permitting
+> the other. Given this project's real merge convention is always `--no-ff` +
+> branch deletion (never bare fast-forward), the scenario clause 3 protected
+> was judged unlikely to occur in practice, while the blind spot it caused was
+> frequent and severe. Clause 3 was removed; `--first-parent --no-merges`
+> alone remains (a `--no-ff` merge's own commits are already invisible to a
+> first-parent walk regardless of branch existence, so that half of DEC-5 is
+> untouched). **This WATCH-1 row's accepted risk is hereby widened**: a
+> ff-merged branch now reads as direct-to-trunk work **for as long as its ref
+> exists**, not only after deletion — see
+> `intake/2026-08-03-trunk-drift-open-branch-blindness/decisions.md` for the
+> full trade-off record and `server/__tests__/trunk-drift.test.js` cases
+> 3b/3c (updated expectations) and 6c (new, red-proven regression case for
+> the actual bug).
 
 ### The question
 

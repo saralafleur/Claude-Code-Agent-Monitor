@@ -251,7 +251,21 @@ describe("detectTrunkDrift", () => {
     assert.equal(result.commits.length, 0, "clean trunk should have 0 direct commits");
   });
 
-  it("3b: feature ff-merged, branch still exists — no direct commits", async () => {
+  it("3b: feature ff-merged, branch still exists — now correctly flagged (WATCH-1 risk widened, see decisions.md)", async () => {
+    // Was "0 direct commits" under the old "--not --exclude=<trunk>
+    // --branches" clause. That clause is gone (see the file header + the
+    // 2026-08-03-trunk-drift-open-branch-blindness decision log): it's
+    // provably impossible to distinguish, from git topology alone, "a
+    // ff-merged branch whose ref hasn't been deleted yet" from "a brand-new,
+    // not-yet-started sibling branch at the same tip" (case 6c) — both have
+    // zero commits ahead of trunk. Protecting the former necessarily blinds
+    // trunk's own unrelated history whenever the latter merely exists, which
+    // this project's actual concurrent-effort workflow triggers constantly.
+    // WATCH-1 already accepted this exposure for the POST-deletion case;
+    // this widens it to apply whenever a ff-merged branch exists at all —
+    // deliberate, not a regression. This project's own convention never
+    // fast-forwards (always --no-ff + branch delete on cleanup), so the
+    // scenario this case exercises is not expected to occur in practice.
     const repo = makeWorkingRepo(tmpDir, "3b-repo");
     git(repo, ["branch", "feature"]);
 
@@ -262,10 +276,14 @@ describe("detectTrunkDrift", () => {
 
     const result = await detectTrunkDrift(repo);
     assert.equal(result.skipped, null);
-    assert.equal(result.commits.length, 0, "ff-merged branch should have 0 direct commits");
+    assert.equal(
+      result.commits.length,
+      1,
+      "ff-merged-but-undeleted branches are indistinguishable from direct commits (accepted, see 3b's comment)"
+    );
   });
 
-  it("3c: worktree flow — feature ff-merged, worktree still linked — no direct commits (G4)", async () => {
+  it("3c: worktree flow — feature ff-merged, worktree still linked — now correctly flagged (same widening as 3b)", async () => {
     const repo = makeWorkingRepo(tmpDir, "3c-repo");
     git(repo, ["branch", "feature"]);
 
@@ -281,8 +299,8 @@ describe("detectTrunkDrift", () => {
     assert.equal(result.skipped, null);
     assert.equal(
       result.commits.length,
-      0,
-      "ff-merged worktree feature should have 0 direct commits"
+      1,
+      "ff-merged worktree feature is likewise no longer distinguishable from a direct commit (see 3b)"
     );
   });
 
@@ -433,6 +451,37 @@ describe("detectTrunkDrift", () => {
 
     assert.equal(result.commits.length, 1);
     assert.equal(result.commits[0].sha, sha3);
+  });
+
+  it("6c: an unrelated sibling branch at trunk's tip (zero divergence) must not blind trunk's own, older direct-to-trunk commits", async () => {
+    // Reproduces a real incident found via the plan-lifecycle-value-ledger
+    // effort's slice-4 checkpoint against Coaching Assistant: a second,
+    // concurrently-open effort branch existed at trunk's exact tip (freshly
+    // created, zero commits of its own yet). Because the OLD detector
+    // excluded everything reachable from ANY other local branch, its mere
+    // existence hid trunk's entire real direct-commit history, not just
+    // anything related to that branch. This case seeds real, older
+    // direct-to-trunk commits FIRST, then creates a sibling branch at the
+    // current tip with no commits of its own, and asserts those older
+    // commits still show up.
+    const repo = makeWorkingRepo(tmpDir, "6c-repo");
+
+    commitOn(repo, "master", "real direct commit, predates the sibling branch");
+    const realSha = git(repo, ["rev-parse", "HEAD"]);
+
+    // A sibling branch created off trunk's current tip, with NO commits of
+    // its own — the exact shape of "someone just ran `git worktree add` for
+    // a brand-new, not-yet-started effort".
+    git(repo, ["branch", "effort/unrelated-in-progress-work"]);
+
+    const result = await detectTrunkDrift(repo);
+    assert.equal(result.skipped, null);
+    assert.equal(
+      result.commits.length,
+      1,
+      "an unstarted sibling branch must not hide trunk's own pre-existing direct commit"
+    );
+    assert.equal(result.commits[0].sha, realSha);
   });
 
   it("7: out-of-order GIT_COMMITTER_DATE — returned in git DAG order, not date order", async () => {

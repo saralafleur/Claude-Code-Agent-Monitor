@@ -3,14 +3,34 @@
  * bypassing the tracked worktree/focus flow — with the same
  * recompute-per-request, never-cached posture as repo-topology.js. Resolves
  * the trunk branch via the shared `git-refs.resolveDefaultBranch`, then runs
- * one bounded, git-native `--first-parent --no-merges --not --exclude=<trunk>
- * --branches` walk (DEC-5's false-positive guard: commits on trunk's
- * first-parent line, not merges, and not reachable from any other local
- * branch — so `--no-ff` merges, fast-forwarded feature branches, and
- * worktree-flow merges are all correctly excluded). Reads no SQLite, writes
- * nothing, caches nothing. Every git failure resolves to
- * `{ skipped: "git_error" }` — this module never throws and never reports a
- * false "clean".
+ * one bounded, git-native `--first-parent --no-merges` walk (DEC-5's
+ * original false-positive guard, from the 2026-08-02-trunk-drift-detection
+ * effort: commits on trunk's first-parent line, not merges — a `--no-ff`
+ * merge's own commits live entirely on the merge commit's *second* parent
+ * line, so `--first-parent` already excludes them regardless of whether the
+ * feature branch ref still exists).
+ *
+ * Deliberately does NOT additionally exclude "commits reachable from any
+ * other local branch" (the original clause 3 / `--not --exclude=<trunk>
+ * --branches`). That clause was removed by the
+ * 2026-08-03-trunk-drift-open-branch-blindness effort: it's provably
+ * impossible, from git topology alone, to distinguish "a fast-forward-merged
+ * branch whose ref hasn't been deleted yet" (WATCH-1's original, accepted
+ * false-positive risk) from "a brand-new, not-yet-started sibling branch
+ * sitting at trunk's exact tip" — both have zero commits ahead of trunk. Any
+ * exclusion narrow enough to protect the former necessarily also blinds
+ * trunk's own *unrelated, older* direct-commit history the moment the latter
+ * merely exists — which, given how many concurrent effort worktrees this
+ * kind of project normally has open, is not a rare edge case but a frequent
+ * and severe one (see that effort's decisions.md for the live incident that
+ * surfaced it). This project's own convention is always `--no-ff` + delete
+ * the branch on cleanup, so the ff-merge scenario clause 3 protected is not
+ * expected to occur in practice; eliminating the far more common blind spot
+ * was judged the better trade.
+ *
+ * Reads no SQLite, writes nothing, caches nothing. Every git failure
+ * resolves to `{ skipped: "git_error" }` — this module never throws and
+ * never reports a false "clean".
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -164,15 +184,13 @@ async function detectTrunkDrift(repoPath, opts = {}) {
         "--shortstat",
         `--format=${RECORD_SEP}%H${FIELD_SEP}%an${FIELD_SEP}%ae${FIELD_SEP}%cI${FIELD_SEP}%s`,
         `refs/heads/${branch}`,
-        "--not",
-        // --exclude's glob-pattern must NOT be prefixed with "refs/heads/"
-        // when paired with --branches (git-rev-list(1): "should not begin
-        // with refs/heads... when applied to --branches") — a prefixed
-        // pattern silently matches nothing, so --branches then re-adds
-        // <branch> itself as a negative rev alongside the positive rev
-        // above and the walk yields zero commits every time. Bare name only.
-        `--exclude=${branch}`,
-        "--branches",
+        // No `--not --exclude=<branch> --branches` here (removed by
+        // 2026-08-03-trunk-drift-open-branch-blindness) — see the file
+        // header for why: it's topologically impossible to tell "a
+        // ff-merged branch not yet deleted" apart from "an unrelated,
+        // not-yet-started sibling branch," and the latter is common enough
+        // in this project's workflow that the old clause blinded trunk's
+        // own unrelated history far more often than it protected anything.
       ],
       { timeout }
     );
