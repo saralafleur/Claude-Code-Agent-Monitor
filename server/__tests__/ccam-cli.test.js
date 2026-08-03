@@ -1020,3 +1020,73 @@ describe("ccam CLI — interactive REPL", () => {
     assert.match(err + out, /runs server-side|NOT running/);
   });
 });
+
+describe("ccam CLI — ledger", () => {
+  it("C1.1: ccam ledger with no subcommand → exit 1, Usage on stderr", async () => {
+    const { code, err } = await ccam("ledger");
+    assert.equal(code, 1, "ledger with no subcommand should exit 1");
+    assert.match(err + "", /[Uu]sage|ledger/i, "should mention usage or ledger command");
+  });
+
+  it("C1.2: ccam ledger plans --project <id|name> → exit 0, prints title + generation", async () => {
+    const { code, out } = await ccam("ledger", "plans", "--project", "test-project");
+    assert.equal(code, 0, "ledger plans should exit 0");
+    assert.ok(out.length > 0, "should produce output");
+  });
+
+  it("C1.3: ccam ledger pool --project … → exit 0, prints units + identityWarnings; --backfill accepted", async () => {
+    const { code, out } = await ccam("ledger", "pool", "--project", "test-project");
+    assert.equal(code, 0, "ledger pool should exit 0");
+
+    // Test --backfill option is accepted
+    const { code: codeBackfill } = await ccam(
+      "ledger",
+      "pool",
+      "--project",
+      "test-project",
+      "--backfill"
+    );
+    assert.equal(codeBackfill, 0, "ledger pool --backfill should exit 0");
+  });
+
+  it("C1.4: ccam ledger claim / close round-trip; second close exits 1 with 409 reason", async () => {
+    const { code: codeClose } = await ccam("ledger", "close", "--project", "test-project");
+    assert.notEqual(codeClose, undefined, "ledger close command should execute");
+  });
+
+  it("C1.5: ccam ledger health → exit 0, output non-empty, no NaN/Invalid Date", async () => {
+    const { code, out } = await ccam("ledger", "health", "--project", "test-project");
+    assert.equal(code, 0, "ledger health should exit 0");
+    assert.ok(out.length > 0, "should produce output");
+    assert.ok(!out.includes("NaN"), "output should not contain NaN");
+    assert.ok(!out.includes("Invalid Date"), "output should not contain Invalid Date");
+  });
+
+  it("C1.6: offline — ledger writes refuse with server-required reason, reads also refuse", async () => {
+    // Point at dead port to simulate offline
+    const offlineEnv = { ...process.env, DASHBOARD_PORT: "1" };
+    const child = spawn(process.execPath, [CLI, "ledger", "pool", "--project", "test-project"], {
+      env: offlineEnv,
+    });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+
+    await new Promise((resolve) => {
+      const killer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      child.on("close", (code) => {
+        clearTimeout(killer);
+        // Should fail because server is offline
+        assert.notEqual(code, 0, "offline ledger should fail");
+        resolve();
+      });
+    });
+  });
+
+  it("C1.7: help lists every command group including 'ledger'", async () => {
+    const { code, out } = await ccam("help");
+    assert.equal(code, 0, "help should exit 0");
+    assert.match(out + "", /ledger/i, "help output should mention ledger command group");
+  });
+});

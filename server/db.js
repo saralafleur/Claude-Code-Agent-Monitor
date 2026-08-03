@@ -735,6 +735,88 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_detour_dispositions_cwd_created ON detour_dispositions(cwd, created_at);
   CREATE INDEX IF NOT EXISTS idx_detour_dispositions_resolved_item ON detour_dispositions(resolved_item_id);
 
+  -- Portfolio-layer plans (DEC-P1/P5/P6). Keyed by project_id, NOT cwd: the
+  -- legacy cwd-keyed 'plans' mirror above is a different layer and is untouched.
+  -- project_id is a soft ref with NO FK/CASCADE - a closed generation is an
+  -- audit record that outlives its project row, same stance as
+  -- detour_dispositions.project_id. Generation ordinal is DERIVED by walking
+  -- succeeds_plan_id; nothing stores it, so nothing can drift.
+  CREATE TABLE IF NOT EXISTS project_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+    succeeds_plan_id INTEGER REFERENCES project_plans(id),
+    origin TEXT NOT NULL DEFAULT 'manual'
+      CHECK(origin IN ('manual','import','retroactive_bundle')),
+    opened_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    closed_at TEXT,
+    closure_note TEXT,
+    imported_from_cwd TEXT,        -- canonicalized (cwd-identity.js) at import
+    imported_content_hash TEXT,    -- plans.content_hash at import time
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_project_plans_project
+    ON project_plans(project_id, status);
+  -- Import idempotency is keyed on (project_id, content_hash), NEVER on cwd -
+  -- CWD-IDENTITY-FANOUT: /SARA/DND and /SARA/dnd are one inode with one
+  -- content_hash and two plans rows.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_project_plans_import
+    ON project_plans(project_id, imported_content_hash)
+    WHERE imported_content_hash IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS project_plan_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES project_plans(id),
+    parent_item_id INTEGER REFERENCES project_plan_items(id),
+    text TEXT NOT NULL,
+    acceptance TEXT,
+    detail TEXT,
+    checked INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    target_date TEXT,              -- same shape pace.js reads; unused in v1 (DEC-18)
+    imported_item_id TEXT,         -- legacy plan_items.item_id provenance
+    imported_from_cwd TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_project_plan_items_plan
+    ON project_plan_items(plan_id, position);
+  CREATE INDEX IF NOT EXISTS idx_project_plan_items_parent
+    ON project_plan_items(parent_item_id);
+
+  -- The ONLY persisted judgment in this feature. Note what is absent: there is
+  -- no closed_at / closed flag here. A claim's closed-ness is a JOIN to
+  -- project_plans.status - copying the stamp onto N rows is 9.1's
+  -- write-sequence form (PM correction 2, architect 5).
+  CREATE TABLE IF NOT EXISTS value_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    plan_id INTEGER NOT NULL REFERENCES project_plans(id),
+    item_id INTEGER NOT NULL REFERENCES project_plan_items(id),
+    -- Full final vocabulary up front (WATCH-4 / DEC-15 of 2026-08-01: a CHECK is
+    -- rebuild-to-widen). v1 emits trunk_commit / merge_commit / intake_initiative
+    -- / detour; focus_segment is reserved for the correlational tier.
+    value_source TEXT NOT NULL CHECK(value_source IN
+      ('trunk_commit','merge_commit','intake_initiative','detour','focus_segment')),
+    value_ref TEXT NOT NULL,       -- sha | intake slug | detour_dispositions.id | segment key
+    source_cwd TEXT NOT NULL DEFAULT '',  -- canonicalized; '' not NULL so the
+                                          -- UNIQUE index below actually bites
+    label_snapshot TEXT,
+    seen_at_snapshot TEXT,
+    stage_snapshot TEXT,
+    attribution TEXT NOT NULL CHECK(attribution IN
+      ('mechanical','correlational','judgment')),
+    claimed_by TEXT NOT NULL DEFAULT 'human' CHECK(claimed_by IN ('human','llm')),
+    claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_value_claims_unit_item
+    ON value_claims(value_source, value_ref, source_cwd, item_id);
+  CREATE INDEX IF NOT EXISTS idx_value_claims_plan ON value_claims(plan_id);
+  CREATE INDEX IF NOT EXISTS idx_value_claims_unit
+    ON value_claims(value_source, value_ref);
+
   -- Layer 6: reconciliation's output queue — shaped like alert_events but
   -- deliberately separate (different audience: Sara reviewing portfolio
   -- health, not a fired alert rule; different trust boundary: some rows are
@@ -2783,6 +2865,76 @@ const stmts = {
   // carries an input_digest) can never accidentally satisfy this gate.
   findOpenQueueItemByDigest: db.prepare(
     `SELECT * FROM decision_queue WHERE cwd = ? AND kind = ? AND input_digest = ? AND status = 'pending' ORDER BY created_at DESC, id DESC LIMIT 1`
+  ),
+
+  // ── Portfolio layer: project_plans / project_plan_items / value_claims ──
+  // (technical-plan.md §3.1, DEC-3/DEC-5). Import idempotency is enforced by
+  // idx_project_plans_import (project_id, imported_content_hash) — NEVER cwd
+  // (CWD-IDENTITY-FANOUT). Closure is a single-row UPDATE guarded by
+  // status='open' in the WHERE clause, so a second close is a documented
+  // zero-row no-op the caller must detect, never a silent overwrite.
+  listProjectPlans: db.prepare(
+    `SELECT * FROM project_plans WHERE project_id = ? ORDER BY created_at ASC, id ASC`
+  ),
+  getProjectPlan: db.prepare(`SELECT * FROM project_plans WHERE id = ?`),
+  insertProjectPlan: db.prepare(
+    `INSERT INTO project_plans
+       (project_id, title, status, succeeds_plan_id, origin, imported_from_cwd, imported_content_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ),
+  updateProjectPlanTitle: db.prepare(
+    `UPDATE project_plans SET title = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id = ? AND status = 'open'`
+  ),
+  // The single closure composer (server/lib/plan-lifecycle.js closePlan) is
+  // the ONLY caller of this statement — see A5.13/A2's single-writer guard.
+  closeProjectPlan: db.prepare(
+    `UPDATE project_plans SET status = 'closed', closed_at = ?, closure_note = ?,
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id = ? AND status = 'open'`
+  ),
+  listProjectPlanItems: db.prepare(
+    `SELECT * FROM project_plan_items WHERE plan_id = ? ORDER BY position ASC, id ASC`
+  ),
+  getProjectPlanItem: db.prepare(`SELECT * FROM project_plan_items WHERE id = ?`),
+  insertProjectPlanItem: db.prepare(
+    `INSERT INTO project_plan_items
+       (plan_id, parent_item_id, text, acceptance, detail, checked, position, target_date, imported_item_id, imported_from_cwd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  updateProjectPlanItem: db.prepare(
+    `UPDATE project_plan_items SET
+       text = COALESCE(?, text),
+       acceptance = COALESCE(?, acceptance),
+       detail = COALESCE(?, detail),
+       checked = COALESCE(?, checked),
+       position = COALESCE(?, position),
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id = ?`
+  ),
+  deleteProjectPlanItem: db.prepare(`DELETE FROM project_plan_items WHERE id = ?`),
+  insertValueClaim: db.prepare(
+    `INSERT INTO value_claims
+       (project_id, plan_id, item_id, value_source, value_ref, source_cwd, label_snapshot, seen_at_snapshot, stage_snapshot, attribution, claimed_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  listClaimsForProject: db.prepare(
+    `SELECT * FROM value_claims WHERE project_id = ? ORDER BY claimed_at ASC, id ASC`
+  ),
+  listClaimsForPlan: db.prepare(
+    `SELECT * FROM value_claims WHERE plan_id = ? ORDER BY claimed_at ASC, id ASC`
+  ),
+  listClaimsForItem: db.prepare(
+    `SELECT * FROM value_claims WHERE item_id = ? ORDER BY claimed_at ASC, id ASC`
+  ),
+  getValueClaim: db.prepare(`SELECT * FROM value_claims WHERE id = ?`),
+  deleteValueClaim: db.prepare(`DELETE FROM value_claims WHERE id = ?`),
+  findProjectPlanByImportHash: db.prepare(
+    `SELECT * FROM project_plans WHERE project_id = ? AND imported_content_hash = ?`
+  ),
+  lastClosureForProject: db.prepare(
+    `SELECT * FROM project_plans WHERE project_id = ? AND status = 'closed'
+     ORDER BY closed_at DESC, id DESC LIMIT 1`
   ),
 };
 

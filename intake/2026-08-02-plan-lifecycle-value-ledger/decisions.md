@@ -340,3 +340,50 @@ sequencing gates.
   (unblocking the next stage is the skill's purpose). Build itself remains
   gated behind DEC-2 (trunk-drift Phase 1a merge) and the PENDING (Sara)
   rows DEC-10..DEC-13 noted above; none of those block QA planning.
+
+### DEC-20 — DEC-9 bounded fallback invoked: deriving `chronology-ordering.test.js`'s scope surfaced 6 pre-existing files
+
+- **Status:** DECIDED-AUTO (2026-08-02, build phase, T3.14) — the bounded fallback DEC-9 itself anticipated, taken per QDEC-5's forcing function
+- **What happened:** replacing `chronology-ordering.test.js`'s hand-typed
+  5-file `filesToScan` with a scope derived from `server/lib/*.js` +
+  `server/routes/*.js` (88 files total, including `server/db.js`) surfaced 11
+  matches across 6 files never previously scanned. Each was reviewed
+  individually (not batch-waived) and dispositioned in the test file's new
+  `FILE_DISPOSITIONS` map:
+  - `server/lib/scoped-stats.js`, `server/routes/hooks.js`,
+    `server/routes/workflows.js` — **verified-fine false positives**:
+    count-ranked top-N leaderboards (same shape as `db.js`'s two existing
+    `GRANDFATHERED_QUERIES` entries) or `SELECT 1 ... LIMIT 1`
+    existence/dedup checks, neither of which is a "most recent N" window.
+  - `server/lib/focus-inference.js` — **verified-fine false positive of the
+    scanner's own technique**: `listCandidates()`'s LIMIT is over `sessions`
+    ordered by `updated_at DESC`, not over the flagged tables; the scanner's
+    substring table-name match was fooled by nested `NOT EXISTS`/`EXISTS`
+    correlated subqueries referencing `events`/`focus_inferences`.
+  - **`server/lib/focus-report.js` — a genuine, pre-existing §9.2-shaped risk,
+    NOT introduced by this effort and not fixed by it.**
+    `resolveSessionStart()`'s `SELECT created_at FROM events WHERE
+    session_id = ? ORDER BY id ASC LIMIT 1` fallback picks "the earliest
+    event" by insertion order, not by `created_at` — the exact
+    row-id-as-chronology-proxy shape §9.2 exists to catch. The file's own
+    sibling query (`allEvents`, a few lines below, no LIMIT) already
+    documents the failure mode in a comment (bulk-ingested Workflow-tool
+    events landing at whatever row id was next, regardless of their own
+    `created_at`) and correctly re-sorts numerically before use —
+    `resolveSessionStart()` does not. This effort's scan was simply never
+    wide enough to see it before.
+- **Disposition:** all six are dated-grandfathered (file-level, `2026-08-02`)
+  in `FILE_DISPOSITIONS`, distinct from — and without widening —
+  `GRANDFATHERED_QUERIES`, which stays at its original 2 reviewed entries
+  exactly as T3.14 requires. **The remainder, tracked here rather than
+  silently fixed or silently ignored:** `server/lib/focus-report.js`'s
+  `resolveSessionStart()` fallback is a real, open defect candidate. It
+  affects `session.started_at`-less sessions' segment-bookend timestamp in
+  the focus-time report (`server/lib/focus-report.js`, unrelated to this
+  effort's own change set) and is **out of scope for this build** to fix —
+  no file in that surface is touched by `plan-lifecycle-value-ledger`.
+- **Recommendation:** file this as its own small, separate fix (swap the
+  `ORDER BY id ASC LIMIT 1` for `ORDER BY created_at ASC LIMIT 1`, or better,
+  reuse the sibling query's fetch-all-then-sort-numerically pattern) the next
+  time `server/lib/focus-report.js` is touched, or as a standalone one-line
+  fix with its own red-first test. Sara may prioritize directly.

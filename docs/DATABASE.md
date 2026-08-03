@@ -943,6 +943,96 @@ Managed through `/api/detours/*`; see [docs/API.md](./API.md).
 
 ---
 
+### project_plans / project_plan_items / value_claims
+
+**Portfolio layer** (`intake/2026-08-02-plan-lifecycle-value-ledger/`): a plan lifecycle + value ledger, additive and keyed by `project_id` — a **different layer** from `plans`/`plan_items` above, which stays cwd-keyed and untouched. A **generation** is one closable plan; `succeeds_plan_id` chains generations and the ordinal is always **derived** by walking that chain — nothing stores it, so nothing can drift. `value_claims` is the only persisted judgment: note what is absent — there is no `closed_at`/`closed` column on it. A claim's closed-ness is a **join** to `project_plans.status`; copying the stamp onto N claim rows would be the write-sequence form of the dual-derived-view defect this codebase's `PROJECT-CONTEXT.md` §9.1 tracks. `project_id` on all three tables is a **soft ref, no FK** — a closed generation is an audit record that must outlive its project row, same stance as `detour_dispositions.project_id`. All three vocabularies (`status`, `origin`, `value_source`, `attribution`, `claimed_by`) are complete as of the initial `CREATE TABLE` for the same SQLite `ALTER TABLE` limitation `detour_dispositions` documents above — **zero `ALTER TABLE`, zero rebuilds** were needed to land this layer; it is three brand-new tables.
+
+```sql
+CREATE TABLE project_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+    succeeds_plan_id INTEGER REFERENCES project_plans(id),
+    origin TEXT NOT NULL DEFAULT 'manual'
+        CHECK(origin IN ('manual','import','retroactive_bundle')),
+    opened_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    closed_at TEXT,
+    closure_note TEXT,
+    imported_from_cwd TEXT,
+    imported_content_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE project_plan_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES project_plans(id),
+    parent_item_id INTEGER REFERENCES project_plan_items(id),
+    text TEXT NOT NULL,
+    acceptance TEXT,
+    detail TEXT,
+    checked INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    target_date TEXT,
+    imported_item_id TEXT,
+    imported_from_cwd TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE value_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    plan_id INTEGER NOT NULL REFERENCES project_plans(id),
+    item_id INTEGER NOT NULL REFERENCES project_plan_items(id),
+    value_source TEXT NOT NULL CHECK(value_source IN
+        ('trunk_commit','merge_commit','intake_initiative','detour','focus_segment')),
+    value_ref TEXT NOT NULL,
+    source_cwd TEXT NOT NULL DEFAULT '',
+    label_snapshot TEXT,
+    seen_at_snapshot TEXT,
+    stage_snapshot TEXT,
+    attribution TEXT NOT NULL CHECK(attribution IN
+        ('mechanical','correlational','judgment')),
+    claimed_by TEXT NOT NULL DEFAULT 'human' CHECK(claimed_by IN ('human','llm')),
+    claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
+**Columns (selected):**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `project_plans.origin` | TEXT | NO | `manual`, `import` (DEC-P2 generation-1 from an existing `AGENT-PLAN.md`), or `retroactive_bundle` |
+| `project_plans.imported_content_hash` | TEXT | YES | `plans.content_hash` at import time — the **only** import idempotency key, paired with `project_id`, via a `UNIQUE` partial index (`WHERE imported_content_hash IS NOT NULL`). **Never `cwd`**: two case-variant/symlinked aliases of one physical directory share one content_hash and must import once |
+| `project_plan_items.imported_item_id` | TEXT | YES | Legacy `plan_items.item_id` provenance for an imported item |
+| `value_claims.value_source` / `value_ref` | TEXT | NO | A value unit's identity together with `source_cwd`: a sha (`trunk_commit`/`merge_commit`), an intake slug (`intake_initiative`), a `detour_dispositions.id` (`detour`), or a reserved segment key (`focus_segment`, not emitted in v1) |
+| `value_claims.source_cwd` | TEXT | NO, default `''` | Canonicalized (`server/lib/cwd-identity.js`) at write time; `''` not `NULL` so the `UNIQUE` index below actually bites (SQLite treats `NULL`s as distinct) |
+| `value_claims.label_snapshot` / `seen_at_snapshot` / `stage_snapshot` | TEXT | YES | Reference + one-line summary only — **never artifact content** (the snapshot ceiling) |
+| `value_claims.attribution` | TEXT | NO | `mechanical` (a direct observation), `correlational` (a session-bracketed suggestion, never auto-claimed), or `judgment` (a decided detour) |
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_project_plans_project ON project_plans(project_id, status);
+CREATE UNIQUE INDEX idx_project_plans_import
+    ON project_plans(project_id, imported_content_hash)
+    WHERE imported_content_hash IS NOT NULL;
+CREATE INDEX idx_project_plan_items_plan ON project_plan_items(plan_id, position);
+CREATE INDEX idx_project_plan_items_parent ON project_plan_items(parent_item_id);
+CREATE UNIQUE INDEX idx_value_claims_unit_item
+    ON value_claims(value_source, value_ref, source_cwd, item_id);
+CREATE INDEX idx_value_claims_plan ON value_claims(plan_id);
+CREATE INDEX idx_value_claims_unit ON value_claims(value_source, value_ref);
+```
+
+The `idx_value_claims_unit_item` `UNIQUE` index is DEC-7's cardinality rule made physical: one value unit may be claimed into **many** items (many-to-many), but not claimed **twice into the same item**. A unit counts as out of the live pool at its **first** claim regardless of how many items it later gets claimed into.
+
+Managed through `/api/project-plans/*` and `ccam ledger`; every derived number (the pool, health metrics, the whole-life summary) is computed exactly once, in `server/lib/value-ledger.js` — see [docs/API.md](./API.md).
+
+---
+
 ### decision_queue
 
 **Layer 6**: `server/lib/reconciliation.js`'s output — pace alerts, detour-volume flags, detours needing a human look, and stuck write-backs (`writeback_conflict`/`writeback_failed`, enqueued by `plan-writeback.applyDisposition` itself). Shaped like `alert_events` but deliberately separate: different audience (Sara reviewing portfolio health, not a fired alert rule) and a different trust boundary (some rows are LLM-classified). `kind`'s `CHECK` includes the write-back values from its initial `CREATE TABLE` for the same reason `detour_dispositions`' constraints do. No FK on `session_id`/`cwd` — an audit trail. `findOpenQueueItem` (`kind`+`ref_id`+`item_id`+`status='pending'`) prevents a still-unfixed condition from re-queuing every tick.

@@ -42,5 +42,6 @@
     "deleting": "삭제 중…",
     "deleteActiveTitle": "활성 세션은 삭제할 수 없습니다 — 완료되거나 중단될 때까지 기다려 주세요.",
     "deleteFailed": "세션을 삭제하지 못했습니다"
-  }
+  },
+  "remoteSourceBadgeTitle": "원격 머신에서 수집됨"
 }

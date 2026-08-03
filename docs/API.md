@@ -1868,6 +1868,68 @@ Two generation paths, split at 2 local calendar days (`server/lib/focus-summary.
 
 ---
 
+### Portfolio Plans & Value Ledger
+
+**`/api/project-plans`** is a portfolio-layer plan lifecycle + value ledger, additive and keyed by `project_id` — deliberately a **separate namespace** from `/api/plans` above (the legacy cwd-keyed AGENT-PLAN.md mirror). A **generation** is one closable plan (`project_plans`); `succeeds_plan_id` chains generations, and the ordinal is always **derived** by walking that chain (never stored). Delivered work is **claimed** into a plan's items (`value_claims`) from a live-derived **value pool** (`server/lib/value-ledger.js`), and a plan **closes** exactly once (`POST /:id/close` — the only door to `status: "closed"`). Closure is derived by joining a claim's `plan_id` to `project_plans.status`; there is no `closed_at` column on `value_claims` and no way to reopen or delete a closed plan.
+
+Existing `AGENT-PLAN.md` imports invert into generation 1 via `POST /import`: idempotent on `(project_id, content_hash)` — **never on cwd** — so a re-import, or an import from a case-variant/symlinked alias of the same directory, is a no-op that returns the existing plan rather than minting a second generation.
+
+**Plan shape:**
+
+```json
+{
+  "plan": {
+    "id": 7,
+    "project_id": "proj_abc",
+    "title": "Coaching Assistant — Q3",
+    "status": "open",
+    "succeeds_plan_id": null,
+    "ordinal": 1,
+    "origin": "import",
+    "opened_at": "2026-08-01T09:00:00.000Z",
+    "closed_at": null,
+    "closure_note": null,
+    "imported_from_cwd": "/Users/dev/CoachingAssistant",
+    "imported_content_hash": "2f9c…"
+  },
+  "items": [
+    {
+      "id": 42,
+      "plan_id": 7,
+      "parent_item_id": null,
+      "text": "Migrate auth",
+      "checked": 0,
+      "position": 0,
+      "claims": []
+    }
+  ]
+}
+```
+
+| Method + path | Purpose |
+|---|---|
+| `GET /api/project-plans?project_id=&status=` | Plans (open+closed) with nested items and per-item claims |
+| `GET /api/project-plans/pool?project_id=&lookbackDays=&backfill=1` | Assembled live value pool + `identityWarnings` |
+| `GET /api/project-plans/health?project_id=` | `{ unclaimedPoolSize, lastClosureAt, daysSinceLastClosure, openPlanCount }` |
+| `GET /api/project-plans/history?project_id=` | AC-6 whole-life summary: closed generations + their claims |
+| `POST /api/project-plans/import` `{project_id, cwd}` | Generation-1 import (idempotent on content_hash) |
+| `POST /api/project-plans` `{project_id, title, succeeds_plan_id?, origin?}` | Create (incl. a `retroactive_bundle`) — 201 |
+| `GET`/`PATCH /api/project-plans/:id` | Read / rename (open plans only — `status` cannot be set via PATCH) |
+| `POST /api/project-plans/:id/close` `{closure_note}` | The only door to closed |
+| `POST /api/project-plans/:id/items`, `PATCH`/`DELETE /api/project-plans/items/:itemId` | Item CRUD (open plans only) |
+| `POST /api/project-plans/:id/claims` | Claim a value unit into an item, or an inline `{new_item:{...}}` |
+| `DELETE /api/project-plans/claims/:claimId` | Explicit unclaim (rejected once the plan is closed) |
+
+`project_plans.project_id` has **no foreign key** — a closed generation is an audit record that outlives its project row, so `/pool`, `/health`, and `/history` stay reachable (200) even after a project is deleted; only `POST /` and `POST /import` require the project to still exist (404 otherwise).
+
+**Value pool.** `GET /pool` assembles every unclaimed value unit live, on every call (nothing is persisted): a **mechanical** tier from intake initiatives + their merge commits and the live `detectTrunkDrift()` trunk feed, a **judgment** tier from `detour_dispositions`, and a **correlational** tier suggesting (never auto-claiming) a focus-session-bracketed trunk commit. A unit's identity is `(value_source, value_ref, source_cwd)`; once claimed it never re-enters the pool (the ratchet). Every cwd is canonicalized through `server/lib/cwd-identity.js` before assembly — `identityWarnings` on the response surfaces case-variant duplicates, unmapped paths, and worktrees folded to a parent repo root.
+
+**WebSocket:** additive message types `project_plan_updated` and `value_claim_updated` (see [WebSocket API](#websocket-api) below) — `plan_updated`'s own type/payload is untouched.
+
+**CLI:** `ccam ledger plans|pool|health|history|import|claim|close --project <id|name>` — every derived number is printed from the API response verbatim, never recomputed client-side.
+
+---
+
 ### Portfolio
 
 The layer-7 read model behind the **Project Manager** page (`/project-manager`, sidebar label **Project Manager**, positioned right after Focus): one rollup per project combining objective/milestone completion and live pace status.
@@ -2333,6 +2395,22 @@ Broadcast whenever a repo's `AGENT-PLAN.md` is (re)ingested with changes — by 
 
 ```json
 { "type": "plan_updated", "data": { "plan": { "cwd": "/Users/dev/Claude-Code-Agent-Monitor", "title": "Auth migration", "item_count": 2 }, "items": [ { "item_number": 1, "text": "Migrate auth", "checked": 0 } ] } }
+```
+
+#### project_plan_updated
+
+Broadcast whenever a portfolio-layer plan or item is created, renamed, closed, or its items change (`/api/project-plans`, see [Portfolio Plans & Value Ledger](#portfolio-plans--value-ledger)). Carries `{ "plan": {...} }`. Deliberately additive and separate from `plan_updated` above — the two plan surfaces never blend in one message.
+
+```json
+{ "type": "project_plan_updated", "data": { "plan": { "id": 7, "project_id": "proj_abc", "status": "closed", "closed_at": "2026-08-02T10:00:00.000Z" } } }
+```
+
+#### value_claim_updated
+
+Broadcast whenever a value unit is claimed or unclaimed, and once more (with `closed: true`) as part of the single closure composer when a plan closes.
+
+```json
+{ "type": "value_claim_updated", "data": { "claim": { "id": 12, "plan_id": 7, "item_id": 42, "value_source": "trunk_commit", "value_ref": "a1b2c3d" } } }
 ```
 
 #### session_focus

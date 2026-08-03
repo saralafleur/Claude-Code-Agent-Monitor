@@ -61,8 +61,20 @@ tags:
     description: Web Push notification subscriptions and broadcast (VAPID); also fires native Electron notifications when hosted in the desktop app
   - name: Projects
     description: User-named groupings of one or more session working directories (cwds). A thin label layer over existing session/cwd data — sessions carry no project_id column, so membership is derived by joining sessions.cwd against the folder mappings.
+  - name: Detours
+    description: 'Layer 4: durable, resolvable detour dispositions (fold_in/new_item/deliberate/discard). fold_in/new_item auto-write into the cwd''s AGENT-PLAN.md through the single audited plan-writeback.applyDisposition path (DEC-2/DEC-13).'
+  - name: Decision Queue
+    description: 'Layer 6 reconciliation output: pace-alert / detour-volume / needs-review / write-outcome entries surfaced for Sara''s review over HTTP, ccam, and the Project Manager page.'
+  - name: Portfolio
+    description: 'Layer 7 read model: per-project objective/milestone completion and live pace status, computed fresh from pace.js on every request. Powers the Project Manager page''s rollup table and pace-watch rail.'
   - name: Plans
     description: Per-repo AGENT-PLAN.md plans (mirrored read-only, keyed by cwd) and per-session focus declarations (which plan item a session is serving, plus its detour stack and drift verdict)
+  - name: Portfolio Plans
+    description: 'Portfolio-layer plan lifecycle + value ledger: closable generations of plans keyed by project_id, a live-derived value pool, and the value_claims audit trail. Separate from the legacy cwd-keyed /api/plans mirror.'
+  - name: Playbook
+    description: The Coach's Playbook — the catalog of rule-based practices the Coach engine evaluates, and their user-editable config
+  - name: Coach
+    description: The Coach's Feed — Observations the Playbook engine records when a practice's condition fires, and the user's response to each
 components:
   parameters:
     SessionIdPath:
@@ -239,6 +251,24 @@ components:
         cost:
           type: number
           nullable: true
+        tokens:
+          type: object
+          nullable: true
+          description: Session-lifetime token totals, summed across every model/speed/tier bucket. Only present on GET /api/sessions (list). `cache_read`/`cache_write` are the split figures; `effective` is the cost-weighted input-equivalent total (input + output + cache reads/writes weighted by the model's pricing rates, so it tracks `cost`). `cache` (read + write combined) is retained for backward compatibility.
+          properties:
+            input:
+              type: integer
+            output:
+              type: integer
+            cache:
+              type: integer
+              description: Deprecated combined read+write figure - prefer the split fields.
+            cache_read:
+              type: integer
+            cache_write:
+              type: integer
+            effective:
+              type: integer
         awaiting_input_since:
           type: string
           format: date-time
@@ -707,6 +737,58 @@ components:
             cache_write_tokens:
               type: integer
               minimum: 0
+        context_series:
+          type: array
+          description: 'Per-turn ACTIVE context-size snapshots, oldest first — distinct from the lifetime cumulative `tokens` above. Each point is input+cache_read+cache_creation tokens for that one turn, approximating what was actually sent to the model on that call. Plotted over time this produces a sawtooth: climbing during normal work, dropping sharply at each /compact or /clear.'
+          items:
+            type: object
+            required:
+              - ts
+              - tokens
+            properties:
+              ts:
+                type: string
+                format: date-time
+                description: Transcript timestamp of the turn.
+              tokens:
+                type: integer
+                minimum: 0
+        token_baggage_series:
+          type: array
+          description: Cumulative running total of tokens consumed per turn, oldest first — each point's `tokens` is a running SUM of that turn's context_series value plus its own newly-generated output tokens. Unlike context_series, this is monotonic and never decreases across /compact or /clear. Rendered as a bar chart, bars getting taller faster means the active context is large enough that each turn is adding more tokens. Each point also carries that single turn's own, non-cumulative input_tokens/output_tokens/cache_read_tokens/cache_write_tokens — the components context_tokens and the running `tokens` total are built from — purely so the chart's hover tooltip can show a per-turn breakdown; they don't sum into anything themselves. All four are 0 for turns recorded before this breakdown was added.
+          items:
+            type: object
+            required:
+              - ts
+              - tokens
+              - input_tokens
+              - output_tokens
+              - cache_read_tokens
+              - cache_write_tokens
+            properties:
+              ts:
+                type: string
+                format: date-time
+                description: Transcript timestamp of the turn.
+              tokens:
+                type: integer
+                minimum: 0
+              input_tokens:
+                type: integer
+                minimum: 0
+                description: That single turn's own input tokens (not cumulative).
+              output_tokens:
+                type: integer
+                minimum: 0
+                description: That single turn's own output tokens (not cumulative).
+              cache_read_tokens:
+                type: integer
+                minimum: 0
+                description: That single turn's own cache-read tokens (not cumulative).
+              cache_write_tokens:
+                type: integer
+                minimum: 0
+                description: That single turn's own cache-write tokens (not cumulative).
     SessionUpdateRequest:
       type: object
       properties:
@@ -1516,32 +1598,32 @@ components:
     FocusSummaryCacheTimelineResponse:
       type: object
       required:
-        - days
+        - entries
+        - truncated
       properties:
-        days:
+        entries:
           type: array
+          description: Raw hit/miss timestamps in the requested range, oldest first. No day-bucketing — the client groups these into its own local calendar days.
           items:
             type: object
             required:
-              - date
-              - hits
-              - misses
-              - total
+              - accessed_at
+              - outcome
             properties:
-              date:
+              accessed_at:
                 type: string
-                format: date
-                description: UTC calendar day, YYYY-MM-DD
-              hits:
-                type: integer
-              misses:
-                type: integer
-              total:
-                type: integer
+                format: date-time
+              outcome:
+                type: string
+                enum:
+                  - hit
+                  - miss
+        truncated:
+          type: boolean
+          description: True when the range held more than the server's row cap
     FocusSummaryCacheDayResponse:
       type: object
       required:
-        - date
         - hits
         - misses
         - total
@@ -1549,9 +1631,6 @@ components:
         - truncated
         - entries
       properties:
-        date:
-          type: string
-          format: date
         hits:
           type: integer
         misses:
@@ -1564,7 +1643,7 @@ components:
             type: string
         truncated:
           type: boolean
-          description: True when the day had more than 500 matching rows and the list was cut off
+          description: True when the range had more than 500 matching rows and the list was cut off
         entries:
           type: array
           items:
@@ -1577,6 +1656,8 @@ components:
               - outcome
               - bullet_count
               - accessed_at
+              - window_from
+              - window_to
             properties:
               cache_key:
                 type: string
@@ -1602,6 +1683,16 @@ components:
               accessed_at:
                 type: string
                 format: date-time
+                description: When this resolution last happened, not the range it covers
+              window_from:
+                type: string
+                format: date-time
+                nullable: true
+                description: Start of the [window_from, window_to) instant range this cached summary covers, decoded from cache_key. Null only if cache_key didn't parse.
+              window_to:
+                type: string
+                format: date-time
+                nullable: true
     ClearDataResponse:
       type: object
       required:
@@ -4304,6 +4395,10 @@ components:
         declared_done_session:
           type: string
           nullable: true
+        target_date:
+          type: string
+          nullable: true
+          description: Optional human-set YYYY-MM-DD target date (layer 5 pace tracking), authored out-of-band via POST /api/plans/items/target — never written by ingest, so it survives every re-ingest of the file untouched.
         updated_at:
           type: string
     PlanWithItems:
@@ -4416,6 +4511,427 @@ components:
             - completed
         activeForm:
           type: string
+    PortfolioPlan:
+      type: object
+      description: One generation of a project's portfolio-layer plan.
+      properties:
+        id:
+          type: integer
+        project_id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum:
+            - open
+            - closed
+        succeeds_plan_id:
+          type: integer
+          nullable: true
+        origin:
+          type: string
+          enum:
+            - manual
+            - import
+            - retroactive_bundle
+        opened_at:
+          type: string
+        closed_at:
+          type: string
+          nullable: true
+        closure_note:
+          type: string
+          nullable: true
+        imported_from_cwd:
+          type: string
+          nullable: true
+        imported_content_hash:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    PortfolioPlanItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        plan_id:
+          type: integer
+        parent_item_id:
+          type: integer
+          nullable: true
+        text:
+          type: string
+        acceptance:
+          type: string
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+        checked:
+          type: integer
+        position:
+          type: integer
+        target_date:
+          type: string
+          nullable: true
+        imported_item_id:
+          type: string
+          nullable: true
+        imported_from_cwd:
+          type: string
+          nullable: true
+        claims:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValueClaim'
+    PortfolioPlanWithItems:
+      type: object
+      properties:
+        plan:
+          $ref: '#/components/schemas/PortfolioPlan'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortfolioPlanItem'
+    ValueClaim:
+      type: object
+      description: The only persisted judgment in this feature. No closed_at column — closure is derived by joining plan_id -> project_plans.status.
+      properties:
+        id:
+          type: integer
+        project_id:
+          type: string
+        plan_id:
+          type: integer
+        item_id:
+          type: integer
+        value_source:
+          type: string
+          enum:
+            - trunk_commit
+            - merge_commit
+            - intake_initiative
+            - detour
+            - focus_segment
+        value_ref:
+          type: string
+        source_cwd:
+          type: string
+        label_snapshot:
+          type: string
+          nullable: true
+        seen_at_snapshot:
+          type: string
+          nullable: true
+        stage_snapshot:
+          type: string
+          nullable: true
+        attribution:
+          type: string
+          enum:
+            - mechanical
+            - correlational
+            - judgment
+        claimed_by:
+          type: string
+          enum:
+            - human
+            - llm
+        claimed_at:
+          type: string
+    ValueUnit:
+      type: object
+      description: One unclaimed value unit surfaced by the live pool assembly.
+      properties:
+        value_source:
+          type: string
+          enum:
+            - trunk_commit
+            - merge_commit
+            - intake_initiative
+            - detour
+            - focus_segment
+        value_ref:
+          type: string
+        source_cwd:
+          type: string
+        attribution:
+          type: string
+          enum:
+            - mechanical
+            - correlational
+            - judgment
+        label:
+          type: string
+          nullable: true
+        unitKey:
+          type: string
+    ValuePool:
+      type: object
+      properties:
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValueUnit'
+        identityWarnings:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                  - case_variant_duplicate
+                  - no_git_repo
+                  - repo_root_unmapped
+              cwds:
+                type: array
+                items:
+                  type: string
+    LedgerHealth:
+      type: object
+      description: computePlanHealth's exact shape — the T6 parity target every consumer reads verbatim.
+      properties:
+        unclaimedPoolSize:
+          type: integer
+        lastClosureAt:
+          type: string
+          nullable: true
+        daysSinceLastClosure:
+          type: integer
+          nullable: true
+        openPlanCount:
+          type: integer
+    LedgerHistory:
+      type: object
+      description: 'AC-6 whole-life summary: closed generations and their claims, no archaeology.'
+      properties:
+        generations:
+          type: array
+          items:
+            type: object
+            properties:
+              plan:
+                $ref: '#/components/schemas/PortfolioPlan'
+              ordinal:
+                type: integer
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PortfolioPlanItem'
+              claims:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ValueClaim'
+    PlaybookField:
+      type: object
+      required:
+        - key
+        - type
+        - default
+        - min
+      description: 'One configurable numeric field on a practice. v1 practices only expose `type: "number"` fields (a threshold), so `default` and `min` are both numbers; `min` is the floor enforced by `PUT /api/playbook/practices/:id/config`.'
+      properties:
+        key:
+          type: string
+          description: Config object key this field controls.
+          example: thresholdTokens
+        type:
+          type: string
+          enum:
+            - number
+          description: Field's value type. Only `"number"` exists in v1.
+          example: number
+        default:
+          type: number
+          description: Value used when the practice has never been configured.
+          example: 100000000
+        min:
+          type: number
+          description: Minimum accepted value. `PUT /api/playbook/practices/:id/config` rejects a lower value with 400 `INVALID_CONFIG`.
+          example: 1000000
+    PlaybookPractice:
+      type: object
+      required:
+        - id
+        - category
+        - scope
+        - kind
+        - defaultSeverity
+        - fields
+        - enabled
+        - config
+      description: A catalog practice merged with its current stored config (or the catalog defaults, if never touched). This is the shape every entry in `GET /api/playbook/practices` has, and also the shape `PUT /api/playbook/practices/:id/config` returns for the one practice it updated.
+      properties:
+        id:
+          type: string
+          description: Stable practice id, also the `:id` path param for the config PUT.
+          example: session-token-ceiling
+        category:
+          type: string
+          description: Grouping label for the Playbook UI.
+          example: context-management
+        scope:
+          type: string
+          enum:
+            - session
+            - project
+            - global
+          description: What one Observation from this practice is scoped to. The engine evaluates `"session"`-scoped practices per active session and `"global"`-scoped practices once per tick against dashboard-wide state (e.g. every enabled account); `"project"`-scoped evaluation isn't built yet.
+          example: session
+        kind:
+          type: string
+          enum:
+            - risk
+            - info
+            - good
+          description: Nature of the Observation this practice produces when it fires.
+          example: risk
+        defaultSeverity:
+          type: string
+          description: Severity stamped onto Observations this practice creates.
+          example: warning
+        fields:
+          type: array
+          description: The practice's configurable fields (see `PlaybookField`).
+          items:
+            $ref: '#/components/schemas/PlaybookField'
+        enabled:
+          type: boolean
+          description: Whether the Coach engine currently evaluates this practice.
+          example: true
+        config:
+          type: object
+          description: Current config, keyed by each field's `key`. Values are numbers; a key absent from stored config falls back to that field's `default`.
+          additionalProperties:
+            type: number
+          example:
+            thresholdTokens: 100000000
+    PlaybookPracticesResponse:
+      type: object
+      required:
+        - practices
+      description: Every catalog practice, merged with its current config.
+      properties:
+        practices:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaybookPractice'
+    PlaybookConfigPatchRequest:
+      type: object
+      description: Patch for one practice's `enabled`/`config`. Both fields are optional and independent — an omitted field keeps its current stored value (or catalog default if never configured); `config` itself is also a patch, so only the keys you supply are overwritten, not the whole object.
+      properties:
+        enabled:
+          type: boolean
+          description: New enabled state for the practice. Omit to leave unchanged.
+          example: true
+        config:
+          type: object
+          description: Field values to overwrite, keyed by each field's `key`. Every key must match one of the practice's own `fields[].key`; every value must be a finite number at or above that field's `min`.
+          additionalProperties:
+            type: number
+          example:
+            thresholdTokens: 150000000
+    CoachObservation:
+      type: object
+      required:
+        - id
+        - practice_id
+        - scope_type
+        - scope_id
+        - kind
+        - severity
+        - values_json
+        - status
+        - detected_at
+        - responded_at
+      description: One recorded firing of a Playbook practice. `values_json` is a JSON-ENCODED STRING (not a nested object) so the row can be stored/returned verbatim regardless of which values a given practice captured — callers `JSON.parse` it to read the practice-specific numbers.
+      properties:
+        id:
+          type: integer
+          description: Row id.
+          example: 42
+        practice_id:
+          type: string
+          description: Which catalog practice produced this Observation.
+          example: session-token-ceiling
+        scope_type:
+          type: string
+          enum:
+            - session
+            - project
+            - global
+          description: What `scope_id` identifies.
+          example: session
+        scope_id:
+          type: string
+          nullable: true
+          description: 'The session/project id this Observation is about; `null` for `scope_type: "global"`.'
+          example: 5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11
+        kind:
+          type: string
+          enum:
+            - risk
+            - info
+            - good
+          description: Copied from the practice's own `kind` at detection time.
+          example: risk
+        severity:
+          type: string
+          description: Copied from the practice's `defaultSeverity` at detection time.
+          example: warning
+        values_json:
+          type: string
+          description: JSON-encoded object of the practice-specific values that triggered detection, e.g. the session's total tokens against the configured threshold.
+          example: '{"totalTokens":150000000,"thresholdTokens":100000000}'
+        status:
+          type: string
+          enum:
+            - open
+            - acknowledged
+            - dismissed
+            - resolved
+          description: Starts `"open"`; moves to one of the other three via `POST .../respond`.
+          example: open
+        detected_at:
+          type: string
+          format: date-time
+          description: When the Coach engine recorded this Observation.
+          example: '2026-07-24T18:41:55.117Z'
+        responded_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the user responded; `null` while `status` is still `"open"`.
+          example: null
+    CoachObservationsResponse:
+      type: object
+      required:
+        - observations
+      description: Observations, most recent (`detected_at`) first.
+      properties:
+        observations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoachObservation'
+    CoachRespondRequest:
+      type: object
+      required:
+        - response
+      description: The user's response to one Observation.
+      properties:
+        response:
+          type: string
+          enum:
+            - acknowledged
+            - dismissed
+            - resolved
+          description: New `status` for the Observation.
+          example: acknowledged
 paths:
   /api/health:
     get:
@@ -6101,39 +6617,57 @@ paths:
     get:
       tags:
         - Settings
-      summary: Day-bucketed hit/miss counts for the focus-window-summary cache
+      summary: Raw hit/miss timestamps for the focus-window-summary cache within an instant range. Day-bucketing (into the viewer's local calendar day) happens client-side.
       operationId: getFocusSummaryCacheTimeline
       parameters:
-        - name: days
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 90
-            default: 30
-          description: Trailing days to include, clamped to [1, 90]
-      responses:
-        '200':
-          description: Zero-filled, oldest-first day timeline
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FocusSummaryCacheTimelineResponse'
-  /api/settings/cache/day:
-    get:
-      tags:
-        - Settings
-      summary: Focus-summary-cache activity for a single UTC calendar day
-      operationId: getFocusSummaryCacheDay
-      parameters:
-        - name: date
+        - name: from
           in: query
           required: true
           schema:
             type: string
-            format: date
-          description: UTC calendar day, YYYY-MM-DD
+            format: date-time
+          description: Inclusive lower bound, ISO instant
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound, ISO instant
+      responses:
+        '200':
+          description: Raw entries in the requested range, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FocusSummaryCacheTimelineResponse'
+        '400':
+          description: Missing or malformed range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageErrorResponse'
+  /api/settings/cache/day:
+    get:
+      tags:
+        - Settings
+      summary: Focus-summary-cache activity within an exact instant range (the caller's own local calendar day, not a UTC day)
+      operationId: getFocusSummaryCacheDay
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound, ISO instant
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound, ISO instant
         - name: outcome
           in: query
           required: false
@@ -6157,13 +6691,13 @@ paths:
               - day
       responses:
         '200':
-          description: Day summary plus the (possibly filtered) entry list
+          description: Range summary plus the (possibly filtered) entry list
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/FocusSummaryCacheDayResponse'
         '400':
-          description: Missing or malformed date
+          description: Missing or malformed range
           content:
             application/json:
               schema:
@@ -10203,6 +10737,254 @@ paths:
                     error:
                       code: NOT_FOUND
                       message: Folder mapping not found
+  /api/detours:
+    get:
+      tags:
+        - Detours
+      operationId: listDetours
+      summary: List detour dispositions
+      parameters:
+        - name: cwd
+          in: query
+          schema:
+            type: string
+        - name: project_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending
+              - resolved
+              - conflict
+              - failed
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Matching disposition rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detours:
+                    type: array
+                    items:
+                      type: object
+  /api/detours/{id}/resolve:
+    post:
+      tags:
+        - Detours
+      operationId: resolveDetour
+      summary: Resolve a disposition by hand. For fold_in/new_item this calls plan-writeback.applyDisposition synchronously — the human-resolve DEC-13 trigger point.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - disposition
+              properties:
+                disposition:
+                  type: string
+                  enum:
+                    - fold_in
+                    - new_item
+                    - deliberate
+                    - discard
+                note:
+                  type: string
+                proposed_text:
+                  type: string
+                proposed_acceptance:
+                  type: string
+                proposed_detail:
+                  type: string
+                proposed_parent_item_id:
+                  type: string
+                expected_hash:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Write outcome — write_status is 'none' for deliberate/discard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  write_status:
+                    type: string
+                    enum:
+                      - none
+                      - pending
+                      - written
+                      - failed
+                      - conflict
+                  resolved_item_id:
+                    type: string
+                    nullable: true
+                  write_error:
+                    type: string
+                    nullable: true
+        '400':
+          description: Invalid disposition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No such disposition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/decision-queue:
+    get:
+      tags:
+        - Decision Queue
+      operationId: listDecisionQueue
+      summary: List layer-6 reconciliation decision-queue items
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending
+              - resolved
+              - dismissed
+        - name: kind
+          in: query
+          schema:
+            type: string
+        - name: cwd
+          in: query
+          schema:
+            type: string
+        - name: project_id
+          in: query
+          schema:
+            type: string
+          description: Filters on the project_id stamped onto each row at write time.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Matching queue rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queue:
+                    type: array
+                    items:
+                      type: object
+  /api/decision-queue/{id}/resolve:
+    post:
+      tags:
+        - Decision Queue
+      operationId: resolveDecisionQueueItem
+      summary: 'Act on a decision-queue item: resolve, dismiss, or retry_write a stuck write-back'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - resolve
+                    - dismiss
+                    - retry_write
+      responses:
+        '200':
+          description: Updated queue item (and write outcome for retry_write)
+        '400':
+          description: Invalid action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No such queue item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/portfolio/summary:
+    get:
+      tags:
+        - Portfolio
+      operationId: getPortfolioSummary
+      summary: 'Layer-7 per-project rollup: milestone completion + live pace status'
+      description: One entry per real project (the unassigned bucket has no objectives and is out of scope). Pace is computed fresh via pace.js on every request, not read back from decision_queue's historical rows.
+      responses:
+        '200':
+          description: Per-project milestone/pace rollup
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project_id:
+                          type: string
+                        milestones:
+                          type: object
+                          properties:
+                            done:
+                              type: integer
+                            total:
+                              type: integer
+                        pace:
+                          type: object
+                          properties:
+                            counts:
+                              type: object
+                              properties:
+                                no_target:
+                                  type: integer
+                                on_track:
+                                  type: integer
+                                behind:
+                                  type: integer
+                                done:
+                                  type: integer
+                            behind:
+                              type: array
+                              items:
+                                type: object
   /api/plans:
     get:
       tags:
@@ -10334,6 +11116,55 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: No AGENT-PLAN.md on disk and no stored plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/plans/items/target:
+    post:
+      tags:
+        - Plans
+      operationId: setPlanItemTargetDate
+      summary: Set or clear a plan item's target date (layer 5 pace tracking)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cwd
+                - item_number
+              properties:
+                cwd:
+                  type: string
+                item_number:
+                  type: integer
+                  description: Positive integer
+                target_date:
+                  type: string
+                  nullable: true
+                  description: YYYY-MM-DD parsing to a real calendar date, or null to clear
+      responses:
+        '200':
+          description: Updated plan item (broadcasts the existing plan_updated WebSocket type)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  item:
+                    $ref: '#/components/schemas/PlanItem'
+        '400':
+          description: cwd/item_number/target_date invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No such plan item
           content:
             application/json:
               schema:
@@ -10478,6 +11309,604 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans:
+    get:
+      tags:
+        - Portfolio Plans
+      operationId: listPortfolioPlans
+      summary: List a project's portfolio plans (open + closed), nested items with per-item claims
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - open
+              - closed
+      responses:
+        '200':
+          description: Plans for the project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PortfolioPlanWithItems'
+        '400':
+          description: project_id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+        - Portfolio Plans
+      operationId: createPortfolioPlan
+      summary: Create a new open plan (manual create or a retroactive_bundle)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - project_id
+                - title
+              properties:
+                project_id:
+                  type: string
+                title:
+                  type: string
+                succeeds_plan_id:
+                  type: integer
+                  nullable: true
+                origin:
+                  type: string
+                  enum:
+                    - manual
+                    - retroactive_bundle
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    $ref: '#/components/schemas/PortfolioPlan'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/pool:
+    get:
+      tags:
+        - Portfolio Plans
+      operationId: getValuePool
+      summary: Assemble the live, derived value pool for a project
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: lookbackDays
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: backfill
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Assembled pool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValuePool'
+        '400':
+          description: project_id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/health:
+    get:
+      tags:
+        - Portfolio Plans
+      operationId: getLedgerHealth
+      summary: Plan health metrics for a project (verbatim T6 parity target)
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Health metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerHealth'
+        '400':
+          description: project_id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/history:
+    get:
+      tags:
+        - Portfolio Plans
+      operationId: getLedgerHistory
+      summary: AC-6 whole-life delivered-value summary for a project
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Closed generations + claims
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerHistory'
+        '400':
+          description: project_id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/import:
+    post:
+      tags:
+        - Portfolio Plans
+      operationId: importPortfolioPlan
+      summary: 'DEC-P2 import: turn an ingested AGENT-PLAN.md into generation 1 (idempotent on content_hash)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - project_id
+                - cwd
+              properties:
+                project_id:
+                  type: string
+                cwd:
+                  type: string
+      responses:
+        '200':
+          description: Imported (or idempotent no-op re-import)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    $ref: '#/components/schemas/PortfolioPlan'
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PortfolioPlanItem'
+                  created:
+                    type: boolean
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project or AGENT-PLAN.md not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/{id}:
+    get:
+      tags:
+        - Portfolio Plans
+      operationId: getPortfolioPlan
+      summary: Read one plan with its items and per-item claims
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioPlanWithItems'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags:
+        - Portfolio Plans
+      operationId: updatePortfolioPlan
+      summary: Rename an open plan (status can never be set here — see /close)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    $ref: '#/components/schemas/PortfolioPlan'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Plan is closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/{id}/close:
+    post:
+      tags:
+        - Portfolio Plans
+      operationId: closePortfolioPlan
+      summary: The only door to closed (DEC-P6) — the single closure composer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                closure_note:
+                  type: string
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    $ref: '#/components/schemas/PortfolioPlan'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Already closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/{id}/items:
+    post:
+      tags:
+        - Portfolio Plans
+      operationId: createPortfolioPlanItem
+      summary: Add an item to an open plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                parent_item_id:
+                  type: integer
+                  nullable: true
+                acceptance:
+                  type: string
+                detail:
+                  type: string
+                position:
+                  type: integer
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item:
+                    $ref: '#/components/schemas/PortfolioPlanItem'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Plan is closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/items/{itemId}:
+    patch:
+      tags:
+        - Portfolio Plans
+      operationId: updatePortfolioPlanItem
+      summary: Update an item on an open plan
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+                acceptance:
+                  type: string
+                detail:
+                  type: string
+                checked:
+                  type: boolean
+                position:
+                  type: integer
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item:
+                    $ref: '#/components/schemas/PortfolioPlanItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Plan is closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - Portfolio Plans
+      operationId: deletePortfolioPlanItem
+      summary: Delete an item from an open plan
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Plan is closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/{id}/claims:
+    post:
+      tags:
+        - Portfolio Plans
+      operationId: createValueClaim
+      summary: Claim a value unit into an existing item, or an inline new_item created atomically
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - value_source
+                - value_ref
+                - attribution
+              properties:
+                item_id:
+                  type: integer
+                new_item:
+                  type: object
+                value_source:
+                  type: string
+                  enum:
+                    - trunk_commit
+                    - merge_commit
+                    - intake_initiative
+                    - detour
+                    - focus_segment
+                value_ref:
+                  type: string
+                source_cwd:
+                  type: string
+                label_snapshot:
+                  type: string
+                seen_at_snapshot:
+                  type: string
+                stage_snapshot:
+                  type: string
+                attribution:
+                  type: string
+                  enum:
+                    - mechanical
+                    - correlational
+                    - judgment
+                claimed_by:
+                  type: string
+                  enum:
+                    - human
+                    - llm
+      responses:
+        '201':
+          description: Claimed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claim:
+                    $ref: '#/components/schemas/ValueClaim'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Plan is closed, or this unit is already claimed into this item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/claims/{claimId}:
+    delete:
+      tags:
+        - Portfolio Plans
+      operationId: deleteValueClaim
+      summary: Explicit human unclaim — rejected once the owning plan is closed
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Unclaimed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Plan is closed — claims are immutable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sessions/{id}/focus-terminal:
     post:
       tags:
@@ -10533,6 +11962,223 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/playbook/practices:
+    get:
+      tags:
+        - Playbook
+      summary: List Playbook practices
+      description: 'Returns every catalog practice merged with its stored config (or the catalog defaults, if a practice has never been configured). Ships two practices: `session-token-ceiling` (category `context-management`, scope `session`, kind `risk`) — a threshold on a session''s total token usage — and `account-weekly-balance` (category `account-management`, scope `global`, kind `info`) — fires when two or more enabled accounts still have weekly-quota headroom and the gap between the lowest- and highest-used of them crosses a configurable percentage-point threshold, recommending a switch to the lower-used account. No authentication — this is a local-first dashboard.'
+      operationId: listPlaybookPractices
+      responses:
+        '200':
+          description: Every catalog practice with its current config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookPracticesResponse'
+              example:
+                practices:
+                  - id: session-token-ceiling
+                    category: context-management
+                    scope: session
+                    kind: risk
+                    defaultSeverity: warning
+                    fields:
+                      - key: thresholdTokens
+                        type: number
+                        default: 100000000
+                        min: 1000000
+                    enabled: true
+                    config:
+                      thresholdTokens: 100000000
+                  - id: account-weekly-balance
+                    category: account-management
+                    scope: global
+                    kind: info
+                    defaultSeverity: info
+                    fields:
+                      - key: gapThresholdPct
+                        type: number
+                        default: 25
+                        min: 1
+                    enabled: true
+                    config:
+                      gapThresholdPct: 25
+  /api/playbook/practices/{id}/config:
+    put:
+      tags:
+        - Playbook
+      summary: Patch one practice's enabled state and/or config
+      description: 'Patches `enabled` and/or `config` for one catalog practice and persists it (server-shared — this app has no user accounts, so the change applies to every connected computer). `config` values are validated against that practice''s own `fields` schema: unknown field names, non-finite numbers, and values below a field''s `min` are all rejected. On success, broadcasts the merged practice over the WebSocket as `playbook_practice_config_updated` so every other connected client picks it up live, and returns that same merged practice. No authentication (local-first).'
+      operationId: updatePlaybookPracticeConfig
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Practice id (e.g. `session-token-ceiling`).
+          example: session-token-ceiling
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaybookConfigPatchRequest'
+            example:
+              enabled: true
+              config:
+                thresholdTokens: 150000000
+      responses:
+        '200':
+          description: Merged practice after applying the patch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookPractice'
+              example:
+                id: session-token-ceiling
+                category: context-management
+                scope: session
+                kind: risk
+                defaultSeverity: warning
+                fields:
+                  - key: thresholdTokens
+                    type: number
+                    default: 100000000
+                    min: 1000000
+                enabled: true
+                config:
+                  thresholdTokens: 150000000
+        '400':
+          description: 'Invalid config: an unknown field name, a non-finite-number value, or a value below that field''s `min`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: INVALID_CONFIG
+                  message: thresholdTokens must be at least 1000000
+        '404':
+          description: No practice with that id in the catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: UNKNOWN_PRACTICE
+                  message: no such practice
+  /api/coach/observations:
+    get:
+      tags:
+        - Coach
+      summary: List Coach Observations
+      description: Returns recorded Observations, most recent first. Optionally narrow to one `status`. No authentication (local-first).
+      operationId: listCoachObservations
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - open
+              - acknowledged
+              - dismissed
+              - resolved
+          description: Filter to Observations currently in this status. Omit for all statuses.
+      responses:
+        '200':
+          description: Observations, most recent first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoachObservationsResponse'
+              example:
+                observations:
+                  - id: 42
+                    practice_id: session-token-ceiling
+                    scope_type: session
+                    scope_id: 5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11
+                    kind: risk
+                    severity: warning
+                    values_json: '{"totalTokens":150000000,"thresholdTokens":100000000}'
+                    status: open
+                    detected_at: '2026-07-24T18:41:55.117Z'
+                    responded_at: null
+        '400':
+          description: '`status` is not one of open/acknowledged/dismissed/resolved'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: INVALID_STATUS
+                  message: unknown status filter
+  /api/coach/observations/{id}/respond:
+    post:
+      tags:
+        - Coach
+      summary: Respond to a Coach Observation
+      description: Records the user's response to one Observation (acknowledge, dismiss, or resolve) and moves its `status` accordingly. Broadcasts the updated row over the WebSocket as `coach_observation_updated` so every other connected client's Feed reflects it live, and returns that same row. (A brand-new Observation is broadcast separately, as `coach_observation_created`, by the Playbook engine itself on the tick that produces it — not by this route.) No authentication (local-first).
+      operationId: respondToCoachObservation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Observation row id.
+          example: 42
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoachRespondRequest'
+            example:
+              response: acknowledged
+      responses:
+        '200':
+          description: Updated Observation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoachObservation'
+              example:
+                id: 42
+                practice_id: session-token-ceiling
+                scope_type: session
+                scope_id: 5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11
+                kind: risk
+                severity: warning
+                values_json: '{"totalTokens":150000000,"thresholdTokens":100000000}'
+                status: acknowledged
+                detected_at: '2026-07-24T18:41:55.117Z'
+                responded_at: '2026-07-24T19:02:10.000Z'
+        '400':
+          description: '`response` is not one of acknowledged/dismissed/resolved'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: INVALID_RESPONSE
+                  message: 'response must be one of: acknowledged, dismissed, resolved'
+        '404':
+          description: No Observation with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: no such observation
   /api/settings/import:
     post:
       tags:

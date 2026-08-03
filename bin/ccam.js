@@ -1234,6 +1234,165 @@ async function cmdDecisions(flags, positional) {
   );
 }
 
+// ── Ledger (portfolio-layer plan lifecycle + value ledger) ─────────────────
+// `ccam ledger …` talks to /api/project-plans. Every derived number (pool
+// size, health metrics) is printed FROM THE API RESPONSE VERBATIM, never
+// recomputed here — that is the whole point of T6
+// (server/__tests__/ledger-metrics-parity.test.js): API and CLI must agree
+// because the CLI never does its own arithmetic (§9.1).
+
+/** Resolve --project <id|name> to a project id: an exact id match wins, else
+ *  a case-insensitive name match, else the flag verbatim (S1: project_plans
+ *  has no FK on project_id, so history/health/pool must stay reachable for
+ *  an id whose project row was deleted). */
+async function resolveLedgerProjectId(flags) {
+  const wanted = flags.project;
+  if (!wanted) {
+    console.error(c.red("✖ --project <id|name> is required"));
+    process.exit(1);
+  }
+  const data = await get("/api/projects");
+  const projects = data.projects || [];
+  const byId = projects.find((p) => p.id === wanted);
+  if (byId) return byId.id;
+  const byName = projects.find(
+    (p) => (p.name || "").toLowerCase() === String(wanted).toLowerCase()
+  );
+  if (byName) return byName.id;
+  return wanted;
+}
+
+async function cmdLedger(flags, positional) {
+  const sub = positional[0];
+  if (!sub) {
+    console.error(
+      c.red(
+        "✖ Usage: ccam ledger <plans|pool|health|history|import|claim|close> --project <id|name>"
+      )
+    );
+    process.exit(1);
+  }
+
+  const projectId = await resolveLedgerProjectId(flags);
+
+  switch (sub) {
+    case "plans": {
+      const data = await get(`/api/project-plans?project_id=${encodeURIComponent(projectId)}`);
+      const rows = (data.plans || []).map((p) => [
+        p.plan.id,
+        p.plan.status === "closed" ? c.dim("closed") : c.green("open"),
+        p.plan.ordinal != null ? `gen ${p.plan.ordinal}` : "-",
+        (p.plan.title || "").slice(0, 40),
+        p.items.length,
+      ]);
+      if (!rows.length) {
+        console.log(c.dim("No plans for this project."));
+        return;
+      }
+      table(["ID", "Status", "Generation", "Title", "Items"], rows);
+      return;
+    }
+    case "pool": {
+      const params = new URLSearchParams({ project_id: projectId });
+      if (flags.backfill) params.set("backfill", "1");
+      const data = await get(`/api/project-plans/pool?${params}`);
+      const rows = (data.units || []).map((u) => [
+        u.value_source,
+        u.attribution,
+        (u.label || u.value_ref || "").slice(0, 50),
+        u.source_cwd || "-",
+      ]);
+      if (!rows.length) {
+        console.log(c.dim("Pool is empty."));
+      } else {
+        table(["Source", "Tier", "Label", "Cwd"], rows);
+      }
+      for (const w of data.identityWarnings || []) {
+        console.log(c.yellow(`⚠ ${w.kind}: ${(w.cwds || []).join(", ")}`));
+      }
+      return;
+    }
+    case "health": {
+      const data = await get(
+        `/api/project-plans/health?project_id=${encodeURIComponent(projectId)}`
+      );
+      kvLine("Unclaimed pool", String(data.unclaimedPoolSize));
+      kvLine("Open plans", String(data.openPlanCount));
+      kvLine("Last closure", data.lastClosureAt ? fmtTime(data.lastClosureAt) : c.dim("never"));
+      kvLine(
+        "Days since",
+        data.daysSinceLastClosure != null ? String(data.daysSinceLastClosure) : c.dim("n/a")
+      );
+      return;
+    }
+    case "history": {
+      const data = await get(
+        `/api/project-plans/history?project_id=${encodeURIComponent(projectId)}`
+      );
+      const generations = data.generations || [];
+      if (!generations.length) {
+        console.log(c.dim("No closed generations yet."));
+        return;
+      }
+      for (const g of generations) {
+        heading(`Generation ${g.ordinal}`, g.plan.title);
+        kvLine("Closed", fmtTime(g.plan.closed_at));
+        if (g.plan.closure_note) kvLine("Note", g.plan.closure_note);
+        kvLine("Claims", String(g.claims.length));
+      }
+      return;
+    }
+    case "import": {
+      const cwd = flags.cwd || process.cwd();
+      const r = await post("/api/project-plans/import", { project_id: projectId, cwd });
+      console.log(
+        `${c.green("✔")} import ${r.created ? "created" : "no-op"} plan #${r.plan?.id} (${r.items?.length ?? 0} items)`
+      );
+      return;
+    }
+    case "claim": {
+      const planId = flags.plan;
+      if (!planId) {
+        console.error(c.red("✖ --plan <id> is required"));
+        process.exit(1);
+      }
+      const body = {
+        item_id: flags.item ? Number(flags.item) : undefined,
+        new_item: flags.item ? undefined : { text: flags.text || "Claimed value" },
+        value_source: flags.source,
+        value_ref: flags.ref,
+        source_cwd: flags.cwd,
+        attribution: flags.attribution || "mechanical",
+        claimed_by: flags.by || "human",
+      };
+      const r = await post(`/api/project-plans/${encodeURIComponent(planId)}/claims`, body);
+      console.log(
+        `${c.green("✔")} claimed ${r.claim.value_source}:${r.claim.value_ref} into item #${r.claim.item_id}`
+      );
+      return;
+    }
+    case "close": {
+      const planId = positional[1] || flags.plan;
+      if (!planId) {
+        console.error(
+          c.red("✖ Usage: ccam ledger close <planId> --project <id|name> [--note text]")
+        );
+        process.exit(1);
+      }
+      const r = await post(`/api/project-plans/${encodeURIComponent(planId)}/close`, {
+        closure_note: flags.note,
+      });
+      console.log(`${c.green("✔")} plan #${r.plan.id} closed`);
+      return;
+    }
+    default:
+      console.error(
+        c.red(`✖ Unknown ledger subcommand: ${sub} (plans|pool|health|history|import|claim|close)`)
+      );
+      process.exit(1);
+  }
+}
+
 // ── Alerts & webhooks ───────────────────────────────────────────────────────
 
 async function cmdAlerts(flags, positional) {
@@ -1797,6 +1956,42 @@ const COMMAND_GROUPS = [
     ],
   ],
   [
+    "Ledger",
+    [
+      ["ledger plans", "--project <id|name>", "List a project's portfolio plans (open + closed)"],
+      [
+        "ledger pool",
+        "--project <id|name> [--backfill]",
+        "Live unclaimed value pool + identity warnings",
+      ],
+      [
+        "ledger health",
+        "--project <id|name>",
+        "Unclaimed pool size, open plans, days since last closure",
+      ],
+      [
+        "ledger history",
+        "--project <id|name>",
+        "AC-6 whole-life summary: closed generations + claims",
+      ],
+      [
+        "ledger import",
+        "--project <id|name> [--cwd path]",
+        "Import AGENT-PLAN.md as generation 1 (idempotent)",
+      ],
+      [
+        "ledger claim",
+        "--plan <id> --source <s> --ref <r> [--item <id> | --text]",
+        "Claim a value unit into an item (or an inline new item)",
+      ],
+      [
+        "ledger close <planId>",
+        "--project <id|name> [--note text]",
+        "Close a plan — the only door to closed",
+      ],
+    ],
+  ],
+  [
     "Alerts & Webhooks",
     [
       ["alerts", "[--unacked]", "Fired-alert feed"],
@@ -2173,6 +2368,10 @@ const SERVER_ONLY_REASONS = {
   "update-check": "the update check runs server-side (git fetch against the canonical remote)",
   info: "system info (uptime, memory, WS connections) only exists on a running server",
   health: "health is, by definition, a check against the running server",
+  // QDEC-16 S5: pool/health math (git subprocess calls, live derivation) is
+  // server-side only — reads AND writes both refuse offline, same posture
+  // as `cost`.
+  ledger: "pool assembly and health math (git subprocess calls, live derivation) run server-side",
 };
 
 /** Open the DB read-only or exit with guidance. */
@@ -2612,6 +2811,7 @@ const SUBCOMMANDS = {
   import: ["rescan", "path"],
   focus: ["status", "set", "push", "pop", "done", "bug", "feature", "target"],
   decisions: ["", "ack", "dismiss", "retry"],
+  ledger: ["plans", "pool", "health", "history", "import", "claim", "close"],
 };
 
 /** Run one parsed command. Returns the handler's promise; may throw
@@ -2654,6 +2854,8 @@ async function runCommand(argv) {
       return cmdFocus(flags, positional);
     case "decisions":
       return cmdDecisions(flags, positional);
+    case "ledger":
+      return cmdLedger(flags, positional);
     case "alerts":
       return cmdAlerts(flags, positional);
     case "rules":

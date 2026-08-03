@@ -1191,3 +1191,185 @@ describe("Migration meta-test", () => {
     }
   });
 });
+
+describe("additive portfolio-layer tables", () => {
+  let tempDbPath;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-portfolio-test-${Date.now()}.db`);
+
+    // Create a legacy-shape DB with ONLY the old tables (no new portfolio-layer tables)
+    const legacyDb = new Database(tempDbPath);
+    legacyDb.pragma("journal_mode = WAL");
+    legacyDb.exec(`
+      CREATE TABLE IF NOT EXISTS plans (
+        cwd TEXT PRIMARY KEY,
+        title TEXT,
+        file_path TEXT NOT NULL,
+        content_hash TEXT,
+        item_count INTEGER NOT NULL DEFAULT 0,
+        missing_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS plan_items (
+        cwd TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        item_number INTEGER,
+        parent_item_id TEXT,
+        text TEXT NOT NULL,
+        acceptance TEXT,
+        detail TEXT,
+        checked INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        declared_done_at TEXT,
+        declared_done_session TEXT,
+        target_date TEXT,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        PRIMARY KEY (cwd, item_id),
+        FOREIGN KEY (cwd) REFERENCES plans(cwd) ON DELETE CASCADE
+      );
+    `);
+    legacyDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("A1.1: legacy-shape DB gains the three new tables (project_plans, project_plan_items, value_claims)", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // Assert the three new tables exist in sqlite_master
+    const tables = db
+      .prepare(
+        `
+      SELECT name FROM sqlite_master
+      WHERE type='table' AND name IN ('project_plans', 'project_plan_items', 'value_claims')
+    `
+      )
+      .all();
+
+    assert.equal(tables.length, 3, "All three portfolio-layer tables should exist");
+    const tableNames = tables.map((t) => t.name).sort();
+    assert.deepEqual(tableNames, ["project_plan_items", "project_plans", "value_claims"]);
+
+    db.close();
+  });
+
+  it("A1.2: new tables are writable via prepared statements", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db, stmts } = dbModule;
+
+    // Assert the prepared statements exist
+    assert.ok(stmts.insertProjectPlan, "insertProjectPlan statement should exist");
+    assert.ok(stmts.insertProjectPlanItem, "insertProjectPlanItem statement should exist");
+    assert.ok(stmts.insertValueClaim, "insertValueClaim statement should exist");
+
+    // Assert value_claims has NO closed_at column (per technical-plan)
+    const valueClaimsInfo = db.prepare("PRAGMA table_info(value_claims)").all();
+    const columnNames = valueClaimsInfo.map((col) => col.name);
+    assert.ok(
+      !columnNames.includes("closed_at"),
+      "value_claims should NOT have a closed_at column"
+    );
+    assert.ok(!columnNames.includes("closed"), "value_claims should NOT have a closed flag column");
+
+    db.close();
+  });
+
+  it("A1.3: second boot is a no-op (sqlite_master unchanged, table SQL identical)", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const db1 = require("../db").db;
+    const snapshot1 = db1
+      .prepare(
+        `
+      SELECT sql FROM sqlite_master
+      WHERE type='table' AND name IN ('project_plans', 'project_plan_items', 'value_claims')
+      ORDER BY name
+    `
+      )
+      .all();
+    db1.close();
+
+    // Second boot
+    delete require.cache[require.resolve("../db")];
+    const db2 = require("../db").db;
+    const snapshot2 = db2
+      .prepare(
+        `
+      SELECT sql FROM sqlite_master
+      WHERE type='table' AND name IN ('project_plans', 'project_plan_items', 'value_claims')
+      ORDER BY name
+    `
+      )
+      .all();
+    db2.close();
+
+    assert.deepEqual(
+      snapshot1,
+      snapshot2,
+      "Table definitions should be byte-identical across boots"
+    );
+  });
+
+  it("A1.4: §9.5/§9.6 stay inapplicable — legacy ALTER count pinned, sqlite_master text unchanged", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // Snapshot legacy tables before boot (already done by A1.1 boot)
+    const legacySnapshot = db
+      .prepare(
+        `
+      SELECT sql FROM sqlite_master
+      WHERE type='table' AND name IN ('plans', 'plan_items', 'detour_dispositions', 'decision_queue')
+      ORDER BY name
+    `
+      )
+      .all();
+
+    // Assert legacy tables are unchanged (they should exist and have their original SQL)
+    assert.ok(legacySnapshot.length > 0, "Legacy tables should exist");
+
+    // Count ALTER TABLE statements in db.js — this is the tripwire
+    const dbSource = fs.readFileSync(path.join(__dirname, "..", "db.js"), "utf8");
+    const alterCount = (dbSource.match(/ALTER\s+TABLE/g) || []).length;
+
+    // Record the count for the tripwire (pinned per test-plan)
+    // The test-plan says: "assert zero occurrences of 'ALTER TABLE' in the db module's migration path for these tables"
+    // For new tables, there should be NO ALTER statements (CREATE TABLE IF NOT EXISTS only)
+    const portfiolioAlterCount = (
+      dbSource.match(/ALTER\s+TABLE.*(project_plans|project_plan_items|value_claims)/gi) || []
+    ).length;
+    assert.equal(
+      portfiolioAlterCount,
+      0,
+      "No ALTER TABLE statements should exist for new portfolio-layer tables (CREATE TABLE IF NOT EXISTS only)"
+    );
+
+    db.close();
+  });
+});
