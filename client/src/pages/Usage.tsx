@@ -39,7 +39,12 @@
  * weekly quotas will run out at their current pace and whether that happens
  * before or after the window resets, driven by each account's own
  * `*_burn_rate_pct_per_hour`/`*_predicted_exhaustion_at` fields from GET
- * /api/accounts (server/lib/consumption-rate.js's %/hour trend fit).
+ * /api/accounts (server/lib/consumption-rate.js's %/hour trend fit). And
+ * `RotationPlanCard`, which chains that same per-account weekly burn-rate
+ * data into an actionable rotation - which account to be on right now, and
+ * the projected instant to hand off to the next one - out to a multi-day
+ * horizon (`computeRotationPlan`), entirely client-side over already-fetched
+ * account data.
  *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
@@ -63,6 +68,7 @@ import {
   Plus,
   Trash2,
   KeyRound,
+  ArrowRightLeft,
 } from "lucide-react";
 import { api } from "../lib/api";
 import type {
@@ -246,6 +252,139 @@ function computePaceRatio(
   const sustainableRate = remainingPct / hoursUntilReset;
   if (sustainableRate <= 0) return null;
   return ratePerHour / sustainableRate;
+}
+
+/**
+ * The assumed pace for whichever account the rotation plan currently has
+ * "in the chair" - the fastest positive weekly `%/hour` rate observed across
+ * ANY account, i.e. whichever one is actually being driven right now. An
+ * idle account's own observed rate is close to zero and says nothing about
+ * what it would do under real use, so a single shared proxy stands in for
+ * "if this became the active account" instead of trusting each account's own
+ * (mostly idle) history. `null` when no account has any positive weekly rate
+ * yet, i.e. there isn't enough data to project anything.
+ */
+function activeBurnRateProxy(accounts: Account[]): number | null {
+  let max: number | null = null;
+  for (const account of accounts) {
+    const rate = account.week_burn_rate_pct_per_hour;
+    if (rate != null && rate > 0 && (max == null || rate > max)) max = rate;
+  }
+  return max;
+}
+
+interface RotationPlanSegment {
+  accountId: string;
+  label: string;
+  startAt: number;
+  endAt: number;
+  /** `"exhausted"` - this account is projected to hit 100% of its weekly
+   *  window here, before its own reset, so the plan hands off to the next
+   *  account. `"horizon"` - this account is sustainable (its trend would
+   *  reset before crossing 100%, or there's no rate data at all) and the
+   *  segment simply ends at the projection horizon. */
+  reason: "exhausted" | "horizon";
+}
+
+/**
+ * Projects which account to be on, and until when, over the coming
+ * `horizonMs` - a greedy simulation, not a guarantee. At each step it picks
+ * whichever not-yet-capped account has the most weekly runway if it became
+ * the active one (using `activeBurnRateProxy` as the assumed active pace),
+ * runs it until it would either cross 100% or the horizon ends, then
+ * advances every account's simulated state - the active one climbs at the
+ * proxy pace, every other account drifts at its own (idle) observed rate,
+ * and any account whose weekly reset falls inside the elapsed window snaps
+ * back to 0% with its next reset pushed out another 7 days - before picking
+ * the next segment. Starts from whichever account `is_active` reports,
+ * falling back to the best-runway pick when that account is already capped
+ * or unset. Returns `[]` when no account is usable (enabled + `status:
+ * "ok"` + has weekly data) or none has a positive weekly rate yet to build a
+ * proxy pace from.
+ */
+function computeRotationPlan(
+  accounts: Account[],
+  now: number,
+  horizonMs: number = 9 * 24 * 3_600_000
+): RotationPlanSegment[] {
+  const usable = accounts.filter(
+    (account) =>
+      account.enabled &&
+      account.status === "ok" &&
+      account.latest_week_window_pct != null &&
+      account.latest_week_reset_raw != null
+  );
+  if (usable.length === 0) return [];
+
+  const pace = activeBurnRateProxy(usable);
+  if (pace == null) return [];
+
+  const state = usable.map((account) => ({
+    id: account.id,
+    label: account.label,
+    pct: account.latest_week_window_pct as number,
+    resetAt: new Date(account.latest_week_reset_raw as string).getTime(),
+    idleRatePerHour: account.week_burn_rate_pct_per_hour ?? 0,
+  }));
+  if (state.some((s) => Number.isNaN(s.resetAt))) return [];
+
+  const pickNext = () => {
+    let best: (typeof state)[number] | null = null;
+    let bestRunway = -Infinity;
+    for (const s of state) {
+      if (s.pct >= 100) continue;
+      const runway = (100 - s.pct) / pace;
+      if (runway > bestRunway) {
+        bestRunway = runway;
+        best = s;
+      }
+    }
+    return best;
+  };
+
+  const activeAccount = accounts.find((account) => account.is_active);
+  const activeFromFlag = activeAccount && state.find((s) => s.id === activeAccount.id);
+  let active = activeFromFlag && activeFromFlag.pct < 100 ? activeFromFlag : pickNext();
+
+  const segments: RotationPlanSegment[] = [];
+  const horizonEnd = now + horizonMs;
+  const maxSegments = state.length * 4;
+  let t = now;
+
+  while (active && t < horizonEnd && segments.length < maxSegments) {
+    const remaining = 100 - active.pct;
+    const exhaustAt = t + (remaining / pace) * 3_600_000;
+    const willExhaustFirst = exhaustAt <= active.resetAt && exhaustAt < horizonEnd;
+    const endAt = willExhaustFirst ? exhaustAt : horizonEnd;
+
+    segments.push({
+      accountId: active.id,
+      label: active.label,
+      startAt: t,
+      endAt,
+      reason: willExhaustFirst ? "exhausted" : "horizon",
+    });
+
+    const elapsedMs = endAt - t;
+    for (const s of state) {
+      s.pct =
+        s.id === active.id
+          ? willExhaustFirst
+            ? 100
+            : s.pct + (pace * elapsedMs) / 3_600_000
+          : Math.min(100, Math.max(0, s.pct + (s.idleRatePerHour * elapsedMs) / 3_600_000));
+      while (s.resetAt <= endAt) {
+        s.pct = 0;
+        s.resetAt += 7 * 24 * 3_600_000;
+      }
+    }
+
+    t = endAt;
+    if (!willExhaustFirst) break;
+    active = pickNext();
+  }
+
+  return segments;
 }
 
 /**
@@ -1049,6 +1188,253 @@ function ConsumptionRateScopeRow({
  * climb toward 100% reads very differently depending on how much window
  * time is actually left, which a raw percentage alone can't capture.
  */
+/**
+ * Identity colors for the Rotation Plan calendar's timeline segments -
+ * deliberately distinct from the red/orange/yellow/emerald risk-band colors
+ * used everywhere else on this page, since a segment's fill answers "which
+ * account", not "how risky" (that's the separate exhausted/sustainable dot
+ * on each segment). Cycles if there are more accounts than colors.
+ */
+const ACCOUNT_TIMELINE_COLORS = ["#6366f1", "#2dd4bf", "#f59e0b", "#ec4899", "#38bdf8", "#a78bfa"];
+
+/** `ACCOUNT_TIMELINE_COLORS[i % length]`, non-null since the modulo always
+ *  lands in bounds - just satisfies `noUncheckedIndexedAccess`. */
+function accountTimelineColor(index: number): string {
+  return ACCOUNT_TIMELINE_COLORS[index % ACCOUNT_TIMELINE_COLORS.length] as string;
+}
+
+function startOfDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * One entry per midnight-to-midnight day from `startMs`'s own day through
+ * `endMs`'s own day (inclusive) - a plan ending mid-afternoon still gets a
+ * full trailing column instead of a sliver, the same whole-days rounding
+ * `AccountsResetCalendar`'s `dayCount` uses.
+ */
+function rotationCalendarDays(startMs: number, endMs: number): Date[] {
+  const days: Date[] = [];
+  for (let ms = startOfDay(startMs); ms <= startOfDay(endMs); ms += 24 * 3_600_000) {
+    days.push(new Date(ms));
+  }
+  return days;
+}
+
+/**
+ * Turns the Consumption Rate card's same per-account weekly burn-rate data
+ * into an actionable rotation: which account to be on right now, and the
+ * projected instant to hand off to the next one, chained across every
+ * enabled account (`computeRotationPlan`). Rendered two ways from the same
+ * segments - a day-strip calendar (so a Tuesday-night hand-off and a
+ * Friday-morning one read as different positions in the week, not just
+ * matching timestamps) plus the ordered list below it for the exact
+ * instants. The calendar also plots each account's own weekly reset as a
+ * small tick even when that account isn't the active one - `computeRotationPlan`
+ * deliberately doesn't switch just because a reset happened, only when the
+ * current account is actually forced to, and the tick is what makes that
+ * "reset passed, didn't switch" behavior visible.
+ */
+function RotationPlanCard({ accounts }: { accounts: Account[] }) {
+  const { t } = useTranslation("usage");
+  if (accounts.length === 0) return null;
+
+  const now = Date.now();
+  const plan = computeRotationPlan(accounts, now);
+
+  const accountColor = new Map<string, string>(
+    accounts.map((account, i) => [account.id, accountTimelineColor(i)])
+  );
+
+  const firstSegment = plan.length > 0 ? plan[0] : null;
+  const lastSegment = plan.length > 0 ? plan[plan.length - 1] : null;
+  const horizonStart = firstSegment ? startOfDay(firstSegment.startAt) : null;
+  const horizonEnd = lastSegment ? startOfDay(lastSegment.endAt) + 24 * 3_600_000 : null;
+  const days =
+    firstSegment && lastSegment
+      ? rotationCalendarDays(firstSegment.startAt, lastSegment.endAt)
+      : [];
+  const dayGridColumns = `repeat(${days.length}, minmax(0, 1fr))`;
+
+  const pctOf = (ms: number) =>
+    horizonStart != null && horizonEnd != null
+      ? ((ms - horizonStart) / (horizonEnd - horizonStart)) * 100
+      : 0;
+
+  const resetTicks =
+    horizonStart != null && horizonEnd != null
+      ? accounts
+          .map((account) => ({
+            id: account.id,
+            label: account.label,
+            ms: account.latest_week_reset_raw
+              ? new Date(account.latest_week_reset_raw).getTime()
+              : NaN,
+          }))
+          .filter(
+            (tick) => !Number.isNaN(tick.ms) && tick.ms > horizonStart && tick.ms < horizonEnd
+          )
+      : [];
+
+  return (
+    <div className="card p-4">
+      <h2 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
+        <ArrowRightLeft className="w-4 h-4 text-accent" />
+        {t("accounts.rotationPlan.title")}
+      </h2>
+      <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.rotationPlan.subtitle")}</p>
+      {plan.length === 0 ? (
+        <p className="text-xs text-gray-500">{t("accounts.rotationPlan.notEnoughData")}</p>
+      ) : (
+        <>
+          <div className="rounded-lg border border-border/60 bg-surface-1 px-3 pt-3 pb-2 overflow-x-auto">
+            <div className="min-w-[560px]">
+              <div className="grid" style={{ gridTemplateColumns: dayGridColumns }}>
+                {days.map((d, i) => (
+                  <div
+                    key={i}
+                    className={`text-[10px] font-mono border-l border-border/40 pl-1 ${
+                      i === 0 ? "text-accent font-semibold" : "text-gray-500"
+                    }`}
+                  >
+                    <div>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                    <div>{d.getDate()}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="relative h-10 mt-1.5">
+                <div
+                  className="absolute inset-0 grid"
+                  style={{ gridTemplateColumns: dayGridColumns }}
+                >
+                  {days.map((_, i) => (
+                    <div key={i} className="border-l border-border/40 h-full" />
+                  ))}
+                </div>
+                <div className="absolute inset-0 flex rounded-md overflow-hidden bg-surface-3">
+                  {plan.map((segment) => (
+                    <div
+                      key={`${segment.accountId}-${segment.startAt}`}
+                      className="relative h-full flex items-center px-2 text-[11px] font-semibold truncate border-r border-surface-0/40 last:border-r-0"
+                      style={{
+                        width: `${pctOf(segment.endAt) - pctOf(segment.startAt)}%`,
+                        backgroundColor: accountColor.get(segment.accountId),
+                        color: "#06060a",
+                      }}
+                      title={`${segment.label}: ${formatDateTimeFull(
+                        new Date(segment.startAt).toISOString()
+                      )} → ${formatDateTimeFull(new Date(segment.endAt).toISOString())}`}
+                    >
+                      <span className="truncate">{segment.label}</span>
+                      <span
+                        className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ring-2 ring-surface-0/50 ${
+                          segment.reason === "exhausted" ? "bg-orange-400" : "bg-emerald-400"
+                        }`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div
+                  className="absolute -top-1 -bottom-4 border-l border-dashed border-gray-100 z-10"
+                  style={{ left: `${pctOf(now)}%` }}
+                >
+                  <span className="absolute -top-0.5 left-1 text-[9px] font-bold uppercase tracking-wider text-gray-100 whitespace-nowrap">
+                    {t("accounts.rotationPlan.now")}
+                  </span>
+                </div>
+              </div>
+              {resetTicks.length > 0 && (
+                <div className="relative h-4 mt-3">
+                  {resetTicks.map((tick) => (
+                    <div
+                      key={tick.id}
+                      className="absolute top-0 flex flex-col items-center gap-0.5 -translate-x-1/2"
+                      style={{ left: `${pctOf(tick.ms)}%` }}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: accountColor.get(tick.id) }}
+                      />
+                      <span className="text-[9px] text-gray-500 truncate max-w-[90px]">
+                        {t("accounts.rotationPlan.resets", { label: tick.label })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 mb-1 text-[11px] text-gray-500">
+            {accounts.map((account) => (
+              <span key={account.id} className="flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 rounded-sm flex-shrink-0"
+                  style={{ backgroundColor: accountColor.get(account.id) }}
+                />
+                {account.label}
+              </span>
+            ))}
+            <span className="text-gray-700">|</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
+              {t("accounts.rotationPlan.switchNext")}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+              {t("accounts.rotationPlan.sustainable")}
+            </span>
+          </div>
+        </>
+      )}
+      {plan.length > 0 && (
+        <ol className="space-y-2">
+          {plan.map((segment, i) => (
+            <li
+              key={`${segment.accountId}-${segment.startAt}`}
+              className="flex items-start gap-3 rounded-lg border border-border/60 bg-surface-2/40 p-3 text-xs"
+            >
+              <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-surface-3 font-mono text-[10px] text-gray-400">
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-gray-300 font-medium truncate">{segment.label}</p>
+                <p className="text-gray-500 mt-0.5">
+                  {i === 0
+                    ? t("accounts.rotationPlan.now")
+                    : t("accounts.rotationPlan.from", {
+                        when: formatDateTimeFull(new Date(segment.startAt).toISOString()),
+                      })}
+                  {" → "}
+                  {segment.reason === "exhausted"
+                    ? t("accounts.rotationPlan.untilExhausted", {
+                        when: formatDateTimeFull(new Date(segment.endAt).toISOString()),
+                      })
+                    : t("accounts.rotationPlan.untilHorizon", {
+                        when: formatDateTimeFull(new Date(segment.endAt).toISOString()),
+                      })}
+                </p>
+              </div>
+              {segment.reason === "exhausted" ? (
+                <span className={`badge ${BAND_BADGE_CLASS.orange} flex-shrink-0`}>
+                  <AlertTriangle className="w-3 h-3" />
+                  {t("accounts.rotationPlan.switchNext")}
+                </span>
+              ) : (
+                <span className={`badge ${BAND_BADGE_CLASS.green} flex-shrink-0`}>
+                  <CheckCircle2 className="w-3 h-3" />
+                  {t("accounts.rotationPlan.sustainable")}
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function ConsumptionRateCard({ accounts }: { accounts: Account[] }) {
   const { t } = useTranslation("usage");
   const { sessionRate: sessionRateThresholds, weeklyRate: weeklyRateThresholds } =
@@ -1901,16 +2287,19 @@ export function Usage() {
   return (
     <div className="space-y-6">
       {accounts.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
-          <div className="space-y-4">
-            <SessionResetTimeline accounts={accounts} />
-            <AccountsResetCalendar accounts={accounts} />
+        <>
+          <RotationPlanCard accounts={accounts} />
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
+            <div className="space-y-4">
+              <SessionResetTimeline accounts={accounts} />
+              <AccountsResetCalendar accounts={accounts} />
+            </div>
+            <div className="space-y-4">
+              <AccountActivityCard accounts={accounts} />
+              <ConsumptionRateCard accounts={accounts} />
+            </div>
           </div>
-          <div className="space-y-4">
-            <AccountActivityCard accounts={accounts} />
-            <ConsumptionRateCard accounts={accounts} />
-          </div>
-        </div>
+        </>
       )}
 
       <AccountsPanel

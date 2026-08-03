@@ -92,6 +92,18 @@
       "ratePace": "{{rate}} · 지속 가능한 속도의 {{pace}}배",
       "observedOver": "{{span}} 동안 관찰됨"
     },
+    "rotationPlan": {
+      "title": "순환 계획",
+      "subtitle": "각 계정의 현재 주간 소비 속도를 기준으로, 이번 주에 계정을 사용할 예상 순서입니다.",
+      "notEnoughData": "순환 계획을 예측하기에 주간 데이터가 아직 충분하지 않습니다.",
+      "now": "지금",
+      "from": "{{when}}부터",
+      "untilExhausted": "소진될 때까지 (~{{when}})",
+      "untilHorizon": "{{when}}까지 지속 가능",
+      "switchNext": "다음 전환",
+      "sustainable": "지속 가능",
+      "resets": "{{label}} 리셋"
+    },
     "colorThresholds": {
       "title": "색상 임계값",
       "subtitle": "이 페이지 전체에 적용되는 초록 → 노랑 → 주황 → 빨강 사용량 색상 전환 지점을 설정합니다.",

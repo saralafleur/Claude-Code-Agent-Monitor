@@ -92,6 +92,18 @@
       "ratePace": "{{rate}} · {{pace}}× sustainable pace",
       "observedOver": "observed over {{span}}"
     },
+    "rotationPlan": {
+      "title": "Rotation plan",
+      "subtitle": "Projected order to work through your accounts this week, based on each one's current weekly burn rate.",
+      "notEnoughData": "Not enough weekly data yet to project a rotation.",
+      "now": "Now",
+      "from": "From {{when}}",
+      "untilExhausted": "until it caps out (~{{when}})",
+      "untilHorizon": "sustainable through {{when}}",
+      "switchNext": "Switch next",
+      "sustainable": "Sustainable",
+      "resets": "{{label}} resets"
+    },
     "colorThresholds": {
       "title": "Color thresholds",
       "subtitle": "Configure where the green → yellow → orange → red usage colors switch over, applied across this page.",

@@ -92,6 +92,18 @@
       "ratePace": "{{rate}} · {{pace}}× tốc độ bền vững",
       "observedOver": "quan sát trong {{span}}"
     },
+    "rotationPlan": {
+      "title": "Kế hoạch xoay vòng",
+      "subtitle": "Thứ tự dự kiến để sử dụng các tài khoản trong tuần này, dựa trên tốc độ tiêu thụ hàng tuần hiện tại của từng tài khoản.",
+      "notEnoughData": "Chưa đủ dữ liệu hàng tuần để dự đoán kế hoạch xoay vòng.",
+      "now": "Bây giờ",
+      "from": "Từ {{when}}",
+      "untilExhausted": "cho đến khi dùng hết (~{{when}})",
+      "untilHorizon": "bền vững đến {{when}}",
+      "switchNext": "Chuyển tiếp theo",
+      "sustainable": "Bền vững",
+      "resets": "{{label}} đặt lại"
+    },
     "colorThresholds": {
       "title": "Ngưỡng màu sắc",
       "subtitle": "Cấu hình điểm chuyển màu xanh lá → vàng → cam → đỏ, áp dụng cho toàn bộ trang này.",

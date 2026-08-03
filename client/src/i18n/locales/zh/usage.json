@@ -92,6 +92,18 @@
       "ratePace": "{{rate}} · 可持续速率的 {{pace}} 倍",
       "observedOver": "观测时长 {{span}}"
     },
+    "rotationPlan": {
+      "title": "轮换计划",
+      "subtitle": "根据每个账户当前的每周消耗速率，预测本周使用账户的先后顺序。",
+      "notEnoughData": "每周数据尚不足，无法预测轮换计划。",
+      "now": "现在",
+      "from": "从 {{when}} 起",
+      "untilExhausted": "直到额度耗尽（约 {{when}}）",
+      "untilHorizon": "可持续使用至 {{when}}",
+      "switchNext": "接下来切换",
+      "sustainable": "可持续",
+      "resets": "{{label}} 重置"
+    },
     "colorThresholds": {
       "title": "颜色阈值",
       "subtitle": "配置绿色 → 黄色 → 橙色 → 红色使用量颜色的切换点，适用于本页面全局。",
