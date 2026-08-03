@@ -108,5 +108,18 @@
       "expand": "Mở rộng các sáng kiến Đã phát hành / Hợp nhất",
       "collapse": "Thu gọn các sáng kiến Đã phát hành / Hợp nhất"
     }
+  },
+  "trunkDrift": {
+    "title": "Công việc trực tiếp trên trunk",
+    "description": "Các commit được thực hiện trực tiếp trên nhánh mặc định",
+    "defaultBranch": "Nhánh mặc định",
+    "lookbackWindow": "{{days}} ngày qua",
+    "commitCount": "commit",
+    "empty": "Không tìm thấy commit trực tiếp nào trên trunk",
+    "unknown": "Không xác định được nhánh trunk",
+    "truncated": "Một số commit đã bị bỏ qua — còn nhiều commit hơn số được hiển thị ở đây.",
+    "budgetExceeded": "Chưa được kiểm tra — đã đạt giới hạn kho cho lần tải trang này",
+    "gitError": "Không thể kiểm tra kho này (lỗi git)",
+    "notARepo": "Không phải kho lưu trữ git"
   }
 }

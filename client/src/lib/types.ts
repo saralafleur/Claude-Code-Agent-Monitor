@@ -1807,6 +1807,67 @@ export interface ProjectRepoTopology {
   ignoredRepos: IgnoredRepo[];
 }
 
+/** One commit that landed directly on a repo's trunk/default branch (see
+ *  server/lib/trunk-drift.js — DEC-5's git-native false-positive guard).
+ *  Read-only, never persisted client-side. */
+export interface TrunkDriftCommit {
+  sha: string;
+  shortSha: string;
+  authorName: string;
+  authorEmail: string;
+  committedAt: string;
+  subject: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+/** Per-repo result of the trunk-drift detector. `skipped` is non-null
+ *  whenever the detector could not (or did not need to) compute a real
+ *  answer — render that as an explicit "unknown" state, never as "clean"
+ *  (the same never-guess contract as {@link WorktreeInfo.dirty}).
+ *  `"budget_exceeded"` is route-level, not detector-level: set by
+ *  `GET /:id/trunk-drift`'s per-request cap (mirrors
+ *  repo-topology.js's MAX_DIRTY_CHECKS_PER_REQUEST) for repos beyond the
+ *  cap, which are still listed rather than dropped.
+ *  Kept in sync BY HAND with the server's canonical vocabulary —
+ *  `server/routes/projects.js`'s exported `TRUNK_DRIFT_ROUTE_SKIP_REASONS`
+ *  (itself `server/lib/trunk-drift.js`'s `TRUNK_DRIFT_SKIP_REASONS` plus the
+ *  route's own `"budget_exceeded"`). A real shared runtime import isn't
+ *  possible across the Node (CJS) / Vite (client bundle) boundary, so this
+ *  is the client-side duplication case PROJECT-CONTEXT.md's DERIVED-DUAL-VIEW
+ *  entry calls out: if a 6th skip reason is ever added server-side, this
+ *  union must be updated in the same change or the client silently falls
+ *  back to trunkDrift.unknown's generic copy for it. */
+export interface TrunkDriftResult {
+  skipped:
+    | null
+    | "not_a_repo"
+    | "no_default_branch"
+    | "no_commits"
+    | "git_error"
+    | "budget_exceeded";
+  repoPath?: string;
+  defaultBranch?: string;
+  defaultBranchVia?: string;
+  headSha?: string;
+  lookbackDays?: number;
+  since?: string;
+  commits?: TrunkDriftCommit[];
+  commitCount?: number;
+  truncated?: boolean;
+  range?: { firstSha: string; lastSha: string } | null;
+}
+
+/** GET /api/projects/:id/trunk-drift response. */
+export interface ProjectTrunkDriftResponse {
+  repos: Array<{
+    cwd: string;
+    pathId: number;
+    drift: TrunkDriftResult;
+  }>;
+}
+
 /** The delivery-team pipeline stages an {@link IntakeInitiative} can be
  *  inferred to be at, from lowest to highest — see
  *  server/lib/intake-scan.js's `ARTIFACT_CHECKS`. Purely a file-presence

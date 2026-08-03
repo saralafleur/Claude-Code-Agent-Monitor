@@ -1391,6 +1391,55 @@ DELETE /api/projects/:id/ignored-repos/:ignoredId
 
 `ignoredId` is the numeric id from `ignoredRepos[].id`. Removes the dismissal, so the suggestion can surface again on the project's next scan. Returns the freshly recomputed topology (same shape as `GET /:id/repos`). **404** if the project id or `ignoredId` is unknown (or the row doesn't belong to that project).
 
+#### Direct-to-Trunk Work (Phase 1a)
+
+```http
+GET /api/projects/:id/trunk-drift
+```
+
+Fetch trunk-drift detection results for a project's mapped repos: commits that landed directly on a repo's default branch, bypassing the tracked worktree/focus flow (see `server/lib/trunk-drift.js`). Computed **live on every call**, read-only — nothing is persisted or written back in this phase. **404** for an unknown project id. Non-repo mapped folders are silently skipped (no `nonRepoFolders` key in this response — that shape belongs to `/repos`). One repo's git error never suppresses another mapped repo's populated result in the same response — each repo's detection is isolated. Capped at 25 actual `detectTrunkDrift` calls per request (`MAX_TRUNK_DRIFT_CHECKS_PER_REQUEST` in `server/routes/projects.js`, sibling of `repo-topology.js`'s `MAX_DIRTY_CHECKS_PER_REQUEST`) — repos beyond the cap still appear in `repos`, never dropped, with `drift.skipped: "budget_exceeded"`.
+
+```json
+{
+  "repos": [
+    {
+      "cwd": "/Users/dev/Claude-Code-Agent-Monitor",
+      "pathId": 1,
+      "drift": {
+        "skipped": null,
+        "repoPath": "/Users/dev/Claude-Code-Agent-Monitor",
+        "defaultBranch": "master",
+        "defaultBranchVia": "remote_head",
+        "headSha": "2f9c8a1b3d4e5f60718293a4b5c6d7e8f9a0b1c2",
+        "lookbackDays": 7,
+        "since": "2026-07-26T13:00:00.000Z",
+        "commits": [
+          {
+            "sha": "2f9c8a1b3d4e5f60718293a4b5c6d7e8f9a0b1c2",
+            "shortSha": "2f9c8a1",
+            "authorName": "Jane Dev",
+            "authorEmail": "jane@example.com",
+            "committedAt": "2026-08-01T10:00:00-06:00",
+            "subject": "fix: patch a straggling null check",
+            "filesChanged": 1,
+            "insertions": 3,
+            "deletions": 1
+          }
+        ],
+        "commitCount": 1,
+        "truncated": false,
+        "range": {
+          "firstSha": "2f9c8a1b3d4e5f60718293a4b5c6d7e8f9a0b1c2",
+          "lastSha": "2f9c8a1b3d4e5f60718293a4b5c6d7e8f9a0b1c2"
+        }
+      }
+    }
+  ]
+}
+```
+
+`drift.skipped` is non-null (`"not_a_repo" | "no_default_branch" | "no_commits" | "git_error" | "budget_exceeded"`) whenever the detector couldn't (or, for `"budget_exceeded"`, wasn't asked to) compute a real answer — the client renders that as an explicit "unknown" state, distinct from the genuinely-clean `{ skipped: null, commits: [] }` state; never conflate the two. `commits` is in git's own DAG order (the `--first-parent` walk), never re-sorted by `committedAt`. The detection predicate (DEC-5, `intake/2026-08-02-trunk-drift-detection/decisions.md`) is purely git-native — first-parent, non-merge, not reachable from any other local branch — and makes no dashboard-side attribution judgement.
+
 #### Team-Intake Initiatives
 
 ```http

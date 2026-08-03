@@ -138,6 +138,7 @@ const continueWorktreeMock = vi.fn();
 const sessionsListMock = vi.fn();
 const projectRollupMock = vi.fn();
 const focusAllMock = vi.fn();
+const trunkDriftMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -152,6 +153,7 @@ vi.mock("../../lib/api", () => ({
       setSiblingScanEnabled: (...args: unknown[]) => setSiblingScanEnabledMock(...args),
       setPathTerminalDefault: (...args: unknown[]) => setPathTerminalDefaultMock(...args),
       continueWorktree: (...args: unknown[]) => continueWorktreeMock(...args),
+      trunkDrift: (...args: unknown[]) => trunkDriftMock(...args),
     },
     sessions: {
       list: (...args: unknown[]) => sessionsListMock(...args),
@@ -200,6 +202,7 @@ describe("ProjectDetail page", () => {
     });
     setPathTerminalDefaultMock.mockResolvedValue(mockRepoTopology);
     continueWorktreeMock.mockResolvedValue({ ok: true });
+    trunkDriftMock.mockResolvedValue({ repos: [] });
   });
 
   it("shows a not-found state for an unknown project id", async () => {
@@ -589,5 +592,146 @@ describe("ProjectDetail page", () => {
     expect(
       screen.getByText("No intake/ folders found in this project's mapped folders yet.")
     ).toBeInTheDocument();
+  });
+
+  it("renders trunk-drift card with populated content (case 1)", async () => {
+    trunkDriftMock.mockResolvedValue({
+      repos: [
+        {
+          cwd: "/repo/agent-monitor",
+          pathId: 1,
+          drift: {
+            skipped: null,
+            defaultBranch: "master",
+            defaultBranchVia: "remote_head",
+            headSha: "abc1234567890def",
+            lookbackDays: 7,
+            since: "2026-07-26T00:00:00Z",
+            commits: [
+              {
+                sha: "abc1234567890def",
+                shortSha: "abc1234",
+                authorName: "Test Author",
+                authorEmail: "test@example.com",
+                committedAt: "2026-07-28T10:00:00Z",
+                subject: "Direct trunk commit",
+                filesChanged: 3,
+                insertions: 5,
+                deletions: 1,
+              },
+            ],
+            commitCount: 1,
+            truncated: false,
+            range: {
+              firstSha: "abc1234567890def",
+              lastSha: "abc1234567890def",
+            },
+          },
+        },
+      ],
+    });
+
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    expect(trunkDriftMock).toHaveBeenCalledWith("proj-1");
+    expect(screen.getByTestId("trunk-drift-card")).toBeInTheDocument();
+    expect(screen.getByText("abc1234")).toBeInTheDocument();
+    expect(screen.getByText("Direct trunk commit")).toBeInTheDocument();
+    expect(screen.getByText("Test Author")).toBeInTheDocument();
+
+    // No classification/action surfaces
+    expect(screen.queryByText(/fold_in|new_item|deliberate|discard/i)).not.toBeInTheDocument();
+    const cardElement = screen.getByTestId("trunk-drift-card");
+    const buttons = cardElement.querySelectorAll("button");
+    const hasActionButton = Array.from(buttons).some((btn) =>
+      /dismiss|resolve|fold|discard|classify/i.test(btn.textContent || "")
+    );
+    expect(hasActionButton).toBe(false);
+  });
+
+  it("renders skipped state as unknown (case 2)", async () => {
+    trunkDriftMock.mockResolvedValue({
+      repos: [
+        {
+          cwd: "/repo/agent-monitor",
+          pathId: 1,
+          drift: {
+            skipped: "no_default_branch",
+            repoPath: "/repo/agent-monitor",
+          },
+        },
+      ],
+    });
+
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    const cardElement = screen.getByTestId("trunk-drift-card");
+    const cardText = cardElement.textContent || "";
+    expect(cardText.toLowerCase()).toContain("unknown");
+    expect(cardText.toLowerCase()).not.toContain("clean");
+  });
+
+  it("distinguishes empty-clean state from unknown state (case 3 — load-bearing guard)", async () => {
+    trunkDriftMock.mockResolvedValue({
+      repos: [
+        {
+          cwd: "/repo/agent-monitor",
+          pathId: 1,
+          drift: {
+            skipped: null,
+            defaultBranch: "master",
+            defaultBranchVia: "remote_head",
+            headSha: "def7890",
+            lookbackDays: 7,
+            since: "2026-07-26T00:00:00Z",
+            commits: [],
+            commitCount: 0,
+            truncated: false,
+            range: null,
+          },
+        },
+        {
+          cwd: "/repo/other-repo",
+          pathId: 2,
+          drift: {
+            skipped: "no_default_branch",
+            repoPath: "/repo/other-repo",
+          },
+        },
+      ],
+    });
+
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    const cardElements = screen.getAllByTestId("trunk-drift-card");
+    expect(cardElements.length).toBe(2);
+
+    // Find the text for each state
+    const allCardText = cardElements.map((el) => el.textContent || "");
+    const cleanText = allCardText.find(
+      (text) => text.toLowerCase().includes("no direct") || text.toLowerCase().includes("commits")
+    );
+    const unknownText = allCardText.find((text) => text.toLowerCase().includes("unknown"));
+
+    expect(cleanText).toBeTruthy();
+    expect(unknownText).toBeTruthy();
+    expect(cleanText).not.toBe(unknownText);
+  });
+
+  it("handles trunk-drift api error gracefully (case 4)", async () => {
+    trunkDriftMock.mockRejectedValue(new Error("network error"));
+
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    // Page should still render project name and existing cards. "repo/agent-monitor"
+    // is rendered more than once on this page (shared mock fixtures used
+    // elsewhere on the screen also render it), so scope with getAllByText
+    // rather than the unscoped, collision-prone getByText.
+    expect(screen.getByText("Agent Monitor")).toBeInTheDocument();
+    expect(screen.getAllByText("repo/agent-monitor").length).toBeGreaterThan(0);
   });
 });

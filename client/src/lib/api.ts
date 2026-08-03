@@ -399,6 +399,7 @@ import type {
   Project,
   ProjectRepoTopology,
   ProjectIntakeReport,
+  ProjectTrunkDriftResponse,
   Session,
   SessionDrillIn,
   SessionStats,
@@ -2457,6 +2458,15 @@ export const api = {
      */
     intake: (id: string) =>
       request<ProjectIntakeReport>(`/projects/${encodeURIComponent(id)}/intake`),
+    /**
+     * GET /api/projects/:id/trunk-drift — direct-to-trunk commit detection
+     * (see {@link TrunkDriftResult}) for each of this project's mapped git
+     * repos. Read-only; updated on-demand per page load, no persistence.
+     * @param id The project id.
+     * @returns The {@link ProjectTrunkDriftResponse}.
+     */
+    trunkDrift: (id: string) =>
+      request<ProjectTrunkDriftResponse>(`/projects/${encodeURIComponent(id)}/trunk-drift`),
     /**
      * POST /api/projects/:id/open-terminal — opens a brand-new Terminal.app
      * window in one of this project's mapped folders and starts a fresh

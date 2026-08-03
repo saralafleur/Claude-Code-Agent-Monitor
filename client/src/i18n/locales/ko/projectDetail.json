@@ -108,5 +108,18 @@
       "expand": "릴리스됨 / 병합됨 이니셔티브 펼치기",
       "collapse": "릴리스됨 / 병합됨 이니셔티브 접기"
     }
+  },
+  "trunkDrift": {
+    "title": "트렁크 직접 작업",
+    "description": "기본 브랜치에 직접 이루어진 커밋",
+    "defaultBranch": "기본 브랜치",
+    "lookbackWindow": "지난 {{days}}일",
+    "commitCount": "커밋",
+    "empty": "트렁크에 직접 커밋된 내역이 없습니다",
+    "unknown": "알 수 없는 트렁크 브랜치",
+    "truncated": "일부 커밋은 표시되지 않았습니다 — 여기 표시된 것보다 더 많은 커밋이 있습니다.",
+    "budgetExceeded": "아직 확인되지 않음 — 이번 페이지 로드의 저장소 한도에 도달했습니다",
+    "gitError": "이 저장소를 확인할 수 없습니다 (git 오류)",
+    "notARepo": "git 저장소가 아닙니다"
   }
 }

@@ -108,5 +108,18 @@
       "expand": "Expand Released / Merged initiatives",
       "collapse": "Collapse Released / Merged initiatives"
     }
+  },
+  "trunkDrift": {
+    "title": "Direct-to-trunk work",
+    "description": "Commits made directly on the default branch",
+    "defaultBranch": "Default branch",
+    "lookbackWindow": "past {{days}} days",
+    "commitCount": "commits",
+    "empty": "No direct-to-trunk commits found",
+    "unknown": "Unknown trunk branch",
+    "truncated": "Some commits were left out — more exist than are shown here.",
+    "budgetExceeded": "Not checked yet — repo limit reached for this page load",
+    "gitError": "Couldn't check this repo (git error)",
+    "notARepo": "Not a git repository"
   }
 }

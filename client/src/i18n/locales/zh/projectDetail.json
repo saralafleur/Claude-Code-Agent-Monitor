@@ -108,5 +108,18 @@
       "expand": "展开已发布/已合并事项",
       "collapse": "折叠已发布/已合并事项"
     }
+  },
+  "trunkDrift": {
+    "title": "直接提交到主干的工作",
+    "description": "直接提交到默认分支的提交记录",
+    "defaultBranch": "默认分支",
+    "lookbackWindow": "过去 {{days}} 天",
+    "commitCount": "个提交",
+    "empty": "未发现直接提交到主干的记录",
+    "unknown": "无法确定主干分支",
+    "truncated": "部分提交未显示——实际数量多于此处展示的内容。",
+    "budgetExceeded": "尚未检查——本次页面加载已达到仓库数量上限",
+    "gitError": "无法检查此仓库（git 错误）",
+    "notARepo": "不是 Git 仓库"
   }
 }
