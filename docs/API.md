@@ -1127,18 +1127,20 @@ Body is any subset of `{ monitors, monitorMap, collapsedProjects }` — only the
 
 ### Color Thresholds
 
-The `/api/color-thresholds` namespace persists the Usage page's **global color thresholds** — the green/yellow/orange/red percentage bands used everywhere a rate-limit percentage is rendered (session/weekly bars, the session-reset marker, the "capped by weekly" callout). It is a single **global** config, not per-user: this app has no accounts, so every computer connected to the dashboard reads and writes the same thresholds, and a change from one client is pushed live to every other connected client over the [`color_thresholds_updated`](#color_thresholds_updated) WebSocket message.
+The `/api/color-thresholds` namespace persists the Usage page's **global color thresholds** — the green/yellow/orange/red percentage bands used everywhere a rate-limit percentage is rendered (session/weekly bars, the session-reset marker, the "capped by weekly" callout, the Consumption Rate card). It is a single **global** config, not per-user: this app has no accounts, so every computer connected to the dashboard reads and writes the same thresholds, and a change from one client is pushed live to every other connected client over the [`color_thresholds_updated`](#color_thresholds_updated) WebSocket message.
 
 **ColorThresholdsConfig shape:**
 
 ```json
 {
   "session": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 },
-  "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }
+  "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 },
+  "sessionRate": { "yellowAt": 0.5, "orangeAt": 1.0, "redAt": 1.5 },
+  "weeklyRate": { "yellowAt": 0.5, "orangeAt": 1.0, "redAt": 1.5 }
 }
 ```
 
-Two independent scopes — `session` (the 5h window) and `weekly` — since they're separate quotas rather than one shared ramp. Within a scope, each field is the percentage its band STARTS at (inclusive); below `yellowAt` always renders green. Must satisfy `yellowAt < orangeAt < redAt`.
+Four independent scopes — `session` (the 5h window) and `weekly`, raw %-used on a 0-100 scale, plus `sessionRate`/`weeklyRate`, the Consumption Rate card's pace-ratio (how many times faster the account's current burn rate is than the SUSTAINABLE pace that would land exactly at 100% right when that window resets, e.g. `1.5` for "1.5x sustainable pace" — see [Accounts](#accounts)) — since these are separate quantities rather than one shared ramp. `sessionRate`/`weeklyRate` are a RAW multiplier, not a percentage: `1.0` means exactly on pace, so their thresholds are typically small decimals (default 0.5/1.0/1.5) rather than 0-100 values. Within a scope, each field is the value its band STARTS at (inclusive); below `yellowAt` always renders green. Must satisfy `yellowAt < orangeAt < redAt`.
 
 #### Get Color Thresholds
 
@@ -1146,7 +1148,7 @@ Two independent scopes — `session` (the 5h window) and `weekly` — since they
 GET /api/color-thresholds
 ```
 
-Returns the current global thresholds for both scopes (defaulting to `{ yellowAt: 50, orangeAt: 80, redAt: 100 }` for each before anything has been saved).
+Returns the current global thresholds for all four scopes (defaulting to `{ yellowAt: 50, orangeAt: 80, redAt: 100 }` for each before anything has been saved).
 
 #### Update Color Thresholds
 
@@ -1154,7 +1156,7 @@ Returns the current global thresholds for both scopes (defaulting to `{ yellowAt
 PUT /api/color-thresholds
 ```
 
-Body is either/both of `{ session, weekly }`; within a scope, any subset of `{ yellowAt, orangeAt, redAt }` — only the provided fields are replaced, merged onto that scope's current values. Broadcasts [`color_thresholds_updated`](#color_thresholds_updated) with the full resulting config and returns it.
+Body is any subset of `{ session, weekly, sessionRate, weeklyRate }`; within a scope, any subset of `{ yellowAt, orangeAt, redAt }` — only the provided fields are replaced, merged onto that scope's current values. Broadcasts [`color_thresholds_updated`](#color_thresholds_updated) with the full resulting config and returns it.
 
 **Error Responses (400):** `{ "error": { "code": "INVALID_THRESHOLDS", "message" } }` when a provided field isn't a finite number in `[0, 1000]`, or when a scope's merged `yellowAt`/`orangeAt`/`redAt` would no longer be strictly increasing.
 
@@ -1170,17 +1172,18 @@ The `/api/projects/*` namespace groups sessions by the folder(s) they run from i
 {
   "id": "b6f1a2d0-3c4e-4f5a-9b8c-1d2e3f4a5b6c",
   "name": "Agent Monitor",
-  "paths": [{ "id": 1, "cwd": "/Users/dev/Claude-Code-Agent-Monitor" }],
+  "paths": [{ "id": 1, "cwd": "/Users/dev/Claude-Code-Agent-Monitor", "terminalDefault": true }],
   "session_count": 12,
   "active_count": 1,
   "last_activity": "2026-07-24T18:41:55.117Z",
   "created_at": "2026-07-01T09:15:00.000Z",
   "updated_at": "2026-07-20T09:15:00.000Z",
-  "pinned": false
+  "pinned": false,
+  "siblingScanEnabled": false
 }
 ```
 
-`session_count`, `active_count`, and `last_activity` are aggregated server-side across every folder currently mapped to the project; `last_activity` is `null` when the project has no sessions yet. `pinned` floats a project to the top of the list (see List Projects below) — set via PATCH, see Rename / Pin Project.
+`session_count`, `active_count`, and `last_activity` are aggregated server-side across every folder currently mapped to the project; `last_activity` is `null` when the project has no sessions yet. `pinned` floats a project to the top of the list (see List Projects below) — set via PATCH, see Rename / Pin Project. `siblingScanEnabled` (default `false`) gates the `"disk-sibling"` source in `GET /:id/repos`'s `detectedSiblings` — see [Repo & Worktree Topology](#repo--worktree-topology) — set via the same PATCH. `paths[].terminalDefault` is whether that folder is offered as a choice in `POST /:id/open-terminal`'s folder picker — set per-folder via [Toggle Folder Terminal Default](#toggle-folder-terminal-default). Only a project's **first** mapped folder defaults to `true`; every folder mapped alongside or after it (via `cwds` on Create Project, or a later Add Folder to Project call) defaults to `false` until explicitly re-enabled — a freshly multi-folder project doesn't flood the picker with folders the user hasn't chosen to use that way yet.
 
 #### List Projects
 
@@ -1213,17 +1216,17 @@ POST /api/projects
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | Yes | Display name |
-| `cwds` | string[] | No | Folders to attach immediately (deduplicated; each must be unmapped elsewhere) |
+| `cwds` | string[] | No | Folders to attach immediately (deduplicated; each must be unmapped elsewhere). Only the **first** entry (after dedup) defaults to `terminalDefault: true` — every folder after it starts `false`, re-enable via [Toggle Folder Terminal Default](#toggle-folder-terminal-default) |
 
 Returns `{ "project": Project }` with HTTP **201**. **400** `INVALID_INPUT` for a missing/blank `name` or a non-array `cwds`. **409** `ALREADY_MAPPED` if any requested `cwd` already belongs to another project (no partial creation — the whole request is rejected).
 
-#### Rename / Pin Project
+#### Rename / Pin Project / Toggle Sibling Scan
 
 ```http
 PATCH /api/projects/:id
 ```
 
-**Request Body:** `{ "name"?: string, "pinned"?: boolean }` — at least one of the two must be present; either can be sent alone (or both together). `name` must be non-blank when provided; `pinned` must be a real boolean. Returns `{ "project": Project }` (with `pinned` normalized to a real boolean), or **404** if the id is unknown, **400** `INVALID_INPUT` if neither field is present or a present field fails its own validation.
+**Request Body:** `{ "name"?: string, "pinned"?: boolean, "siblingScanEnabled"?: boolean }` — at least one of the three must be present; any can be sent alone or together. `name` must be non-blank when provided; `pinned`/`siblingScanEnabled` must be real booleans. Returns `{ "project": Project }` (with `pinned`/`siblingScanEnabled` normalized to real booleans), or **404** if the id is unknown, **400** `INVALID_INPUT` if none of the three fields is present or a present field fails its own validation.
 
 #### Delete Project
 
@@ -1239,7 +1242,7 @@ Deletes the project; its folder mappings cascade away (`ON DELETE CASCADE`). The
 POST /api/projects/:id/paths
 ```
 
-**Request Body:** `{ "cwd": string }` (required, non-blank). Returns `{ "project": Project }` with HTTP **201**. **404** if the project id is unknown. **409** `ALREADY_MAPPED` if the folder already belongs to this project or another one (message distinguishes the two cases).
+**Request Body:** `{ "cwd": string }` (required, non-blank). Returns `{ "project": Project }` with HTTP **201**. **404** if the project id is unknown. **409** `ALREADY_MAPPED` if the folder already belongs to this project or another one (message distinguishes the two cases). The new folder defaults to `terminalDefault: true` only if the project had **no** other mapped folders before this call — otherwise it defaults to `false`, matching Create Project's `cwds` ordering rule above.
 
 #### Remove Folder from Project
 
@@ -1249,13 +1252,25 @@ DELETE /api/projects/:id/paths/:pathId
 
 `pathId` is the numeric id from `Project.paths[].id`. Unmaps the folder — the folder and its sessions are untouched; it becomes unassigned again. Returns `{ "project": Project }`, or **404** if the project id or `pathId` is unknown (or the mapping doesn't belong to that project).
 
+#### Toggle Folder Terminal Default
+
+```http
+PATCH /api/projects/:id/paths/:pathId
+```
+
+Sets whether one mapped folder is offered as a choice in `POST /:id/open-terminal`'s folder picker (`paths[].terminalDefault` / the matching `repos[]`/`nonRepoFolders[]` entry's `terminalDefault` in `GET /:id/repos`) — the Project Detail page's Repos card exposes this as a per-folder checkbox ("Full" view mode only, alongside each folder's Remove button). `pathId` is the numeric id from `Project.paths[].id`. Every folder mapped before this feature existed defaults to `true` (migration-safe — nothing historical is silently excluded); going forward, only a project's first mapped folder defaults to `true` and every folder mapped alongside or after it defaults to `false` (see Create Project / Add Folder to Project above) — this route is how any of them get flipped either way.
+
+**Request Body:** `{ "terminalDefault": boolean }` (required).
+
+Returns the freshly recomputed topology (same shape as `GET /:id/repos`, see [Repo & Worktree Topology](#repo--worktree-topology)) so the client can render the result without a second round trip — matching the ignore/un-ignore routes' own convention. **404** if the project id or `pathId` is unknown (or the mapping doesn't belong to that project). **400** `INVALID_INPUT` if `pathId` isn't an integer or `terminalDefault` isn't a boolean.
+
 #### Repo & Worktree Topology
 
 ```http
 GET /api/projects/:id/repos
 ```
 
-Backs the [Project Detail page](../client/src/pages/ProjectDetail.tsx) (`/projects/:id`, reached from a project row's "open detail" icon in the Projects list). Computed **live on every call** — nothing here is persisted — by `server/lib/repo-topology.js`: splits the project's mapped folders into actual git repos (has a `.git`) versus plain folders, lists each repo's live worktrees (`git worktree list --porcelain`, `git` invoked via `execFile` with an isolated env — see `server/lib/git-env.js` — never a shell string), and best-effort-detects sibling repos named in a mapped repo's own `PROJECT-CONTEXT.md` "Repo topology" section that aren't mapped to the project yet. **404** for an unknown project id.
+Backs the [Project Detail page](../client/src/pages/ProjectDetail.tsx) (`/projects/:id`, reached from a project row's "open detail" icon in the Projects list, or the page header's **Refresh** button (next to the project name), which re-fetches this endpoint together with `GET /:id/intake` and pops up a summary of what the rescan found). Computed **live on every call** — nothing here is persisted except the ignore list (below) — by `server/lib/repo-topology.js`: splits the project's mapped folders into actual git repos (has a `.git`) versus plain folders, lists each repo's live worktrees (`git worktree list --porcelain`, `git` invoked via `execFile` with an isolated env — see `server/lib/git-env.js` — never a shell string), and best-effort-detects related repos not yet mapped to the project from three sources, each tagged in `detectedSiblings[].source`: `"context"` (named in a mapped repo's own `PROJECT-CONTEXT.md` "Repo topology" section), `"disk-sibling"` (another git repo found sitting next to a mapped repo, one directory-listing deep, capped at 200 entries), and `"disk-nested"` (a git repo found nested inside a mapped folder's own subfolders — e.g. a submodule, a vendored checkout, or an unrelated checkout inside a plain "workspace" folder — via a depth-capped walk, max depth 4, max 2000 directories scanned per folder, skipping `node_modules`/`.git`/`dist`/`build`/etc., and never descending further once a nested repo is found). `"disk-sibling"` only runs when the project's `siblingScanEnabled` is `true` (default `false` — set via `PATCH /api/projects/:id`, see [Rename / Pin Project / Toggle Sibling Scan](#rename--pin-project--toggle-sibling-scan)); that scan surfaces every git repo in the same parent folder regardless of relatedness, which is noisy in a flat workspace holding many unrelated repos. `"context"` and `"disk-nested"` are unaffected and always run. `"disk-nested"` is the only source of the three that also runs against a mapped folder that **isn't itself a git repo** — a mapped folder that's just a plain container can still have real repos scanned out of it. Every one of a mapped repo's own worktrees is excluded from all three sources — a linked worktree is the same repo checked out at a second, possibly unrelated-looking location, never a new repo to suggest. Suggestions the project has explicitly dismissed (see the ignore/un-ignore routes below) are filtered out and returned separately as `ignoredRepos`. When the same path is found more than one way, `"context"` wins the dedup. **404** for an unknown project id.
 
 ```json
 {
@@ -1264,6 +1279,7 @@ Backs the [Project Detail page](../client/src/pages/ProjectDetail.tsx) (`/projec
     {
       "cwd": "/Users/dev/Claude-Code-Agent-Monitor",
       "pathId": 1,
+      "terminalDefault": true,
       "worktrees": [
         {
           "path": "/Users/dev/Claude-Code-Agent-Monitor",
@@ -1278,18 +1294,102 @@ Backs the [Project Detail page](../client/src/pages/ProjectDetail.tsx) (`/projec
       ]
     }
   ],
-  "nonRepoFolders": [{ "cwd": "/Users/dev/scratch-notes", "pathId": 2 }],
+  "nonRepoFolders": [
+    { "cwd": "/Users/dev/scratch-notes", "pathId": 2, "terminalDefault": true }
+  ],
   "detectedSiblings": [
     {
       "name": "sibling-repo",
       "path": "/Users/dev/sibling-repo",
-      "sourceRepoCwd": "/Users/dev/Claude-Code-Agent-Monitor"
+      "sourceRepoCwd": "/Users/dev/Claude-Code-Agent-Monitor",
+      "source": "context"
+    },
+    {
+      "name": "other-repo-next-door",
+      "path": "/Users/dev/other-repo-next-door",
+      "sourceRepoCwd": "/Users/dev/Claude-Code-Agent-Monitor",
+      "source": "disk-sibling"
+    },
+    {
+      "name": "vendored-lib",
+      "path": "/Users/dev/Claude-Code-Agent-Monitor/packages/vendored-lib",
+      "sourceRepoCwd": "/Users/dev/Claude-Code-Agent-Monitor",
+      "source": "disk-nested"
+    }
+  ],
+  "ignoredRepos": [
+    {
+      "id": 5,
+      "path": "/Users/dev/some-unrelated-repo",
+      "name": "some-unrelated-repo",
+      "source": "disk-sibling",
+      "ignoredAt": "2026-01-01T00:00:00.000Z"
     }
   ]
 }
 ```
 
-`worktrees[].dirty` is `true`/`false` from `git status --porcelain --ignore-submodules -uno`, or `null` when it genuinely couldn't be determined (missing path, timeout, error, or a per-request cap of 25 dirty-checks was reached) — render `null` as "unknown", never as a false "clean". `detectedSiblings` are suggestions only: nothing is added to the project automatically — the client adds one explicitly via the existing `POST /api/projects/:id/paths`.
+`worktrees[].dirty` is `true`/`false` from `git status --porcelain --ignore-submodules -uno`, or `null` when it genuinely couldn't be determined (missing path, timeout, error, or a per-request cap of 25 dirty-checks was reached) — render `null` as "unknown", never as a false "clean". Every entry in `repos[]`/`nonRepoFolders[]` also carries `terminalDefault` — see [Toggle Folder Terminal Default](#toggle-folder-terminal-default) — mirroring the same flag on `Project.paths[].terminalDefault`. `detectedSiblings` are suggestions only: nothing is added to the project automatically — the client adds one explicitly via the existing `POST /api/projects/:id/paths`, or dismisses it via the ignore route below.
+
+#### Continue Worktree
+
+```http
+POST /api/projects/:id/continue-worktree
+```
+
+macOS only. Opens a brand-new Terminal.app window in one specific worktree of one of this project's mapped repos and starts a FRESH `claude` instance there — deliberately never `-c`/`--continue` (silently resuming whatever prior conversation happened in that directory is considered unsafe: it can drag in stale context, a different task than what's actually in progress, or an inherited permission/tool state nobody reviewed) — seeded with a server-built resume prompt naming the worktree's branch and dirty state and telling it to run `git status`/`git log --oneline -10`/`git diff` itself before picking work back up. Backs the **Continue** button on every worktree row in the [Project Detail page](../client/src/pages/ProjectDetail.tsx)'s Repos card (always visible there, independent of the card's Compact/Full toggle — it's a launcher, not a project-mutating action like Remove/Add/Ignore). Unlike [Open Terminal in Project Folder](#open-terminal-in-project-folder) (restricted to a project's `terminalDefault`-eligible mapped folders), `path` here is any live worktree belonging to any of this project's mapped repos — the server recomputes the project's repo topology on every call (nothing here is persisted) and rejects a `path` that isn't one of those worktrees' own paths, rather than trusting an arbitrary client-supplied directory.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | Project ID |
+
+**Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `path` | string | Yes | The worktree's absolute path — must exactly match one of `worktrees[].path` from [Repo & Worktree Topology](#repo--worktree-topology) (git may canonicalize it, e.g. resolving a symlinked temp dir — pass the value that endpoint returned, not an independently-typed path). |
+| `name` | string | No | An effort/session name, trimmed server-side; blank or omitted opens untitled. Passed through as `claude -n <name>`, same as [Open Terminal in Project Folder](#open-terminal-in-project-folder). |
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:4820/api/projects/proj_abc123/continue-worktree \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/Users/dev/Claude-Code-Agent-Monitor"}'
+```
+
+**Example Response:**
+
+```json
+{ "ok": true }
+```
+
+**Error Responses:**
+
+| Status | Code | Description |
+|--------|------|-------------|
+| 404 | `NOT_FOUND` | Project not found |
+| 400 | `INVALID_INPUT` | `path` is missing, or isn't one of this project's mapped repos' live worktree paths |
+| 500 | `AUTOMATION_ERROR` | Terminal automation failed — commonly means macOS hasn't yet granted Automation access to control Terminal (System Settings > Privacy & Security > Automation) |
+| 501 | `UNSUPPORTED_PLATFORM` | Not running on macOS |
+
+#### Ignore Detected Repo
+
+```http
+POST /api/projects/:id/ignored-repos
+```
+
+**Request Body:** `{ "path": string, "name": string, "source": "context" | "disk-sibling" | "disk-nested" }` (all required — pass the exact fields from the `detectedSiblings` entry being dismissed). Dismisses that suggestion so it drops out of `detectedSiblings` on every future call to `GET /:id/repos` until explicitly un-ignored. Idempotent — ignoring an already-ignored path just refreshes its stored `name`/`source`/`ignoredAt` rather than erroring. Returns the freshly recomputed topology (same shape as `GET /:id/repos`, HTTP **201**) so the client can render the result without a second round trip. **404** for an unknown project id; **400** `INVALID_INPUT` for a missing `path`/`name` or an invalid `source`.
+
+#### Un-ignore Detected Repo
+
+```http
+DELETE /api/projects/:id/ignored-repos/:ignoredId
+```
+
+`ignoredId` is the numeric id from `ignoredRepos[].id`. Removes the dismissal, so the suggestion can surface again on the project's next scan. Returns the freshly recomputed topology (same shape as `GET /:id/repos`). **404** if the project id or `ignoredId` is unknown (or the row doesn't belong to that project).
 
 #### Team-Intake Initiatives
 
@@ -1297,7 +1397,7 @@ Backs the [Project Detail page](../client/src/pages/ProjectDetail.tsx) (`/projec
 GET /api/projects/:id/intake
 ```
 
-Also backs the Project Detail page. Computed **live on every call** by `server/lib/intake-scan.js`: scans each mapped folder's `intake/<slug>/` directories (the layout the `team-intake`/`team-qa`/`team-build`/`team-release` delivery-team pipeline skills produce) and infers a pipeline stage purely from which known artifact files exist — no markdown content is parsed. **404** for an unknown project id.
+Also backs the Project Detail page — re-fetched alongside `GET /:id/repos` by the page header's **Refresh** button, so a rescan updates both repo/worktree state and intake stage together. Computed **live on every call** by `server/lib/intake-scan.js`: finds every `intake/` directory reachable from each mapped folder within 3 levels of subdirectories (some projects nest their app code, and `intake/`, a few folders below the mapped folder's own root rather than directly at it), scans each found `intake/<slug>/` directory (the layout the `team-intake`/`team-qa`/`team-build`/`team-release` delivery-team pipeline skills produce), and infers a pipeline stage purely from which known artifact files exist — no markdown content is parsed. **404** for an unknown project id.
 
 ```json
 {
@@ -1575,7 +1675,7 @@ Each session entry carries `ended_at` (`null` while still active/waiting) straig
 POST /api/projects/:id/open-terminal
 ```
 
-macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the shared `client/src/components/OpenTerminalModal.tsx` project/session picker, reachable from two places: the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view) and the sidebar's "New session…" icon button next to the Projects nav row (expanded sidebar only). Either entry point opens the same picker: picking a project with exactly one mapped folder opens it directly; a project with more than one drills into a folder-picker step first. The top-level project list itself is sorted client-side: once more than 3 projects exist and at least one has session history, a "Most used" section promotes the top 3 by `session_count` (ties broken alphabetically) above an "All projects" section holding the rest in the server's alphabetical order; with 3 or fewer projects, or none used yet, it's shown as one plain alphabetical list. The same picker also carries an optional effort-name field across the project/folder navigation, mirroring `POST /api/sessions/:id/open-terminal`'s `name` body param below.
+macOS only. Opens a brand-new Terminal.app window in one of this project's mapped folders and starts a fresh `claude` instance in it (see `server/lib/terminal-focus.js`'s `openTerminalForCwd`, the same primitive behind `POST /api/sessions/:id/open-terminal`). Backs the shared `client/src/components/OpenTerminalModal.tsx` project/session picker, reachable from two places: the Kanban board header's standalone "Open terminal in project…" icon button (next to the copy-link button, reachable from any view) and the sidebar's "New session…" icon button next to the Projects nav row (expanded sidebar only). Either entry point opens the same picker: picking a project with exactly one *eligible* mapped folder opens it directly; a project with more than one drills into a folder-picker step first. Only folders with `terminalDefault` on (default `true` — see [Toggle Folder Terminal Default](#toggle-folder-terminal-default)) are eligible, both in what the picker offers and what this route itself accepts — a folder toggled off can't be opened through this route even if `cwd` names it explicitly. The top-level project list itself is sorted client-side: once more than 3 projects exist and at least one has session history, a "Most used" section promotes the top 3 by `session_count` (ties broken alphabetically) above an "All projects" section holding the rest in the server's alphabetical order; with 3 or fewer projects, or none used yet, it's shown as one plain alphabetical list. The same picker also carries an optional effort-name field across the project/folder navigation, mirroring `POST /api/sessions/:id/open-terminal`'s `name` body param below.
 
 **Path Parameters:**
 
@@ -1587,7 +1687,7 @@ macOS only. Opens a brand-new Terminal.app window in one of this project's mappe
 
 | Field | Type | Required | Description |
 |-------|------|----------|--------------|
-| `cwd` | string | Only when the project has more than one mapped folder | Which of the project's own `paths[].cwd` to open. Ignored (the project's single folder is used) when the project has exactly one. |
+| `cwd` | string | Only when the project has more than one *eligible* (`terminalDefault: true`) mapped folder | Which of the project's own eligible `paths[].cwd` to open. Ignored (the project's single eligible folder is used) when there's exactly one. |
 | `name` | string | No | An effort/session name, trimmed server-side; blank or omitted opens untitled. Passed through as `claude -n <name>` so the fresh session starts already titled. |
 
 **Example Request:**
@@ -1609,8 +1709,8 @@ curl -X POST http://localhost:4820/api/projects/proj_abc123/open-terminal \
 | Status | Code | Description |
 |--------|------|-------------|
 | 404 | `NOT_FOUND` | Project not found |
-| 409 | `NO_FOLDERS` | This project has no mapped folders |
-| 400 | `INVALID_INPUT` | `cwd` is missing or isn't one of this project's mapped folders (only possible when the project has more than one) |
+| 409 | `NO_FOLDERS` | This project has no *eligible* (`terminalDefault: true`) mapped folders |
+| 400 | `INVALID_INPUT` | `cwd` is missing or isn't one of this project's eligible mapped folders (only possible when the project has more than one eligible folder) |
 | 500 | `AUTOMATION_ERROR` | Terminal automation failed — commonly means macOS hasn't yet granted Automation access to control Terminal (System Settings > Privacy & Security > Automation) |
 | 501 | `UNSUPPORTED_PLATFORM` | Not running on macOS |
 
@@ -1846,6 +1946,8 @@ POST   /api/accounts/:id/login-terminal    Open a Terminal.app window running CL
 `POST /:id/login-terminal` is the click-through fix for `needs_login`: it opens a brand-new Terminal.app window already running `CLAUDE_CONFIG_DIR=<this account's config dir> claude` (the same AppleScript machinery as `POST /api/sessions/:id/open-terminal`), so the user can walk through that profile's interactive login and close the window when done. In the UI this is what clicking an account row's **Needs login** badge calls. Returns `200 { ok: true }` on launch; typed failures map to `501` (`UNSUPPORTED_PLATFORM` — not macOS), `409` (`NO_CONFIG_DIR`), or `500` (`AUTOMATION_ERROR` — commonly a not-yet-granted macOS Automation permission).
 
 Every account object returned by `GET /api/accounts` (and the `account` embedded in `POST /:id/capture`'s response) also carries `last_used_at` and `is_active` — a real-usage gauge distinct from `last_capture_at`. `last_capture_at` only moves when someone clicks Refresh (or the scheduler ticks); `last_used_at`/`is_active` are inferred from movement in that account's own session/weekly rate-limit percentage between two consecutive `ok` captures (`server/lib/account-activity.js`'s `computeLastUsedAt`/`pctIncreased`) — a config-dir-independent signal, since the local CLAUDE_CONFIG_DIR the user happens to be working under is disconnected from which Anthropic account is actually being billed, but the percentage itself only moves when that account's quota is really consumed. A *lower* newer percentage (a session/weekly window rolling over) is never counted as usage. `last_used_at` is `null` until two comparable captures exist or no rise was ever found in the retained lookback (the most recent 500 captures). `is_active` is `true` when `last_used_at` is within the last 15 minutes, else `false`. Powers the Usage page's "Activity" card (`AccountActivityCard` in `client/src/pages/Usage.tsx`).
+
+**Consumption Rate fields:** the same account object also carries `session_burn_rate_pct_per_hour`, `session_predicted_exhaustion_at`, `session_burn_rate_observed_span_ms`, `week_burn_rate_pct_per_hour`, `week_predicted_exhaustion_at`, and `week_burn_rate_observed_span_ms` (`server/lib/consumption-rate.js`'s `computeConsumptionRate`). For each of the session/weekly windows independently, a least-squares %/hour trend is fit over that account's own captures since the *current* window started (a window reset drops the percentage back toward 0, so blending across that boundary would read as a usage crash rather than a fresh window); `*_burn_rate_pct_per_hour` is `null` with fewer than two comparable captures in the window. `*_predicted_exhaustion_at` is the ISO instant that trend would cross 100% — `null` (even with a non-null rate) when the trend is flat or falling, since no exhaustion is predictable in that case. `*_burn_rate_observed_span_ms` is the wall-clock span between the oldest and newest capture the fit actually used — `null` under the same "fewer than two points" condition as the rate itself — so the UI can show the confidence basis of a rate ("observed over 45m" vs. "observed over 2d") rather than presenting every fit as equally solid. Same 500-capture lookback cap as `last_used_at` above, which for the weekly window means the trend narrows to roughly the most recent ~41 hours of pace once more than about a day and a half has passed since the last weekly reset. Powers the Usage page's "Consumption Rate" card (`ConsumptionRateCard` in `client/src/pages/Usage.tsx`), which compares the predicted instant against `latest_session_window_reset_raw`/`latest_week_reset_raw` to decide whether the account is actually on track to run out before it resets. Both the "on track" and "runs out in..." labels are colored by the same raw pace-ratio number shown in the card's stats line (`computePaceRatio` — how many times faster than sustainable pace the account is currently burning, e.g. `1.6` for "1.6x sustainable pace") against the `sessionRate`/`weeklyRate` [Color Thresholds](#color-thresholds) scopes, so the color always matches the number actually displayed. When at risk, a second "Short by" line spells out the actual gap between the two fixed instants — reset and predicted exhaustion — e.g. a window that resets in 6 days but is predicted to run out in 4 shows "Short by 2d."
 
 ---
 
@@ -2211,10 +2313,10 @@ Broadcast whenever `PUT /api/monitors` changes the global Kanban Board monitor l
 
 #### color_thresholds_updated
 
-Broadcast whenever `PUT /api/color-thresholds` changes the global Usage-page color thresholds — from any connected client/computer. Carries the full resulting `{ session, weekly }` config (see [Color Thresholds](#color-thresholds)); the client merges it straight into `lib/colorThresholds.ts`'s store on top of the `GET /api/color-thresholds` hydrate, so every other connected client picks up the change live, without a reload.
+Broadcast whenever `PUT /api/color-thresholds` changes the global Usage-page color thresholds — from any connected client/computer. Carries the full resulting `{ session, weekly, sessionRate, weeklyRate }` config (see [Color Thresholds](#color-thresholds)); the client merges it straight into `lib/colorThresholds.ts`'s store on top of the `GET /api/color-thresholds` hydrate, so every other connected client picks up the change live, without a reload.
 
 ```json
-{ "type": "color_thresholds_updated", "data": { "session": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }, "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 } } }
+{ "type": "color_thresholds_updated", "data": { "session": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }, "weekly": { "yellowAt": 50, "orangeAt": 80, "redAt": 100 }, "sessionRate": { "yellowAt": 0.5, "orangeAt": 1.0, "redAt": 1.5 }, "weeklyRate": { "yellowAt": 0.5, "orangeAt": 1.0, "redAt": 1.5 } } }
 ```
 
 #### decision_queue_updated

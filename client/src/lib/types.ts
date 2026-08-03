@@ -1631,6 +1631,13 @@ export interface ProjectPath {
   /** Absolute working-directory path this project claims. Example:
    *  `"/Users/dev/my-repo"`. */
   cwd: string;
+  /** Whether this folder is offered as a choice in the "open a new Claude
+   *  terminal" pickers (OpenTerminalModal's folder step for a project mapped
+   *  to more than one folder), toggled per-folder via PATCH
+   *  `/:id/paths/:pathId`. Optional so fixtures/mocks predating this field
+   *  still type-check and are treated as eligible (`!== false`); always
+   *  present (true or false) on a real API response. */
+  terminalDefault?: boolean;
 }
 
 /** A named grouping of folders, from GET /api/projects. Session/active counts
@@ -1658,6 +1665,15 @@ export interface Project {
    *  fixtures/mocks predating this field still type-check; always present
    *  (true or false) on a real API response. */
   pinned?: boolean;
+  /** Whether the Project Detail page's "Suggested repos" section scans this
+   *  project's parent directory for sibling git repos on disk (the
+   *  `disk-sibling` source). Defaults to false — in a flat workspace folder
+   *  holding many unrelated repos, that scan surfaces every one of them
+   *  regardless of relatedness. PROJECT-CONTEXT.md-declared siblings and
+   *  nested/child repo detection are unaffected and always run. Optional so
+   *  fixtures/mocks predating this field still type-check; always present
+   *  (true or false) on a real API response. */
+  siblingScanEnabled?: boolean;
 }
 
 /** Sessions whose cwd isn't mapped to any {@link Project} yet, from GET
@@ -1717,31 +1733,78 @@ export interface RepoTopologyEntry {
   pathId: number;
   /** This repo's live worktrees (always includes the main one). */
   worktrees: WorktreeInfo[];
+  /** See {@link ProjectPath.terminalDefault} — same flag, surfaced here too
+   *  since the Project Detail page's Repos card toggles it from this
+   *  entry, not from `Project.paths`. */
+  terminalDefault?: boolean;
 }
 
-/** A sibling repo named in a mapped repo's own PROJECT-CONTEXT.md "Repo
- *  topology" section that isn't mapped to the project yet. Surfaced as a
- *  suggestion only — the client must call `api.projects.addPath` to actually
- *  add it; nothing adds it automatically. */
+/** How a {@link DetectedSiblingRepo} was found — see
+ *  server/lib/repo-topology.js's file overview for the three detection
+ *  sources this maps to. */
+export type DetectedSiblingSource = "context" | "disk-sibling" | "disk-nested";
+
+/** A repo related to one of the project's mapped folders that isn't mapped
+ *  to the project yet — found either because a mapped repo's own
+ *  PROJECT-CONTEXT.md names it (`source: "context"`), it's another git repo
+ *  sitting next to a mapped repo on disk (`source: "disk-sibling"`), or it's
+ *  a git repo nested inside a mapped folder's own tree, e.g. a submodule, a
+ *  vendored checkout, or an unrelated checkout sitting inside a plain
+ *  non-repo "workspace" folder (`source: "disk-nested"` — the only source
+ *  that can also be found relative to a mapped folder that isn't itself a
+ *  git repo). Surfaced as a suggestion only — the client must call
+ *  `api.projects.addPath` to actually add it; nothing adds it
+ *  automatically. */
 export interface DetectedSiblingRepo {
-  /** Repo name as written in PROJECT-CONTEXT.md. */
+  /** Repo name — as written in PROJECT-CONTEXT.md for `"context"`, or the
+   *  directory's own name for the two disk-scan sources. */
   name: string;
   /** Resolved absolute path (verified to exist and be a git repo). */
   path: string;
-  /** Which of the project's own mapped repos named this sibling. */
+  /** Which of the project's own mapped folders this was found relative to —
+   *  a git repo for `"context"`/`"disk-sibling"`, or any mapped folder
+   *  (repo or not) for `"disk-nested"`. */
   sourceRepoCwd: string;
+  /** How this suggestion was found. */
+  source: DetectedSiblingSource;
 }
 
-/** GET /api/projects/:id/repos response. */
+/** A previously-detected repo suggestion the project has explicitly
+ *  dismissed via the Repos card's "Ignore" action (`POST
+ *  /:id/ignored-repos`) — excluded from {@link ProjectRepoTopology.detectedSiblings}
+ *  on every scan until "Unignore" (`DELETE /:id/ignored-repos/:id`) removes
+ *  it. `name`/`source` are captured at ignore time, not re-derived, so this
+ *  can render without re-running the live disk scan for just this path. */
+export interface IgnoredRepo {
+  /** Row id — pass this to the unignore action. */
+  id: number;
+  /** Resolved absolute path of the ignored suggestion. */
+  path: string;
+  /** Name it was suggested under at the time it was ignored. */
+  name: string;
+  /** How it was found at the time it was ignored. */
+  source: DetectedSiblingSource;
+  /** ISO timestamp of when it was ignored. */
+  ignoredAt: string;
+}
+
+/** GET /api/projects/:id/repos response (also returned by the ignore/
+ *  unignore actions, so the client can render the result without a second
+ *  round trip). */
 export interface ProjectRepoTopology {
   /** The project id. */
   project_id: string;
   /** Mapped folders that are git repos, each with its worktrees. */
   repos: RepoTopologyEntry[];
   /** Mapped folders that are NOT git repos (no `.git`). */
-  nonRepoFolders: Array<{ cwd: string; pathId: number }>;
-  /** Sibling repos detected via PROJECT-CONTEXT.md but not yet mapped. */
+  nonRepoFolders: Array<{ cwd: string; pathId: number; terminalDefault?: boolean }>;
+  /** Related repos detected via PROJECT-CONTEXT.md or a live disk scan
+   *  (siblings and nested repos) but not yet mapped to the project, minus
+   *  whatever's in `ignoredRepos`. */
   detectedSiblings: DetectedSiblingRepo[];
+  /** Suggestions this project has explicitly dismissed — see
+   *  {@link IgnoredRepo}. */
+  ignoredRepos: IgnoredRepo[];
 }
 
 /** The delivery-team pipeline stages an {@link IntakeInitiative} can be
@@ -1753,13 +1816,25 @@ export type IntakeStage = "requested" | "planned" | "qa" | "built" | "released";
 
 /** Which known delivery-team artifact files exist for an
  *  {@link IntakeInitiative}, the raw signal `deriveIntakeStage` picks a
- *  stage from. */
+ *  stage from. `merged` is true either from a real `merge.json` file or from
+ *  a git-detected "Merge effort/<slug>: ..." commit — see `mergeRecorded` /
+ *  `mergeCommit` on {@link IntakeInitiative} to tell the two apart. */
 export interface IntakeArtifactFlags {
   requestBrief: boolean;
   technicalPlan: boolean;
   qaAssessment: boolean;
   buildReport: boolean;
   merged: boolean;
+}
+
+/** The live `git worktree` an {@link IntakeInitiative} is currently checked
+ *  out in, found by matching the intake slug against the `effort/<slug>`
+ *  branch-naming convention every build-triage/wrap-up pass uses. `null`
+ *  means no such worktree exists right now — either the build hasn't been
+ *  triaged yet, or it was already merged and cleaned up. */
+export interface IntakeWorktree {
+  path: string;
+  branch: string;
 }
 
 /** One `intake/<slug>/` folder found under a project's mapped folders, from
@@ -1775,6 +1850,18 @@ export interface IntakeInitiative {
   /** Highest pipeline stage inferred from `artifacts`. */
   stage: IntakeStage;
   artifacts: IntakeArtifactFlags;
+  /** Whether `merge.json` itself was found on disk (the pipeline's own
+   *  manually-authored merge record). False even when `artifacts.merged` is
+   *  true via a git-detected merge commit instead. */
+  mergeRecorded: boolean;
+  /** Short commit hash of a "Merge effort/<slug>: ..." commit found via
+   *  `git log`, or `null` if none was found. Populated independently of
+   *  `mergeRecorded` - when both are set, merge.json just never caught up to
+   *  what git already shows. */
+  mergeCommit: string | null;
+  /** The initiative's live effort worktree, or `null` if none currently
+   *  exists (not yet provisioned, or already merged and cleaned up). */
+  worktree: IntakeWorktree | null;
 }
 
 /** GET /api/projects/:id/intake response. */
@@ -2465,13 +2552,21 @@ export interface ColorThresholds {
 
 /** The Usage page's global color thresholds: GET/PUT /api/color-thresholds's
  *  response shape, and the payload of `color_thresholds_updated` WebSocket
- *  pushes. Two independent scopes - the session (5h) window and the weekly
- *  window are separate quotas, each with its own bands. */
+ *  pushes. Four independent scopes - the session (5h) window and the weekly
+ *  window are separate quotas, each with its own bands, and the Consumption
+ *  Rate card's runway-risk percentage (how much of a window's remaining
+ *  time a predicted burn-rate trend would eat before that window resets)
+ *  gets its own pair of bands too, since a burn-rate risk isn't the same
+ *  quantity as a raw percentage-used. */
 export interface ColorThresholdsConfig {
   /** Bands for anything driven by `latest_session_window_pct`. */
   session: ColorThresholds;
   /** Bands for anything driven by `latest_week_window_pct`. */
   weekly: ColorThresholds;
+  /** Bands for the Consumption Rate card's session-window runway risk. */
+  sessionRate: ColorThresholds;
+  /** Bands for the Consumption Rate card's weekly-window runway risk. */
+  weeklyRate: ColorThresholds;
 }
 
 /** One user-adjustable numeric field on a {@link PlaybookPractice} (e.g. the

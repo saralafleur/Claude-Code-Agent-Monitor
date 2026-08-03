@@ -1,7 +1,8 @@
 /**
  * @file Tests for the global Usage-page color thresholds: the
- * /api/color-thresholds route's GET/PUT CRUD across its two independent
- * scopes (session, weekly), partial-patch behavior, and input validation.
+ * /api/color-thresholds route's GET/PUT CRUD across its four independent
+ * scopes (session, weekly, sessionRate, weeklyRate), partial-patch
+ * behavior, and input validation.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -61,6 +62,8 @@ const put = (p, body) => fetchJson(p, { method: "PUT", body });
 const DEFAULTS = {
   session: { yellowAt: 50, orangeAt: 80, redAt: 100 },
   weekly: { yellowAt: 50, orangeAt: 80, redAt: 100 },
+  sessionRate: { yellowAt: 0.5, orangeAt: 1.0, redAt: 1.5 },
+  weeklyRate: { yellowAt: 0.5, orangeAt: 1.0, redAt: 1.5 },
 };
 
 before(async () => {
@@ -88,7 +91,7 @@ beforeEach(async () => {
 });
 
 describe("GET /api/color-thresholds", () => {
-  it("returns the default bands for both scopes on a fresh DB", async () => {
+  it("returns the default bands for all four scopes on a fresh DB", async () => {
     const res = await get("/api/color-thresholds");
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, DEFAULTS);
@@ -96,10 +99,12 @@ describe("GET /api/color-thresholds", () => {
 });
 
 describe("PUT /api/color-thresholds", () => {
-  it("persists a full set of thresholds for both scopes and a follow-up GET reflects it", async () => {
+  it("persists a full set of thresholds for all four scopes and a follow-up GET reflects it", async () => {
     const thresholds = {
       session: { yellowAt: 30, orangeAt: 60, redAt: 90 },
       weekly: { yellowAt: 40, orangeAt: 70, redAt: 95 },
+      sessionRate: { yellowAt: 35, orangeAt: 65, redAt: 92 },
+      weeklyRate: { yellowAt: 45, orangeAt: 75, redAt: 98 },
     };
     const putRes = await put("/api/color-thresholds", thresholds);
     assert.equal(putRes.status, 200);
@@ -109,7 +114,7 @@ describe("PUT /api/color-thresholds", () => {
     assert.deepEqual(getRes.body, thresholds);
   });
 
-  it("patches only the given scope, leaving the other untouched", async () => {
+  it("patches only the given scope, leaving the others untouched", async () => {
     await put("/api/color-thresholds", {
       session: { yellowAt: 30, orangeAt: 60, redAt: 90 },
       weekly: { yellowAt: 40, orangeAt: 70, redAt: 95 },
@@ -119,6 +124,8 @@ describe("PUT /api/color-thresholds", () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.body.session, { yellowAt: 30, orangeAt: 65, redAt: 90 });
     assert.deepEqual(res.body.weekly, { yellowAt: 40, orangeAt: 70, redAt: 95 });
+    assert.deepEqual(res.body.sessionRate, DEFAULTS.sessionRate);
+    assert.deepEqual(res.body.weeklyRate, DEFAULTS.weeklyRate);
   });
 
   it("patches only the given field within a scope, leaving its other fields untouched", async () => {
@@ -126,6 +133,18 @@ describe("PUT /api/color-thresholds", () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.body.weekly, { yellowAt: 45, orangeAt: 80, redAt: 100 });
     assert.deepEqual(res.body.session, DEFAULTS.session);
+  });
+
+  it("patches the new sessionRate/weeklyRate scopes independently of session/weekly", async () => {
+    const res = await put("/api/color-thresholds", {
+      sessionRate: { yellowAt: 20, orangeAt: 55, redAt: 85 },
+      weeklyRate: { yellowAt: 25, orangeAt: 60, redAt: 90 },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.sessionRate, { yellowAt: 20, orangeAt: 55, redAt: 85 });
+    assert.deepEqual(res.body.weeklyRate, { yellowAt: 25, orangeAt: 60, redAt: 90 });
+    assert.deepEqual(res.body.session, DEFAULTS.session);
+    assert.deepEqual(res.body.weekly, DEFAULTS.weekly);
   });
 
   // The `color_thresholds_updated` broadcast (so other connected clients pick
@@ -141,6 +160,11 @@ describe("PUT /api/color-thresholds", () => {
     ["session.yellowAt equal to session.orangeAt", { session: { yellowAt: 80, orangeAt: 80 } }],
     ["weekly.orangeAt greater than weekly.redAt", { weekly: { orangeAt: 100, redAt: 90 } }],
     ["a full session set out of order", { session: { yellowAt: 90, orangeAt: 50, redAt: 100 } }],
+    ["sessionRate not an object", { sessionRate: "bad" }],
+    [
+      "weeklyRate.yellowAt equal to weeklyRate.orangeAt",
+      { weeklyRate: { yellowAt: 80, orangeAt: 80 } },
+    ],
   ];
   for (const [name, body] of rejects) {
     it(`rejects ${name} with a 400 + structured error`, async () => {

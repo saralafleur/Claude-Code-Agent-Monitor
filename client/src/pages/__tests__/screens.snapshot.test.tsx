@@ -485,7 +485,27 @@ vi.mock("../../lib/api", async (importOriginal) => {
         // Project Detail page's repo/worktree topology + team-intake status
         // fetches - deterministically empty, same idiom as the rest of this
         // mock block.
-        repos: r({ project_id: "", repos: [], nonRepoFolders: [], detectedSiblings: [] }),
+        repos: r({
+          project_id: "",
+          repos: [],
+          nonRepoFolders: [],
+          detectedSiblings: [],
+          ignoredRepos: [],
+        }),
+        ignoreRepo: r({
+          project_id: "",
+          repos: [],
+          nonRepoFolders: [],
+          detectedSiblings: [],
+          ignoredRepos: [],
+        }),
+        unignoreRepo: r({
+          project_id: "",
+          repos: [],
+          nonRepoFolders: [],
+          detectedSiblings: [],
+          ignoredRepos: [],
+        }),
         intake: r({ project_id: "", initiatives: [] }),
       },
       plans: {

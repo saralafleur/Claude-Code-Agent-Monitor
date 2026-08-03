@@ -1588,7 +1588,8 @@
                     instead of losing data. Only one capture runs at a time — a second request
                     while one is in flight is rejected rather than racing the tmux session.
                     Same-origin guard included, shared with Run Claude. An
-                    <strong>Accounts</strong> panel above it tracks any number of other Claude
+                    <strong>Accounts</strong> panel above it — collapsible via a chevron on its
+                    own header, collapsed by default — tracks any number of other Claude
                     accounts side by side, each pointing at a <code>CLAUDE_CONFIG_DIR</code>
                     already logged in via <code>claude login</code> — per-account capture reads
                     that login's own OAuth credential straight from the CLI's storage (Keychain,
@@ -1610,7 +1611,8 @@
                     panel does the same for the weekly window's calendar-day
                     reset. A <strong>Color thresholds</strong> card lets you
                     configure exactly where each green/yellow/orange/red band
-                    starts, independently for the session and weekly scopes —
+                    starts, independently for the session and weekly scopes
+                    plus their <strong>Consumption rate</strong> counterparts —
                     shared live across every connected computer. Every
                     enabled account also captures automatically every 15
                     minutes (a disable-able background scheduler), so
@@ -1623,7 +1625,20 @@
                     its <code>CLAUDE_CONFIG_DIR</code>, since real work is
                     often done through whichever profile is logged into your
                     default <code>~/.claude</code> instead of this account's
-                    own named config directory.
+                    own named config directory. A <strong>Consumption
+                    rate</strong> card predicts, per account, when its session
+                    and weekly quotas will run out at their current pace — a
+                    %/hour trend fit over recent captures since the current
+                    window started, projected forward to the instant it would
+                    cross 100% only when actually rising — and colors the
+                    result by whether that predicted exhaustion lands before
+                    or after the window's own reset. Underneath each verdict,
+                    a small stats line gives the raw rate (%/hour for
+                    session, %/day for weekly) plus how many times faster or
+                    slower that is than the <strong>sustainable pace</strong>
+                    — the rate that would land exactly at 100% right when the
+                    window resets — since a bare rate alone can't say whether
+                    it's normal or alarming.
                   </p>
                 </div>
                 <div class="feature-card">
@@ -7298,7 +7313,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=89" defer></script>
+    <script src="i18n-content.js?v=92" defer></script>
     <script src="script.js?v=34" defer></script>
     <script>
       (function () {

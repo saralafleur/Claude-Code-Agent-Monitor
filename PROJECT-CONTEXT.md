@@ -145,6 +145,79 @@ through **both** the server resolver and the client helper. Coverage verdict for
 intake was BLIND (see `intake/2026-08-02-practice-kind-override/qa/qa-assessment.md`),
 primarily for the §9.6 reason below, not for this entry.
 
+**Pre-flag RETRACTED on closer read (2026-08-02, `intake/2026-08-02-trunk-drift-detection/`
+— count unchanged at 5, NOT an occurrence):** that intake's request brief pre-flagged
+this entry because a third `detour_dispositions.label` composer (commit-derived, for the
+new `trunk_drift` source) joins the two that exist today. The architect's read of the
+code overturned it and the PM concurred — **this entry does not apply to that surface.**
+`label` is already produced by two independent composers (`recordInferredDetour` takes
+the classifier's narrative; `backfillDeclaredDetours` composes inline from
+`events.data.title`/`.description`) and there is **no single correct value** the three
+are converging on — `buildDispositionPrompt` reads `f.label || ""` as an opaque string
+and has no expectation about how it was built. This entry's acceptance criterion ("same
+field, same value, across every consumer") is meaningless here; applying it by rote
+would force three genuinely different observations into one shape. **The generalizable
+test for this entry, stated for future reuse:** is there a single value multiple sites
+*should* agree on? If not, it is not this pattern — it is at most a code-organization
+concern (give the composers one home + one shared size contract), which is what the
+trunk-drift technical plan carries instead.
+
+**Design-time pre-flag (2026-08-02, `intake/2026-08-02-plan-lifecycle-value-ledger/`
+— NOT an occurrence, count unchanged at 5):** the "consumers announced before the code
+exists" form. Sara's ruling DEC-P2 (`AGENT-PLAN.md` becomes a read-only view; the DB
+leads) *names* the read surfaces in the request itself: the workbench UI, `ccam`, MCP,
+and an optional generated export. So the derived values this build introduces — pool
+size and time-since-last-closure — arrive with **consumers 2-4 already specified**,
+which is the exact point this entry's own history says the failure lands. Aggravating
+and specific to this build: `mcp/src/tools/` has **zero** plan-related tools and `ccam`
+reads plans only through `/api/plans/*`, so those consumers are **net-new code**, not
+adaptations of something that already shares a formula — three fresh opportunities to
+hand-write the same arithmetic. Required from day one, not as a later refactor: one
+shared computation (working name `server/lib/value-pool.js`'s `computePlanHealth`) and a
+**cross-consumer parity spec** driving one seeded DB state through the route, the CLI and
+the MCP tool. Note this is the spec QA's own 2026-08-01 note says never gets written,
+because the one-spec-file-per-module convention gives it no home — so it must be a named
+deliverable with a filename, not an aspiration.
+
+Second form pre-flagged in the same intake, at **feed** level rather than consumer level:
+the pool's direct-to-trunk-commit input can arrive by two routes — live
+`detectTrunkDrift()` (trunk-drift Phase 1a) or persisted `detour_dispositions` rows with
+`source='trunk_drift'` (Phase 1b). Both are legitimate; what is not legitimate is letting
+the same sha enter the pool once per route. Unit identity must be `('trunk_commit', sha)`
+**independent of the producing feed**, deduped once at assembly, with a named test —
+otherwise the day Phase 1b merges, every direct-to-trunk commit is counted twice and the
+health metric silently doubles. Unlike the retracted trunk-drift pre-flag above, this one
+*does* pass this entry's generalizable test: there is a single value (is this sha claimed
+or not?) that multiple sites must agree on.
+
+Third form, the same entry's **write-sequence** shape, pre-empted in the design: closure
+stamping. Copying `closed_at` from a plan onto its N claim rows at close time creates two
+places that can disagree; the recommended design derives a claim's closed-ness by join
+and gives `value_claims` no `closed_at` column at all. Recorded because the 2026-08-01
+build was burned by exactly this shape, and "derive, don't copy" is the cheaper cure than
+any guard over a copying writer.
+
+**QA-pass note (2026-08-02, `team-qa` strategist, same intake — count unchanged at 5,
+nothing built yet):** all three pre-flagged forms are answered by named, dated deliverables
+with filenames — DEC-5 (one `value-ledger.js`), DEC-4's dedupe test, no `closed_at` on
+claims — and **T6 `ledger-metrics-parity.test.js` is the first time this entry's
+"per-shape, not per-module" spec has been given a filename and a slice.** That is the
+right countermeasure and it works: name the file, and the spec gets written. It was
+applied **once**; three sibling obligations of the same shape stayed homeless in the same
+plan — cross-seam `unitKey` agreement (named in `risk.md` trap T2, adopted by neither test
+architect, and its own stated fallback of "then it becomes a WATCH row" also didn't
+happen), whole-namespace locale key parity (parked *inside* a component spec, and
+slice-5-gated), and route↔OpenAPI completeness (see the new CONTRACT-SPEC-DRIFT candidate
+below). **Two things to grade at build, not at plan:** (a) if T6 degenerates into "spawn
+the CLI with the API mocked," that is **this entry's 2026-08-01 fix regressing**, not a
+fresh gap — it must drive the real route and the real spawned process off one seeded DB;
+(b) DEC-4's dedupe test is **schema-blocked today** (`detour_dispositions.source` CHECK is
+`('inferred','declared')`, `server/db.js:701`), so it can only be seeded under
+`ignore_check_constraints` — a §9.3 B4-shaped fixture that is *future*-real rather than
+never-real. Defensible, but only with a tripwire asserting the CHECK still excludes
+`'trunk_drift'`, whose failure message is the instruction to re-verify against a real
+Phase-1b row. See `intake/2026-08-02-plan-lifecycle-value-ledger/qa/qa-assessment.md`.
+
 **Inverse-application warning for this surface (do not apply the criterion above
 by rote):** on the Coach/Playbook, `coach_observations.kind` (frozen at insert)
 and the live resolved kind (catalog + current override) are two legitimate,
@@ -278,6 +351,46 @@ new test fail, then restoring; the `assert.ok(true` / `|| true` sweep was re-run
 and stayed at 0. Suite 1189 → 1209. Applying §9.3 to the *fix* round, not just
 the build round, is what made "these four are fixed" a checkable claim rather
 than an assertion.
+
+**2026-08-02 — see also §9.7 HAND-SCOPED STRUCTURAL SCAN.** The commonest live shape of this entry on this project is now a *static guard* that is real and red-provable for the names it was hand-typed with, and silently blind to the rest of the surface. Green scan + incomplete scope reads as enforced.
+
+**2026-08-02, `intake/2026-08-02-trunk-drift-detection/` — STANDING RULE, promoted
+from three same-build recurrences.** That one Phase-1a build independently
+re-discovered this entry's shape **three separate times in three different
+guards**, and §9.7's shape **twice** — five vacuous guards in a single change
+set, each caught by a different reviewer pass, never by the suite:
+
+1. `assertSingleHome`'s own path resolution was broken (resolved relative to the
+   helper's directory, not the caller's), so the **MANDATORY §9.7 cure itself**
+   never once executed its real disposition-checking logic — it "passed" by
+   failing to load. *(Also a §9.7 instance: the same fix.)*
+2. The `execGit`-implicit-timeout guard searched from each call site to end of
+   file, so a `timeout` in a decorative comment or an unrelated later call
+   vacuously satisfied an earlier call that had none.
+3. The `update-check.js` behavior-preservation check used a **ref-less**
+   `git diff --stat -- <file>`, which compares worktree-to-*index* — so the
+   moment the file is `git add`-ed (as it would be at this build's own commit)
+   the guard goes permanently green regardless of any future edit.
+4. *(§9.7)* The i18n completeness scan hand-typed `TRUNK_DRIFT_KEYS` and missed
+   the `truncated` key added one fix-round earlier; and no test ever varied
+   `days`, so a locale reverted to a hardcoded `"past 7 days"` passed everything.
+
+Every "add a structural guard to prevent X" step in that build initially shipped
+a guard that did not test for X. The density is the finding: this is not a run of
+bad luck, it is the **default output shape** of guard-writing on this project.
+
+**Standing rule (adopted, applies to every build from here):** *a new
+structural/regression guard is not done until it has been observed **red against
+a real mutation of the thing it names**, and restored byte-identical.* Not "the
+suite is green," not "I read it and it looks right," not "the product code is
+correct" — a recorded red observation, or the guard does not count and the DoD
+row does not get ticked. The trunk-drift build converged on exactly this
+discipline ad hoc, three separate times, only because a reviewer forced it each
+time; making it standing is what stops the fourth. Two corollaries this build
+paid for: (a) a guard that fails to *load* looks identical to a guard that
+passes — assert the guard's own scope is non-empty; (b) any guard that shells
+out to `git diff` must be **ref-anchored** (`git diff <base> -- <path>`), because
+the un-anchored form silently self-disarms at commit time.
 
 ### 9.4 FIX-ROUND-REGRESSION (the fix round is a build round)
 
@@ -419,3 +532,319 @@ not evidence about this failure mode.
   a legacy-DB case **and** an interruption case per site. Grandfather the five
   existing sites with a dated reason (per `chronology-ordering.test.js`) rather
   than weakening the scan; retrofit them as their own change, with a backup.
+
+**Line-reference correction (2026-08-02).** This entry's citations of the `agents`
+rebuild (`line 1478`, `server/db.js:1478-1514`) are **stale** — `db.js` has grown
+since. The correct range is **`server/db.js:1560-1600`**: `PRAGMA foreign_keys = OFF`
+at 1562, `BEGIN;` at 1563, `CREATE TABLE agents_new` at 1566, `ALTER TABLE agents_new
+RENAME TO agents` at 1598, `COMMIT;` at 1599. The five non-atomic sites are at 776 and
+843 (`plan_items`), 1084 and 1674 (`token_usage`), and 1524 (`webhook_targets`). A
+stale pointer in the one entry whose whole instruction is "copy *this* site, not the
+other five" is itself a hazard — re-verify by grep (`ALTER TABLE (\w+) RENAME TO`,
+`CREATE TABLE (\w+)_new`, `PRAGMA foreign_keys = OFF`) before copying, not by line
+number.
+
+**Design-time pre-flag (2026-08-02, `intake/2026-08-02-trunk-drift-detection/`
+— NOT an occurrence, count unchanged):** adding a third `detour_dispositions.source`
+value (`'trunk_drift'`) requires widening `source TEXT NOT NULL CHECK(source IN
+('inferred','declared'))` (`server/db.js:701`) — a CHECK cannot be altered in place, so
+this is a full rebuild on the same table §9.5 was catalogued from. **This cost was
+already priced and accepted:** `intake/2026-08-01-build-project-manager/decisions.md`
+**WATCH-4** ("CHECK-constrained enums are rebuild-to-widen") names this exact column and
+states the rename-copy-drop dance would be required. WATCH-4 is now **due**.
+
+**The forcing function this entry has been waiting for.** As of 2026-08-02 there are
+**two** CHECK-widening rebuilds in flight within 24 hours of this entry being
+catalogued — `coach_observations.severity` (Task 1 of
+`intake/2026-08-02-practice-kind-override/build/.../build-task-list.md`) and
+`detour_dispositions.source` (this intake) — each planned as an independent hand-copy of
+`agents`. Hand-rolling the 2nd and 3rd is exactly how the existing 5-of-6 non-atomic
+population came to exist: atomicity is re-decided by hand per site, and the file offers
+the wrong precedent five times out of six. **PM recommendation (2026-08-02): build the
+`rebuildTableAtomically` helper above NOW and make these two its first call sites,
+whichever build starts first.** What must not happen is two more independent hand-rolls.
+
+**Candidate new pattern, NOT yet catalogued — SHARED-BUDGET-STARVATION (recorded here
+with an explicit promotion trigger so it is not re-argued from scratch).** Found by the
+architect and quantified by the PM during `intake/2026-08-02-trunk-drift-detection/`:
+`reconciliation.js`'s `buildDispositionPrompt` ends in `.slice(0, 8_000)` applied to the
+**whole** assembled prompt (preamble + PLAN ITEMS + every flagged detour + the JSON
+reply instruction), source-blind and sized for short session labels. The **tail** is
+what is cut — i.e. the reply-format instruction goes first — and
+`parseDispositionOutput` ends in `catch { return new Map(); }`, **silently**. So one
+oversized label voids an entire tick's verdicts for *unrelated* detours: every row stays
+`pending`, the suite stays green, nothing is logged. Live budget math (2026-08-02):
+preamble ~1.5 KB + largest real PLAN ITEMS block ~1.2 KB, `MAX_DETOURS_PER_TICK` = 10 →
+roughly **540 chars per detour label** of headroom. Today's sites are safe only *by
+construction* — every input is capped upstream (`focus-inference.js:288` caps labels at
+120 chars) — which is why this is not yet an entry. Other shared budgets with the same
+shape: `focus-inference.js` (6 K ×2), `focus-summary.js` (12 K / 16 K),
+`focus-audit.js` (4 K). **Promote to a real catalog entry the first time either (a) a
+second shared truncation budget is found taking unbounded input, or (b) this one
+actually fires.** Required now regardless, in the trunk-drift technical plan: one shared
+`MAX_DETOUR_LABEL_CHARS` applied where *every* composer returns; move the JSON reply
+instruction above the lists (or truncate per-item, never whole-prompt); and make the
+silent `catch` log loudly.
+
+**Generalizable lesson worth stating once (2026-08-02, PM, across
+`intake/2026-08-02-practice-kind-override/` and
+`intake/2026-08-02-plan-lifecycle-value-ledger/`): prefer a design that makes §9.5/§9.6
+INAPPLICABLE over one that COMPLIES with them.** Two consecutive intakes reached the
+strongest available outcome not by writing a better migration but by not needing one:
+practice-kind-override widened an existing JSON `config` blob instead of adding a column
+(zero DDL), and plan-lifecycle-value-ledger puts the whole portfolio layer in **new**
+tables via `CREATE TABLE IF NOT EXISTS` instead of re-keying `plans`/`plan_items` (zero
+`ALTER`, zero rebuilds — and, as a bonus, the `deletePlanItemsNotIn` data-loss trap at
+`plan-ingest.js:396` becomes structurally unreachable rather than guarded, because the
+delete statement has no analogue against tables ingest never writes). Compliance is a
+guard someone must keep correct forever; inapplicability is a property of the shape. When
+reviewing a schema change, ask whether the change can be relocated out of the constrained
+table before grading how well it complies.
+
+### 9.7 HAND-SCOPED STRUCTURAL SCAN (a guard that enumerates its own blind spot)
+
+The cure for §9.1/§9.2/§9.6 is, in every case, a **static scan** — assert the
+single-home / ordering / atomicity rule by reading source text, not just by testing
+outputs. Those scans work. What repeatedly fails is their **scope**: the set of names,
+queries, or call sites the scan looks at is **hand-typed by whoever wrote it**, and
+nothing compares that set against the real surface it is supposed to cover. Anything
+outside the hand-typed set is unguarded *and* the suite is green, so the checkmark
+reads as "enforced." This is strictly worse than no scan, for §9.3's reason: the next
+change reads the tick and stops looking.
+
+**Flagged in (6x — 4 previously recorded only as prose inside other entries, plus 2 at build time on 2026-08-02):**
+1. `intake/2026-08-01-build-project-manager/` — §9.2's chronology SQL scan used a body
+   class of ``[^`'"]``, silently skipping every statement containing a quoted literal
+   (5 of 11 candidates) and **reporting clean**. (§9.2 build-outcome lesson 1.)
+2. Same build — `single-writer-guard.test.js` scanned for copies of `applyDisposition`
+   but not of its helper `enqueueIfNotOpen`; the copy shipped and was the *wrong* one.
+   (§9.1 build-outcome note.)
+3. `intake/2026-08-02-practice-kind-override/` — the planned `playbook-resolver-guard`
+   scans for raw `practice.kind` reads and structurally cannot see `playbookStore.ts`'s
+   client-side copy of the same precedence rule. (§9.1 QA-pass note.)
+4. `intake/2026-08-02-trunk-drift-detection/` (QA pre-build, `qa-strategist`) —
+   `unit-tests.md` §2.1's single-home scan enumerates **3 of the 4** names moving to
+   `git-refs.js`. The omitted one, `execGit`, is the highest-severity rewiring risk in
+   the whole refactor per `risk.md` §8 trap 2, and the scan's own positive-match regex
+   (`/\{[^}]*\blistRemotes\b[^}]*\}\s*=\s*require\(["']\.\/git-refs["']\)/s`) **matches
+   the bad state** — a destructure that also pulls in `execGit`.
+
+**Acceptance criterion:** a structural scan's scope must be **derived** from the real
+surface (e.g. `Object.keys(require("../lib/git-refs"))`, the module's export list, the
+file's actual SQL literals), not hand-typed — and must **fail** when a member of that
+surface has no rule covering it. "The scan passed" is only meaningful alongside "the
+scan looked at everything."
+
+**How to comply:**
+- Enumerate from the artifact, then assert per member. Adding a 5th export / 12th query
+  / 7th rebuild site must break the scan until someone gives it a disposition.
+- Durable cure recommended (2026-08-02, not yet built): a shared
+  `assertSingleHome(sharedModulePath, { [consumerPath]: { shared: [...], private: [...] } })`
+  helper that reads the shared module's real exports and fails on any export with **no
+  explicit disposition** at a listed consumer. Applied to trunk-drift it would have
+  forced "`execGit`: private in `update-check.js`" to be written down — and then to be
+  checked.
+- Anything deliberately left hand-typed gets a dated grandfather entry with a reason,
+  per `chronology-ordering.test.js`'s `GRANDFATHERED_QUERIES` — never a weakened scan.
+- **Pin the behavior, not a dead default.** trunk-drift's near-miss: the proposed guard
+  ("`update-check.js`'s `execGit` still defaults to `120_000`") pins a value **no call
+  site reads** — all 9 call sites pass an explicit `timeout`, incl. `git fetch`'s own
+  `{ timeout: 120_000 }` at `update-check.js:139`. That assertion is green whether or
+  not the feature works (§9.3). Assert the *call site's* effective value instead.
+
+**Design-time pre-flag (2026-08-02, `intake/2026-08-02-plan-lifecycle-value-ledger/`
+— NOT an occurrence, count unchanged at 4, confirmed by direct read):**
+`server/__tests__/chronology-ordering.test.js:80-86` hand-types `filesToScan` as exactly
+**five** files (`server/db.js`, `lib/detours.js`, `lib/reconciliation.js`,
+`routes/detours.js`, `routes/decision-queue.js`). The value-ledger build adds a new
+`server/lib/value-pool.js` whose focus-bracketing queries walk `events`/`focus_inferences`/
+`sessions` — i.e. it is born **outside the scan's scope**, so every §9.2 obligation in that
+module would be unenforced while the suite stays green and the DoD shows a tick. Registering
+the file in the same commit is the minimum; **the durable cure is to stop hand-typing the
+list**: derive it from `server/lib/*.js` + `server/routes/*.js` and require an explicit
+per-file disposition (scanned, or dated-grandfathered-with-a-reason), so adding a 6th lib
+file **breaks the scan** until someone dispositions it. Same instruction for that build's
+new closure single-writer guard: derive its scope from the module's real export list
+(`assertSingleHome`), never from typed names. This entry has now been flagged five times
+and its recommended cure remains unbuilt — the next build that touches a scanned surface
+should be the one that builds it.
+
+**BUILT, 2026-08-02 — `intake/2026-08-02-trunk-drift-detection/` (occurrences 5 and 6,
+and the cure this entry has been asking for since it was catalogued).**
+`server/__tests__/helpers/single-home.js` now exists and exports
+`assertSingleHome(sharedModulePath, { [consumerRelPath]: { shared, private, absent } })`.
+It derives scope from `Object.keys(require(<sharedModule>))`, computes **each consumer's
+own** relative import specifier from the filesystem (never reusing the test file's path
+string), and fails naming both the undispositioned export and the consumer that lacks a
+disposition for it. Live consumer: `server/__tests__/git-refs.test.js` §1, covering
+`git-refs.js` → `update-check.js` (`execGit` = **private**, exactly the disposition trap
+occurrence 4 above predicted) and → `trunk-drift.js`. Proven red by injecting a 5th
+export, twice, with two different canary names (implementer's, then a verifier-chosen
+one). **Apply it to the next scan that needs a scope** — don't write a fresh one.
+
+Two fresh occurrences in that same build, both caught in review, both now fixed —
+recorded because they show the failure survives even in the build that builds the cure:
+5. `assertSingleHome`'s **own** path resolution was anchored to the helper's directory
+   instead of the caller's, so the scan never loaded and never ran its real logic — a
+   hand-scoped scan whose effective scope was empty, while the DoD showed a tick.
+   (Also §9.3.)
+6. `client/src/i18n/__tests__/i18n.test.ts`'s trunkDrift completeness scan hand-typed
+   `TRUNK_DRIFT_KEYS` with 7 names and missed the 8th (`truncated`) added one fix-round
+   earlier. Fixed by deriving from `Object.keys(en.projectDetail.trunkDrift)` — the en
+   locale JSON is now the registry, so a new key automatically demands all 4 locales.
+
+**Known remaining hand-typed member on this surface (accepted, documented in place):**
+`client/src/lib/types.ts`'s `TrunkDriftResult["skipped"]` union duplicates the server's
+`TRUNK_DRIFT_ROUTE_SKIP_REASONS` by hand, because a CJS server module cannot be imported
+across the Vite/Node boundary. Per this entry's own "how to comply," it carries a doc
+comment naming the canonical source rather than a weakened scan. Revisit if build-time
+codegen or a shared JSON manifest ever becomes cheap.
+
+**QA-pass note (2026-08-02, `team-qa` strategist, `intake/2026-08-02-plan-lifecycle-value-ledger/`
+— NOT an occurrence, count unchanged at 6; written after the BUILT note above and
+reconciled against it):** that plan adopts **both** halves (DEC-9: same-commit registration
+of the four new server files *and* a derived `filesToScan` scope), and its `unit-tests.md`
+§8 specifies the per-file disposition map plus a written red-proof — drop a scratch
+`server/lib/zz-scratch.js` containing an undispositioned LIMITed SELECT and require the
+suite to fail on **scope**, not on SQL shape. Best-specified version of this cure to date.
+Three corrections now that `assertSingleHome` exists:
+1. **Consume the helper, do not re-derive.** `server/__tests__/helpers/single-home.js` is
+   built and red-proven but **still unmerged** (verified 2026-08-02: absent from `master`,
+   present only in the trunk-drift worktree). It arrives with the DEC-2 dependency that
+   already hard-gates that build's slice 1 — so "closure single-writer guard with
+   export-derived scope" and the T4 import rogue-writer scan must both be *call sites of
+   `assertSingleHome`*. A second hand-rolled scope-derivation helper would be §9.1's
+   "scan for copies of its *helpers* too" recurring at the guard level, in the same week.
+2. **The live risk is DEC-9's "bounded fallback,"** which permits landing
+   registration-only and deferring the derived scope — the exact silent downgrade this
+   entry is about, on the build nominated to end it. The fallback may only be taken with a
+   dated `decisions.md` row naming the pre-existing violator set; never as the default
+   under schedule pressure.
+3. **Occurrence 6's i18n fix should be widened while someone is in there.** Deriving
+   `TRUNK_DRIFT_KEYS` from `Object.keys(en.projectDetail.trunkDrift)` fixes that key group;
+   `i18n.test.ts` as a whole is still a hand-typed registry that accretes one block per
+   build, with **no whole-namespace key-set parity assertion**. A plural-aware audit over
+   all 21 namespaces × 4 locales, run 2026-08-02, finds a live divergence the suite cannot
+   see: `sessions:remoteSourceBadgeTitle` exists in `en` only (ko/vi/zh carry that string
+   under a *different* namespace, `settings.json`). **Shaping instruction:** a naive
+   `deepEqual(sorted(keys(en)), sorted(keys(locale)))` lands red on **8 legitimate pairs**
+   on its first run, because i18next gives zh/vi/ko a single plural category — `*_one` keys
+   correctly do not exist there. A parity test that goes red for a legitimate reason on day
+   one gets weakened, not fixed (§9.3's whole history). Strip/exempt
+   `_one|_two|_few|_many|_zero` for single-plural-form locales first; then it is green
+   today except for the one real divergence, which should be fixed in the same commit.
+
+---
+
+### Candidate new pattern, NOT yet catalogued — CWD-IDENTITY-FANOUT
+
+Recorded with an explicit promotion trigger so it is not re-argued from scratch (same
+convention as SHARED-BUDGET-STARVATION under §9.6).
+
+**The shape:** state keyed by `cwd` silently fans out to N rows for one logical thing,
+because a "working directory" is not a stable identity. Found by the PM during
+`intake/2026-08-02-plan-lifecycle-value-ledger/` by reading Sara's **live**
+`~/.claude/agent-dashboard/dashboard.db`, not by reading code: **10 `plans` rows represent
+8 distinct plans**, via three independent mechanisms —
+
+1. **Case-insensitive filesystem.** `/Users/sara/CODE-LOCAL/SARA/DND` and `.../dnd` are
+   the *same directory* (`stat` confirms identical inode `17996204`), yet exist as two
+   `plans` rows with **identical** `content_hash` `966c7a8f…`, mapped in `project_paths` to
+   **two different `project_id`s** (`52cd5a8c…`, `26b989c5…`).
+2. **Effort worktrees.** `/SARA/New-Group-efforts/2026-08-02-clockify-verify-button` has
+   its own `plans` row with a `content_hash` byte-identical to `/SARA/New Group`'s, and
+   **no `project_paths` mapping at all** — so work done in effort worktrees has no project
+   home in any project-keyed aggregation.
+3. **Renamed directories.** `games/lost-an-adventure-…` (11 items, `missing_at` set) vs
+   `games/lost-and-found-an-adventure-…` (14 items) — a stale row left by a rename.
+
+**Why it is worth a promotion trigger.** It is harmless while `cwd`-keyed state is only a
+*mirror* of a file (today's `plans`). It becomes a correctness bug the moment something
+**aggregates by project** or **claims to be complete** — the value-ledger's own headline
+question ("what value did this project deliver across its life") would answer from one of
+two project ids and silently omit the other, and a per-cwd DEC-P2 import would create two
+generation-1s from one physical file.
+
+**Cures recommended in that intake (not yet built):** key import idempotency on
+`content_hash` + `project_id`, never on `cwd`; resolve every cwd through its git repo root
+/ common-dir before attributing value, so worktree cwds fold into their parent repo; and
+treat "N rows, one `content_hash`" as a reportable condition rather than normal.
+
+**Promote to a real catalog entry the first time either (a) a second `cwd`-keyed surface is
+found fanning out the same way, or (b) a shipped aggregate is shown to under- or
+double-report because of it.** Until then, anyone adding project-level aggregation should
+read this and check their keys.
+
+---
+
+### Candidate new pattern, NOT yet catalogued — CONTRACT-SPEC-DRIFT
+
+Recorded 2026-08-02 by `qa-strategist` during
+`intake/2026-08-02-plan-lifecycle-value-ledger/`, with an explicit promotion trigger (same
+convention as SHARED-BUDGET-STARVATION / CWD-IDENTITY-FANOUT). Related to §9.7 but
+distinct: §9.7 is a scan whose **scope** is hand-typed; this is a canonical artifact with
+**no scan at all**.
+
+**The shape:** an artifact the repo declares to be the source of truth for a contract is
+maintained **by hand, per feature**, and nothing compares it to the real surface. It drifts
+silently; the suite is green because no test ever looks at it; and the drift is invisible
+precisely because the artifact is the thing people consult *instead of* reading the code.
+
+**Live evidence (all verified by direct read, 2026-08-02):**
+- `server/README.md:523` calls the OpenAPI spec "the source of truth for request/response
+  contracts," and the committed `openapi.yaml` "mirrors the live spec."
+- `openapi.yaml` was last regenerated **2026-07-30** and has **zero** entries for
+  `topology`, `intake-status`, `color-thresholds` or `terminal-focus` — four route families
+  merged since. 32 `/api/*` mounts in `server/index.js`, 96 path entries in the yaml.
+- **No test anywhere asserts operationId uniqueness or route↔spec completeness.** Zero
+  `operationId` references under `server/__tests__/`; `api.test.js` only smoke-checks that
+  `/api/openapi.json` returns `openapi: "3.0.3"`.
+- The forcing case: `server/openapi-extra/plans.js:236` already owns
+  `operationId: "getProjectPlans"` for the **legacy** `GET /api/plans/project/{projectId}`
+  rollup. The incoming `/api/project-plans` namespace collides with it by name — a DEC-14
+  "the two plan surfaces must never blend" failure landing at the docs layer, where every
+  generated client reads it.
+
+**Why it repeats:** the spec fragments under `server/openapi-extra/` are enumerated by hand
+per feature, and the DoD's docs line names `docs/API.md` / `ARCHITECTURE.md` / the READMEs
+but **not** the spec — so the artifact with the strongest correctness claim is the one with
+the weakest checklist coverage.
+
+**Cure recommended (not yet built):** one `server/__tests__/openapi-contract.test.js` that
+(a) asserts operationId uniqueness across the whole merged spec and (b) derives its scope
+from the router registry — every `app.use("/api/…")` mount in `server/index.js` must have
+at least one path entry — with the four known-missing families dated-grandfathered per
+`chronology-ordering.test.js`'s convention rather than the scan being weakened. Add
+`npm run openapi:yaml` to the docs step of any change-set that adds or changes a route.
+
+**Promote to a real catalog entry the first time either (a) a second hand-maintained
+canonical artifact is found drifting the same way (candidates: the committed `openapi.yaml`
+vs the live spec, `wiki/i18n-content.js`, `docs/DATABASE.md` vs `server/db.js`'s real
+schema), or (b) a shipped consumer is shown to have been built against the stale artifact.**
+
+---
+
+## Planning notes for `team-intake` / `team-qa`
+
+### Exact CLI flags in a plan need an empirical check, not a documentation read
+
+**2026-08-02, `intake/2026-08-02-trunk-drift-detection/`.** `technical-plan.md` §4
+specified the detector's git walk as
+`git log … --not --exclude=refs/heads/<branch> --branches`. That is **wrong**: per
+`git-rev-list(1)`, patterns given to `--exclude` "should not begin with `refs/heads`"
+when applied to `--branches` — a `refs/heads/`-prefixed pattern matches nothing and is
+silently ignored. The correct form is the **bare branch name**,
+`--exclude=<branch>`. The implementer caught it and verified the semantics
+empirically against real fixtures; had it shipped as planned, DEC-5's clause 3
+(the false-positive guard, the single most load-bearing predicate in the change)
+would have been a **no-op** while every test that didn't specifically exercise it
+stayed green.
+
+**The generalizable lesson:** when a plan pins exact CLI flags — git, `find`,
+`rsync`, `ffmpeg`, anything with pattern/ref-matching semantics — the plan is
+asserting a behavior it has not run. A flag that is *accepted* is not a flag that
+*matched*. Plans should either (a) mark such flags as "semantics unverified,
+implementer must confirm empirically," or (b) carry a one-line recorded
+verification (the actual command run + its actual output) beside the flag. And the
+corresponding test should be able to fail if the flag silently no-ops — which here
+means a fixture where the excluded set is non-empty, not just a happy-path walk.

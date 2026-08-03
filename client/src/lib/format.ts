@@ -69,6 +69,8 @@
  * - `formatModelName` — exported API; see TSDoc on the symbol for behavior.
  * - `isExpensiveModel` — exported API; see TSDoc on the symbol for behavior.
  * - `pathBasename` — exported API; see TSDoc on the symbol for behavior.
+ * - `pathTail` — exported API; see TSDoc on the symbol for behavior.
+ * - `splitCommonPrefix` — exported API; see TSDoc on the symbol for behavior.
  *
  * ## Testing pointers
  * - Prefer colocated `__tests__` with Vitest + Testing Library for UI.
@@ -755,4 +757,47 @@ export function pathTail(p: string | null | undefined): string | null {
   const parts = trimmed.split("/").filter(Boolean);
   if (parts.length === 0) return trimmed || null; // degenerate case: "/" or ""
   return parts.slice(-2).join("/");
+}
+
+/** Result of {@link splitCommonPrefix}. */
+export interface CommonPathSplit {
+  /** Shared ancestor directory (no trailing slash), or `""` when the only
+   *  shared ancestor is the filesystem root, or fewer than two paths were given. */
+  common: string;
+  /** Per-path remainder beyond `common`, same order/length as the input.
+   *  Never empty - a path equal to `common` itself renders as `"."`.
+   *  Equals the untouched input paths whenever `common === ""`. */
+  suffixes: string[];
+}
+
+/**
+ * Finds the shared ancestor directory across a set of absolute POSIX paths
+ * and each path's remainder beyond it - lets a folder picker with several
+ * mapped folders under the same project root show that root once instead of
+ * repeating it in every row.
+ * @param paths Absolute POSIX paths. Fewer than two degenerates safely
+ *   (nothing to share).
+ * @returns `{ common, suffixes }` (see {@link CommonPathSplit}).
+ * @remarks Compares whole path segments (split on `/`), not raw characters,
+ *   so `/Users/sara/proj` and `/Users/sara/project` correctly share only
+ *   `/Users/sara`, not the character-wise prefix `/Users/sara/proj`.
+ * @example
+ *   splitCommonPrefix(["/Users/sara/code/a", "/Users/sara/code/b"])
+ *   // { common: "/Users/sara/code", suffixes: ["a", "b"] }
+ *   splitCommonPrefix(["/Users/sara/code/a", "/Users/sara/code/a/sub"])
+ *   // { common: "/Users/sara/code/a", suffixes: [".", "sub"] }
+ *   splitCommonPrefix(["/Users/sara/a", "/opt/b"])
+ *   // { common: "", suffixes: ["/Users/sara/a", "/opt/b"] }
+ */
+export function splitCommonPrefix(paths: string[]): CommonPathSplit {
+  if (paths.length < 2) return { common: "", suffixes: [...paths] };
+  const segLists = paths.map((p) => p.split("/").filter(Boolean));
+  const first = segLists[0] as string[];
+  const minLen = Math.min(...segLists.map((s) => s.length));
+  let shared = 0;
+  while (shared < minLen && segLists.every((s) => s[shared] === first[shared])) shared++;
+  if (shared === 0) return { common: "", suffixes: [...paths] }; // nothing shared beyond "/"
+  const common = "/" + first.slice(0, shared).join("/");
+  const suffixes = segLists.map((s) => s.slice(shared).join("/") || ".");
+  return { common, suffixes };
 }

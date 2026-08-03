@@ -587,7 +587,7 @@ Managed through the `/api/monitors` route (`GET`/`PUT`); every `PUT` is broadcas
 
 ### color_thresholds
 
-Global Usage-page color thresholds — a **singleton row** (`id` pinned to `1`, enforced by the `CHECK`), not per-user: this app has no accounts, so the row holds the one setting every computer connected to the dashboard reads and writes. Controls where the green/yellow/orange/red bands fall for every percentage-driven color on the Usage page (session/weekly rate-limit bars, the session-reset marker, the "capped by weekly" callout). Two independent scopes, `session` and `weekly`, since the session (5h) window and the weekly window are separate quotas that shouldn't have to share one ramp.
+Global Usage-page color thresholds — a **singleton row** (`id` pinned to `1`, enforced by the `CHECK`), not per-user: this app has no accounts, so the row holds the one setting every computer connected to the dashboard reads and writes. Controls where the green/yellow/orange/red bands fall for every percentage-driven color on the Usage page (session/weekly rate-limit bars, the session-reset marker, the "capped by weekly" callout, the Consumption Rate card). Four independent scopes: `session`/`weekly` (raw %-used on a 0-100 scale — the session (5h) window and the weekly window are separate quotas that shouldn't have to share one ramp) plus `session_rate`/`weekly_rate` (the Consumption Rate card's pace-ratio — a RAW multiplier of the sustainable pace that would land exactly at 100% right when that window resets, e.g. `1.6` for "1.6x sustainable pace," not a percentage — so its thresholds live on their own small-decimal scale, defaulting to 0.5/1.0/1.5).
 
 ```sql
 CREATE TABLE color_thresholds (
@@ -598,6 +598,12 @@ CREATE TABLE color_thresholds (
     weekly_yellow_at REAL NOT NULL DEFAULT 50,
     weekly_orange_at REAL NOT NULL DEFAULT 80,
     weekly_red_at REAL NOT NULL DEFAULT 100,
+    session_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
+    session_rate_orange_at REAL NOT NULL DEFAULT 1.0,
+    session_rate_red_at REAL NOT NULL DEFAULT 1.5,
+    weekly_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
+    weekly_rate_orange_at REAL NOT NULL DEFAULT 1.0,
+    weekly_rate_red_at REAL NOT NULL DEFAULT 1.5,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
@@ -609,6 +615,8 @@ CREATE TABLE color_thresholds (
 | `id` | INTEGER | NO | Primary key, always `1` (CHECK-constrained singleton) |
 | `session_yellow_at` / `session_orange_at` / `session_red_at` | REAL | NO | Percentage each band STARTS at for the session (5h) window; below `session_yellow_at` always renders green |
 | `weekly_yellow_at` / `weekly_orange_at` / `weekly_red_at` | REAL | NO | Same, for the weekly window |
+| `session_rate_yellow_at` / `session_rate_orange_at` / `session_rate_red_at` | REAL | NO | Same bands, for the Consumption Rate card's session-window pace-ratio (a raw multiplier, e.g. 1.5, not a percentage) |
+| `weekly_rate_yellow_at` / `weekly_rate_orange_at` / `weekly_rate_red_at` | REAL | NO | Same, for the weekly-window pace-ratio |
 | `updated_at` | TEXT | NO | ISO 8601 timestamp of the last edit |
 
 Managed through the `/api/color-thresholds` route (`GET`/`PUT`); every `PUT` is broadcast over the WebSocket as `color_thresholds_updated` so other connected clients pick up the change live. See [docs/API.md → Color Thresholds](./API.md#color-thresholds).
@@ -669,7 +677,8 @@ CREATE TABLE projects (
     name TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    pinned INTEGER NOT NULL DEFAULT 0
+    pinned INTEGER NOT NULL DEFAULT 0,
+    sibling_scan_enabled INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE project_paths (
@@ -677,8 +686,22 @@ CREATE TABLE project_paths (
     project_id TEXT NOT NULL,
     cwd TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    terminal_default INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+
+CREATE TABLE project_ignored_repos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    ignored_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX idx_project_ignored_repos_project_path
+    ON project_ignored_repos(project_id, path);
 ```
 
 **`projects` columns:**
@@ -690,6 +713,7 @@ CREATE TABLE project_paths (
 | `created_at` | TEXT | NO | ISO 8601 creation timestamp |
 | `updated_at` | TEXT | NO | ISO 8601 timestamp of the last rename or pin/unpin |
 | `pinned` | INTEGER | NO | `0`/`1` boolean. `1` floats the project to the top of `GET /api/projects` (`ORDER BY pinned DESC, name COLLATE NOCASE ASC`), ahead of the regular alphabetical order. Set via `PATCH /api/projects/:id` |
+| `sibling_scan_enabled` | INTEGER | NO | `0`/`1` boolean, default `0`. Gates the `"disk-sibling"` source in `GET /api/projects/:id/repos`'s `detectedSiblings` — the live scan of this project's parent directory for other git repos sitting next to it. Off by default because that scan surfaces every repo in the same parent folder regardless of relatedness, which is noisy in a flat workspace holding many unrelated repos; the `"context"` (PROJECT-CONTEXT.md) and `"disk-nested"` (children) sources are unaffected and always run. Set via `PATCH /api/projects/:id` |
 
 **`project_paths` columns:**
 
@@ -699,8 +723,22 @@ CREATE TABLE project_paths (
 | `project_id` | TEXT | NO | FK to `projects.id`, `ON DELETE CASCADE` — deleting a project drops its mappings, not its sessions |
 | `cwd` | TEXT | NO | Working directory this project claims. `UNIQUE` — a folder can only belong to one project at a time |
 | `created_at` | TEXT | NO | ISO 8601 timestamp the mapping was added |
+| `terminal_default` | INTEGER | NO | `0`/`1` boolean. Whether this folder is offered as a choice in `POST /api/projects/:id/open-terminal`'s folder picker — off excludes it from both the picker and that route's own `cwd` validation. Column default is `1` (so every folder mapped before this column existed reads as enabled), but application logic in `POST /api/projects` and `POST /api/projects/:id/paths` (`server/routes/projects.js`) explicitly writes `0` for every folder after a project's first — only a project's first-ever mapped folder is left on the column default. Set via `PATCH /api/projects/:id/paths/:pathId` |
 
-Managed through the `/api/projects/*` routes. Every project mutation (create, rename, folder add/remove, delete) is plain CRUD, not broadcast over the WebSocket — re-fetched by the client after each mutation like `webhook_targets`. See [docs/API.md → Projects](./API.md#projects).
+**`project_ignored_repos` columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Auto-increment primary key (the id passed to the un-ignore endpoint) |
+| `project_id` | TEXT | NO | FK to `projects.id`, `ON DELETE CASCADE` |
+| `path` | TEXT | NO | Resolved absolute path of the dismissed suggestion. `UNIQUE` per `(project_id, path)` |
+| `name` | TEXT | NO | The suggestion's name as of when it was ignored (captured, not re-derived) |
+| `source` | TEXT | NO | The suggestion's `detectedSiblings[].source` as of when it was ignored (`"context"` / `"disk-sibling"` / `"disk-nested"`) |
+| `ignored_at` | TEXT | NO | ISO 8601 timestamp; refreshed (not duplicated) on a re-ignore of the same path |
+
+A project-scoped "don't suggest this again" list for the Project Detail page's Repos card — see [`server/lib/repo-topology.js`](../server/lib/repo-topology.js). `buildProjectRepoTopology` filters `detectedSiblings` against this table on every call and returns it as `ignoredRepos`; nothing about the underlying disk scan is cached, only the dismissal itself. Managed through `POST`/`DELETE /api/projects/:id/ignored-repos` — see [docs/API.md → Repo & Worktree Topology](./API.md#repo--worktree-topology).
+
+Managed through the `/api/projects/*` routes. Every project mutation (create, rename, folder add/remove, folder terminal-default toggle, delete) is plain CRUD, not broadcast over the WebSocket — re-fetched by the client after each mutation like `webhook_targets`. See [docs/API.md → Projects](./API.md#projects).
 
 ---
 

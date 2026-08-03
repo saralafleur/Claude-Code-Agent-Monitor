@@ -38,6 +38,8 @@
   },
   "accounts": {
     "title": "Accounts",
+    "expand": "Expand accounts",
+    "collapse": "Collapse accounts",
     "refreshAll": "Refresh all",
     "refreshingAll": "Refreshing…",
     "addAccount": "Add account",
@@ -77,13 +79,29 @@
       "cappedByWeekly": "Capped by weekly ({{pct}}% left)",
       "weeklyResetsIn": "Weekly resets in {{when}}"
     },
+    "consumptionRate": {
+      "title": "Consumption rate",
+      "subtitle": "Predicted, from each account's recent pace, whether it will run out before its session/weekly window resets.",
+      "session": "Session",
+      "weekly": "Weekly",
+      "notEnoughData": "Not enough data yet",
+      "onTrack": "On track — resets before limit",
+      "runsOutIn": "Runs out in",
+      "shortBy": "Short by",
+      "rateFlat": "{{rate}} (not rising)",
+      "ratePace": "{{rate}} · {{pace}}× sustainable pace",
+      "observedOver": "observed over {{span}}"
+    },
     "colorThresholds": {
       "title": "Color thresholds",
       "subtitle": "Configure where the green → yellow → orange → red usage colors switch over, applied across this page.",
       "scope": {
         "session": "Session window (5h)",
-        "weekly": "Weekly window"
+        "weekly": "Weekly window",
+        "sessionRate": "Session consumption rate",
+        "weeklyRate": "Weekly consumption rate"
       },
+      "rateScopeDescription": "Measured as a multiple of sustainable pace, not a percentage — 1.0 means burning exactly fast enough to hit 100% right at reset. Typically set between 0.5 and 1.5.",
       "yellowLabel": "Yellow starts at",
       "orangeLabel": "Orange starts at",
       "redLabel": "Red starts at",

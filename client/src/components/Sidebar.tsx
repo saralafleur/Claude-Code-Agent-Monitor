@@ -1,6 +1,6 @@
 /**
  * @file Sidebar.tsx
- * @description Defines the Sidebar component that provides navigation links to different sections of the application, displays the connection status, and includes a toggle button for collapsing or expanding the sidebar. The component uses React Router's NavLink for navigation and Lucide icons for visual representation. The collapsed state of the sidebar is stored in localStorage to persist user preferences across sessions. A "new session" icon button opens the shared OpenTerminalModal project/session picker, mirroring the Kanban board's own entry point to it - when expanded it sits beside the Projects nav row, and when collapsed it becomes its own icon-only row directly above the Projects icon.
+ * @description Defines the Sidebar component that provides navigation links to different sections of the application, displays the connection status, and includes a toggle button for collapsing or expanding the sidebar. The component uses React Router's NavLink for navigation and Lucide icons for visual representation. The collapsed state of the sidebar is stored in localStorage to persist user preferences across sessions. A "new session" icon button opens the shared OpenTerminalModal project/session picker, mirroring the Kanban board's own entry point to it - when expanded it sits beside the Projects nav row, and when collapsed it becomes its own icon-only row directly above the Projects icon. A "More" toggle sits above the language selector and hides/shows the update-check button, language selector, and GitHub/website links as one group (Live connection status always stays visible); that group's visibility persists in localStorage independent of the whole-sidebar rail collapse. The whole-sidebar rail collapse/expand button is the last control at the bottom of the sidebar, below the footer.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -141,6 +141,7 @@ const NAV_GROUPS = [
 
 const STORAGE_KEY = "sidebar-collapsed";
 const STATS_STORAGE_KEY = "sidebar-connection-stats";
+const MORE_STORAGE_KEY = "sidebar-more-expanded";
 const RECENT_EVENTS_CAP = 8;
 const SUPPORTED_LANGUAGES = ["en", "zh", "vi", "ko"] as const;
 type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -158,6 +159,15 @@ function loadCollapsed(): boolean {
     return localStorage.getItem(STORAGE_KEY) === "true";
   } catch {
     return false;
+  }
+}
+
+function loadMoreExpanded(): boolean {
+  try {
+    const raw = localStorage.getItem(MORE_STORAGE_KEY);
+    return raw === null ? true : raw === "true";
+  } catch {
+    return true;
   }
 }
 
@@ -228,6 +238,19 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  // "More" section - update-check, language selector, and GitHub/website
+  // links can be hidden as a group, independent of the whole-sidebar rail
+  // collapse. Live status stays visible regardless of this toggle.
+  const [moreExpanded, setMoreExpanded] = useState(loadMoreExpanded);
+  const toggleMore = useCallback(() => {
+    setMoreExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(MORE_STORAGE_KEY, String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
   // Project→session picker, reachable from the Projects nav row - same
   // OpenTerminalModal the Kanban board's header button opens, just a second
   // entry point so it's available without leaving the sidebar.
@@ -559,74 +582,78 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
         )}
       </div>
 
-      {/* Language controls */}
+      {/* "More" visibility toggle - hides/shows the update-check button,
+          language selector, and GitHub/website links below as one group.
+          Live status is unaffected. */}
       <div className="px-2 pb-2 flex-shrink-0">
-        {collapsed ? (
-          <button
-            onClick={toggleLang}
-            className="w-full h-9 rounded-lg border border-border bg-surface-2 text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors flex flex-col items-center justify-center gap-0.5"
-            title={switchLanguageTitle}
-            aria-label={switchLanguageTitle}
-          >
-            <Languages className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-semibold leading-none">
-              {t(`nav:languageShort.${currentLanguage}`)}
-            </span>
-          </button>
-        ) : (
-          <div className="rounded-lg border border-border bg-surface-2 p-2">
-            <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-              {t("nav:language")}
-            </p>
-            <div className="mt-2 grid grid-cols-4 gap-1">
-              {SUPPORTED_LANGUAGES.map((language) => {
-                const active = language === currentLanguage;
-                return (
-                  <button
-                    key={language}
-                    onClick={() => changeLanguage(language)}
-                    aria-pressed={active}
-                    aria-label={t(`nav:languageNames.${language}`)}
-                    title={t(`nav:languageNames.${language}`)}
-                    className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                      active
-                        ? "bg-accent/20 text-accent border border-accent/30"
-                        : "bg-surface-1 text-gray-400 border border-border hover:bg-surface-3 hover:text-gray-200"
-                    }`}
-                  >
-                    {t(`nav:languageShort.${language}`)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Collapse toggle */}
-      <div className="px-2 py-2 flex-shrink-0">
         <button
-          onClick={onToggle}
-          className={`w-full h-10 rounded-lg border border-border bg-surface-2 transition-colors ${
-            collapsed
-              ? "flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-surface-3"
-              : "flex items-center gap-2.5 px-3 text-gray-300 hover:text-gray-100 hover:bg-surface-3"
+          type="button"
+          onClick={toggleMore}
+          aria-expanded={moreExpanded}
+          title={moreExpanded ? t("nav:collapseMore") : t("nav:expandMore")}
+          aria-label={moreExpanded ? t("nav:collapseMore") : t("nav:expandMore")}
+          className={`w-full h-8 rounded-lg border border-border bg-surface-2 text-gray-400 hover:text-gray-200 hover:bg-surface-3 transition-colors ${
+            collapsed ? "flex items-center justify-center" : "flex items-center gap-2 px-3"
           }`}
-          title={collapsed ? t("nav:expand") : t("nav:collapse")}
-          aria-label={collapsed ? t("nav:expand") : t("nav:collapse")}
         >
-          {collapsed ? (
-            <PanelLeftOpen className="w-4 h-4 flex-shrink-0" />
+          {moreExpanded ? (
+            <ChevronUp className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
           ) : (
-            <>
-              <PanelLeftClose className="w-4 h-4 flex-shrink-0" />
-              <span className="text-[11px] font-semibold uppercase tracking-wide">
-                {t("nav:collapseShort")}
-              </span>
-            </>
+            <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
+          )}
+          {!collapsed && (
+            <span className="text-[11px] font-semibold uppercase tracking-wide">
+              {t("nav:moreShort")}
+            </span>
           )}
         </button>
       </div>
+
+      {/* Language controls */}
+      {moreExpanded && (
+        <div className="px-2 pb-2 flex-shrink-0">
+          {collapsed ? (
+            <button
+              onClick={toggleLang}
+              className="w-full h-9 rounded-lg border border-border bg-surface-2 text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors flex flex-col items-center justify-center gap-0.5"
+              title={switchLanguageTitle}
+              aria-label={switchLanguageTitle}
+            >
+              <Languages className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-semibold leading-none">
+                {t(`nav:languageShort.${currentLanguage}`)}
+              </span>
+            </button>
+          ) : (
+            <div className="rounded-lg border border-border bg-surface-2 p-2">
+              <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                {t("nav:language")}
+              </p>
+              <div className="mt-2 grid grid-cols-4 gap-1">
+                {SUPPORTED_LANGUAGES.map((language) => {
+                  const active = language === currentLanguage;
+                  return (
+                    <button
+                      key={language}
+                      onClick={() => changeLanguage(language)}
+                      aria-pressed={active}
+                      aria-label={t(`nav:languageNames.${language}`)}
+                      title={t(`nav:languageNames.${language}`)}
+                      className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                        active
+                          ? "bg-accent/20 text-accent border border-accent/30"
+                          : "bg-surface-1 text-gray-400 border border-border hover:bg-surface-3 hover:text-gray-200"
+                      }`}
+                    >
+                      {t(`nav:languageShort.${language}`)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Footer */}
       <div
@@ -667,53 +694,54 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
             )}
           </div>
         </button>
-        {collapsed ? (
-          <button
-            type="button"
-            onClick={onCheckUpdates}
-            disabled={checking}
-            title={checkTitle}
-            aria-label={checkTitle}
-            className={`relative w-8 h-8 mx-auto flex items-center justify-center rounded-lg border bg-surface-2 transition-colors disabled:opacity-60 ${
-              updateAvailable
-                ? "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-                : checkError
-                  ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
-                  : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-3"
-            }`}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${checking ? "animate-spin" : ""}`} aria-hidden />
-            {updateAvailable && !checking && (
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            )}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onCheckUpdates}
-            disabled={checking}
-            title={checkTitle}
-            className={`w-full rounded-lg border bg-surface-2 px-2.5 py-2 text-xs transition-colors disabled:opacity-60 flex items-center justify-between gap-2 ${
-              updateAvailable
-                ? "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
-                : checkError
-                  ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
-                  : "border-border text-gray-300 hover:text-gray-100 hover:bg-surface-3"
-            }`}
-          >
-            <span className="inline-flex items-center gap-2 truncate">
-              <RefreshCw
-                className={`w-3.5 h-3.5 flex-shrink-0 ${checking ? "animate-spin" : ""}`}
-                aria-hidden
-              />
-              <span className="font-medium truncate">{checkTitle}</span>
-            </span>
-            {updateAvailable && !checking && (
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-            )}
-          </button>
-        )}
-        {!collapsed && (
+        {moreExpanded &&
+          (collapsed ? (
+            <button
+              type="button"
+              onClick={onCheckUpdates}
+              disabled={checking}
+              title={checkTitle}
+              aria-label={checkTitle}
+              className={`relative w-8 h-8 mx-auto flex items-center justify-center rounded-lg border bg-surface-2 transition-colors disabled:opacity-60 ${
+                updateAvailable
+                  ? "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                  : checkError
+                    ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                    : "border-border text-gray-400 hover:text-gray-200 hover:bg-surface-3"
+              }`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${checking ? "animate-spin" : ""}`} aria-hidden />
+              {updateAvailable && !checking && (
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onCheckUpdates}
+              disabled={checking}
+              title={checkTitle}
+              className={`w-full rounded-lg border bg-surface-2 px-2.5 py-2 text-xs transition-colors disabled:opacity-60 flex items-center justify-between gap-2 ${
+                updateAvailable
+                  ? "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                  : checkError
+                    ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                    : "border-border text-gray-300 hover:text-gray-100 hover:bg-surface-3"
+              }`}
+            >
+              <span className="inline-flex items-center gap-2 truncate">
+                <RefreshCw
+                  className={`w-3.5 h-3.5 flex-shrink-0 ${checking ? "animate-spin" : ""}`}
+                  aria-hidden
+                />
+                <span className="font-medium truncate">{checkTitle}</span>
+              </span>
+              {updateAvailable && !checking && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+              )}
+            </button>
+          ))}
+        {!collapsed && moreExpanded && (
           <div className="space-y-1.5">
             <a
               href="https://github.com/hoangsonww"
@@ -741,7 +769,7 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
             </a>
           </div>
         )}
-        {collapsed && (
+        {collapsed && moreExpanded && (
           <div className="flex flex-col items-center gap-2 pt-0.5">
             <a
               href="https://github.com/hoangsonww"
@@ -765,6 +793,31 @@ export function Sidebar({ wsConnected, collapsed, onToggle }: SidebarProps) {
             </a>
           </div>
         )}
+      </div>
+
+      {/* Collapse toggle - last control in the sidebar */}
+      <div className="px-2 pt-2 pb-2 flex-shrink-0">
+        <button
+          onClick={onToggle}
+          className={`w-full h-10 rounded-lg border border-border bg-surface-2 transition-colors ${
+            collapsed
+              ? "flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-surface-3"
+              : "flex items-center gap-2.5 px-3 text-gray-300 hover:text-gray-100 hover:bg-surface-3"
+          }`}
+          title={collapsed ? t("nav:expand") : t("nav:collapse")}
+          aria-label={collapsed ? t("nav:expand") : t("nav:collapse")}
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="w-4 h-4 flex-shrink-0" />
+          ) : (
+            <>
+              <PanelLeftClose className="w-4 h-4 flex-shrink-0" />
+              <span className="text-[11px] font-semibold uppercase tracking-wide">
+                {t("nav:collapseShort")}
+              </span>
+            </>
+          )}
+        </button>
       </div>
 
       <ConnectionStatusModal

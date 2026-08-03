@@ -24,6 +24,7 @@ import {
   pathTail,
   parseTokenShorthand,
   fmtTokensFull,
+  splitCommonPrefix,
 } from "../format";
 
 describe("formatMs", () => {
@@ -425,5 +426,54 @@ describe("pathTail", () => {
 
   it("handles the degenerate root-only path", () => {
     expect(pathTail("/")).toBeNull();
+  });
+});
+
+describe("splitCommonPrefix", () => {
+  it("factors out the shared parent directory of sibling paths", () => {
+    expect(splitCommonPrefix(["/Users/sara/code/a", "/Users/sara/code/b"])).toEqual({
+      common: "/Users/sara/code",
+      suffixes: ["a", "b"],
+    });
+  });
+
+  it("compares whole path segments, not raw characters", () => {
+    // Character-wise prefix would wrongly stop at "/Users/sara/proj";
+    // segment-wise correctly stops one level higher.
+    expect(splitCommonPrefix(["/Users/sara/proj", "/Users/sara/project"])).toEqual({
+      common: "/Users/sara",
+      suffixes: ["proj", "project"],
+    });
+  });
+
+  it("renders a path equal to the common ancestor itself as '.'", () => {
+    expect(splitCommonPrefix(["/Users/sara/code/a", "/Users/sara/code/a/sub"])).toEqual({
+      common: "/Users/sara/code/a",
+      suffixes: [".", "sub"],
+    });
+  });
+
+  it("returns no common prefix when paths share nothing beyond root", () => {
+    expect(splitCommonPrefix(["/Users/sara/a", "/opt/b"])).toEqual({
+      common: "",
+      suffixes: ["/Users/sara/a", "/opt/b"],
+    });
+  });
+
+  it("handles three or more paths, using the shortest shared depth", () => {
+    expect(
+      splitCommonPrefix(["/Users/sara/code/a", "/Users/sara/code/b", "/Users/sara/code/b/nested"])
+    ).toEqual({
+      common: "/Users/sara/code",
+      suffixes: ["a", "b", "b/nested"],
+    });
+  });
+
+  it("degenerates safely for fewer than two paths", () => {
+    expect(splitCommonPrefix([])).toEqual({ common: "", suffixes: [] });
+    expect(splitCommonPrefix(["/Users/sara/code/a"])).toEqual({
+      common: "",
+      suffixes: ["/Users/sara/code/a"],
+    });
   });
 });

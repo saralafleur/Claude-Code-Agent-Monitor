@@ -246,6 +246,100 @@ const UPGRADE_CASES = [
       assert.equal(row.pinned, 1, "pinned should be settable on legacy rows");
     },
   },
+  {
+    // Sibling-scan toggle: projects gained a `sibling_scan_enabled` column so
+    // the disk-based sibling-repo scan in the Project Detail "Suggested
+    // repos" section can be opted into per project (default off — that scan
+    // is noisy in a flat workspace folder holding many unrelated repos).
+    // Additive + NOT NULL DEFAULT 0, mirroring the `pinned` case above. The
+    // legacy schema here already has `pinned` (added earlier) to reflect a
+    // realistic pre-this-migration upgrade path.
+    table: "projects",
+    column: "sibling_scan_enabled",
+    legacySql: `
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        pinned INTEGER NOT NULL DEFAULT 0
+      )
+    `,
+    seed(legacyDb) {
+      legacyDb
+        .prepare("INSERT INTO projects (id, name) VALUES (?, ?)")
+        .run("legacy-project-2", "Legacy Project 2");
+    },
+    assertLegacyRow(db) {
+      const row = db
+        .prepare("SELECT sibling_scan_enabled FROM projects WHERE id = ?")
+        .get("legacy-project-2");
+      assert.ok(row, "projects row should exist after migration");
+      assert.equal(
+        row.sibling_scan_enabled,
+        0,
+        "sibling_scan_enabled should default to 0 for legacy rows"
+      );
+    },
+    assertWritable(db) {
+      const { stmts } = require("../db");
+      stmts.setProjectSiblingScanEnabled.run(1, "legacy-project-2");
+      const row = db
+        .prepare("SELECT sibling_scan_enabled FROM projects WHERE id = ?")
+        .get("legacy-project-2");
+      assert.equal(
+        row.sibling_scan_enabled,
+        1,
+        "sibling_scan_enabled should be settable on legacy rows"
+      );
+    },
+  },
+  {
+    // Terminal-default folder toggle: project_paths gained a `terminal_default`
+    // column so a project with several mapped folders can exclude some of
+    // them from the "open a new Claude terminal" pickers (OpenTerminalModal's
+    // folder step, toggled per-folder on the Project Detail page's Repos
+    // card). Additive + NOT NULL DEFAULT 1, mirroring the `pinned` case above,
+    // so every historical mapping keeps showing up in the picker exactly as
+    // it does today.
+    table: "project_paths",
+    column: "terminal_default",
+    legacySql: `
+      CREATE TABLE IF NOT EXISTS project_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        cwd TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      )
+    `,
+    seed(legacyDb) {
+      legacyDb
+        .prepare("INSERT INTO project_paths (project_id, cwd) VALUES (?, ?)")
+        .run("legacy-project-3", "/tmp/legacy-project-3-repo");
+    },
+    assertLegacyRow(db) {
+      const row = db
+        .prepare("SELECT terminal_default FROM project_paths WHERE cwd = ?")
+        .get("/tmp/legacy-project-3-repo");
+      assert.ok(row, "project_paths row should exist after migration");
+      assert.equal(row.terminal_default, 1, "terminal_default should default to 1 for legacy rows");
+    },
+    assertWritable(db) {
+      const { stmts } = require("../db");
+      const row = db
+        .prepare("SELECT id FROM project_paths WHERE cwd = ?")
+        .get("/tmp/legacy-project-3-repo");
+      stmts.setProjectPathTerminalDefault.run(0, row.id, "legacy-project-3");
+      const updated = db
+        .prepare("SELECT terminal_default FROM project_paths WHERE cwd = ?")
+        .get("/tmp/legacy-project-3-repo");
+      assert.equal(
+        updated.terminal_default,
+        0,
+        "terminal_default should be settable on legacy rows"
+      );
+    },
+  },
   // color_thresholds' single yellow_at/orange_at/red_at set split into
   // independent session_*/weekly_* scopes (2026-08-01, same day the table
   // was introduced — a live reproduction of the "fresh install vs. upgraded
@@ -296,7 +390,24 @@ const UPGRADE_CASES = [
     };
     const assertWritable = (db) => {
       const { stmts } = require("../db");
-      stmts.updateColorThresholds.run(60, null, null, null, null, null);
+      // updateColorThresholds now takes 12 positional params (session,
+      // weekly, sessionRate, weeklyRate x 3 fields each — see the
+      // session_rate/weekly_rate split case below); only the first is
+      // exercised here, the rest COALESCE through untouched.
+      stmts.updateColorThresholds.run(
+        60,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      );
       const row = db.prepare("SELECT session_yellow_at FROM color_thresholds WHERE id = 1").get();
       assert.equal(
         row.session_yellow_at,
@@ -311,6 +422,89 @@ const UPGRADE_CASES = [
       "weekly_yellow_at",
       "weekly_orange_at",
       "weekly_red_at",
+    ].map((column) => ({
+      table: "color_thresholds",
+      column,
+      legacySql,
+      seed,
+      assertLegacyRow,
+      assertWritable,
+    }));
+  })(),
+  // session_rate_*/weekly_rate_* (Consumption Rate card's own color bands)
+  // added as pure new columns on an already-split color_thresholds table —
+  // unlike the session/weekly split above, these aren't backfilled from an
+  // existing value (there's nothing to backfill from); they just take their
+  // own DEFAULT on legacy rows, same pattern as projects.pinned above.
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS color_thresholds (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        session_yellow_at REAL NOT NULL DEFAULT 50,
+        session_orange_at REAL NOT NULL DEFAULT 80,
+        session_red_at REAL NOT NULL DEFAULT 100,
+        weekly_yellow_at REAL NOT NULL DEFAULT 50,
+        weekly_orange_at REAL NOT NULL DEFAULT 80,
+        weekly_red_at REAL NOT NULL DEFAULT 100,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      )
+    `;
+    const seed = (legacyDb) => {
+      legacyDb
+        .prepare(
+          `INSERT OR REPLACE INTO color_thresholds
+             (id, session_yellow_at, session_orange_at, session_red_at,
+              weekly_yellow_at, weekly_orange_at, weekly_red_at)
+           VALUES (1, 40, 70, 90, 45, 75, 95)`
+        )
+        .run();
+    };
+    const assertLegacyRow = (db) => {
+      const row = db.prepare("SELECT * FROM color_thresholds WHERE id = 1").get();
+      assert.ok(row, "color_thresholds row should exist after migration");
+      // Pre-existing scopes are untouched by this migration.
+      assert.equal(row.session_yellow_at, 40);
+      assert.equal(row.weekly_red_at, 95);
+      // New scopes take their own seeded defaults, not a backfill.
+      assert.equal(row.session_rate_yellow_at, 0.5, "session_rate should default to 0.5");
+      assert.equal(row.session_rate_orange_at, 1.0, "session_rate should default to 1.0");
+      assert.equal(row.session_rate_red_at, 1.5, "session_rate should default to 1.5");
+      assert.equal(row.weekly_rate_yellow_at, 0.5, "weekly_rate should default to 0.5");
+      assert.equal(row.weekly_rate_orange_at, 1.0, "weekly_rate should default to 1.0");
+      assert.equal(row.weekly_rate_red_at, 1.5, "weekly_rate should default to 1.5");
+    };
+    const assertWritable = (db) => {
+      const { stmts } = require("../db");
+      stmts.updateColorThresholds.run(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        65,
+        null,
+        null,
+        null,
+        null,
+        null
+      );
+      const row = db
+        .prepare("SELECT session_rate_yellow_at FROM color_thresholds WHERE id = 1")
+        .get();
+      assert.equal(
+        row.session_rate_yellow_at,
+        65,
+        "session_rate_yellow_at should be settable on a migrated row"
+      );
+    };
+    return [
+      "session_rate_yellow_at",
+      "session_rate_orange_at",
+      "session_rate_red_at",
+      "weekly_rate_yellow_at",
+      "weekly_rate_orange_at",
+      "weekly_rate_red_at",
     ].map((column) => ({
       table: "color_thresholds",
       column,
@@ -635,6 +829,96 @@ describe("Migration: color_thresholds session/weekly split", () => {
   });
 });
 
+describe("Migration: color_thresholds session_rate/weekly_rate columns", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "color_thresholds" && uc.column === "session_rate_yellow_at"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-color-thresholds-rate-test-${Date.now()}.db`);
+
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+
+    // Run the pre-rate-columns schema (already split into session_*/weekly_*
+    // but predating session_rate_*/weekly_rate_*).
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("adds session_rate_*/weekly_rate_* columns via ALTER TABLE, defaulted (not backfilled)", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(color_thresholds)").all();
+    for (const column of [
+      "session_rate_yellow_at",
+      "session_rate_orange_at",
+      "session_rate_red_at",
+      "weekly_rate_yellow_at",
+      "weekly_rate_orange_at",
+      "weekly_rate_red_at",
+    ]) {
+      assert.ok(
+        tableInfo.some((col) => col.name === column),
+        `${column} column should exist after migration`
+      );
+    }
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate columns", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(color_thresholds)")
+      .all()
+      .filter((c) => c.name === "session_rate_yellow_at").length;
+    assert.equal(count1, 1, "should have exactly one session_rate_yellow_at column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(color_thresholds)")
+      .all()
+      .filter((c) => c.name === "session_rate_yellow_at").length;
+    assert.equal(count2, 1, "should still have exactly one session_rate_yellow_at column");
+    db2.close();
+  });
+});
+
 describe("Migration: projects.pinned", () => {
   let tempDbPath;
   let tempDb;
@@ -707,6 +991,165 @@ describe("Migration: projects.pinned", () => {
       .all()
       .filter((c) => c.name === "pinned").length;
     assert.equal(count2, 1, "should still have exactly one pinned column");
+    db2.close();
+  });
+});
+
+describe("Migration: projects.sibling_scan_enabled", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "projects" && uc.column === "sibling_scan_enabled"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-projects-sibling-scan-test-${Date.now()}.db`);
+
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+
+    // Run the legacy projects schema (with pinned, without sibling_scan_enabled).
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("creates sibling_scan_enabled column on legacy projects via ALTER TABLE", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(projects)").all();
+    const column = tableInfo.find((col) => col.name === "sibling_scan_enabled");
+    assert.ok(column, "sibling_scan_enabled column should exist after migration");
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate the column", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(projects)")
+      .all()
+      .filter((c) => c.name === "sibling_scan_enabled").length;
+    assert.equal(count1, 1, "should have exactly one sibling_scan_enabled column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(projects)")
+      .all()
+      .filter((c) => c.name === "sibling_scan_enabled").length;
+    assert.equal(count2, 1, "should still have exactly one sibling_scan_enabled column");
+    db2.close();
+  });
+});
+
+describe("Migration: project_paths.terminal_default", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "project_paths" && uc.column === "terminal_default"
+  );
+
+  before(() => {
+    tempDbPath = path.join(
+      os.tmpdir(),
+      `db-migration-project-paths-terminal-default-test-${Date.now()}.db`
+    );
+
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+
+    // Run the legacy project_paths schema (without terminal_default).
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("creates terminal_default column on legacy project_paths via ALTER TABLE", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(project_paths)").all();
+    const column = tableInfo.find((col) => col.name === "terminal_default");
+    assert.ok(column, "terminal_default column should exist after migration");
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate the column", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(project_paths)")
+      .all()
+      .filter((c) => c.name === "terminal_default").length;
+    assert.equal(count1, 1, "should have exactly one terminal_default column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(project_paths)")
+      .all()
+      .filter((c) => c.name === "terminal_default").length;
+    assert.equal(count2, 1, "should still have exactly one terminal_default column");
     db2.close();
   });
 });

@@ -1,5 +1,6 @@
 {
   "backToProjects": "返回项目列表",
+  "backToProjectManager": "返回项目管理",
   "notFound": "未找到项目",
   "notFoundDesc": "此项目可能已被删除，或链接已过期。",
   "errors": {
@@ -11,6 +12,9 @@
   },
   "repos": {
     "title": "代码仓库",
+    "refresh": "刷新",
+    "refreshing": "扫描中…",
+    "refreshFailed": "重新扫描此项目的仓库失败",
     "empty": "此项目映射的文件夹中还没有 Git 仓库。",
     "worktrees_one": "{{count}} 个工作树",
     "worktrees_other": "{{count}} 个工作树",
@@ -20,14 +24,71 @@
     "clean": "干净",
     "unknown": "未知",
     "nonRepoFoldersTitle": "其他已映射文件夹",
-    "nonRepoFolder": "不是 Git 仓库"
+    "nonRepoFolder": "不是 Git 仓库",
+    "remove": "移除",
+    "removeConfirm": "确认移除？",
+    "removeFailed": "从项目中移除此文件夹失败",
+    "terminalDefault": {
+      "label": "在新终端中提供",
+      "toggleFailed": "更新此文件夹的终端设置失败"
+    },
+    "continueWorktree": {
+      "label": "继续",
+      "title": "在此处以全新的 claude 会话打开终端，并预设提示词以检查 git 状态/日志，继续此工作树之前的工作。",
+      "opening": "打开中…",
+      "opened": "已打开",
+      "failed": "打开此工作树的终端失败"
+    },
+    "collapse": "折叠",
+    "expand": "展开",
+    "viewMode": {
+      "label": "仓库卡片视图模式",
+      "compact": "精简",
+      "compactHint": "精简视图 — 隐藏移除/添加/忽略/取消忽略操作，仅显示信息。",
+      "full": "完整",
+      "fullHint": "完整视图 — 显示所有操作（移除、添加到项目、忽略、取消忽略）。"
+    },
+    "scanModal": {
+      "title": "仓库扫描结果",
+      "description": "以下是重新扫描此项目已映射文件夹的结果。",
+      "close": "关闭",
+      "empty": "未找到仓库、建议仓库或非 Git 文件夹。",
+      "reposFound_one": "发现 {{count}} 个仓库",
+      "reposFound_other": "发现 {{count}} 个仓库",
+      "siblingsFound_one": "发现 {{count}} 个建议仓库",
+      "siblingsFound_other": "发现 {{count}} 个建议仓库",
+      "siblingsHint": "添加后会立即重新扫描此项目的仓库，以便发现它自己的相关仓库。",
+      "nonRepoFound_one": "{{count}} 个其他已映射文件夹",
+      "nonRepoFound_other": "{{count}} 个其他已映射文件夹"
+    }
   },
   "suggestedRepos": {
     "title": "建议的仓库",
-    "description": "在已映射仓库的 PROJECT-CONTEXT.md 中提及，但尚未加入此项目。",
+    "description": "在磁盘上发现的、或在已映射仓库的 PROJECT-CONTEXT.md 中提及的相关仓库，尚未加入此项目。",
+    "empty": "目前没有建议。",
     "add": "添加到项目",
     "adding": "添加中…",
-    "addFailed": "添加此仓库失败。"
+    "addFailed": "添加此仓库失败。",
+    "ignore": "忽略",
+    "ignoring": "忽略中…",
+    "ignoreFailed": "忽略此建议失败。",
+    "siblingScan": {
+      "label": "扫描相邻仓库",
+      "hint": "默认关闭。扫描此项目的父文件夹以查找与其相邻的其他 git 仓库——当相关仓库彼此相邻存放时很有用，但在包含许多不相关仓库的扁平工作区文件夹中会产生大量干扰。",
+      "toggleFailed": "更新相邻仓库扫描设置失败。"
+    },
+    "source": {
+      "context": "PROJECT-CONTEXT.md",
+      "diskSibling": "相邻文件夹",
+      "diskNested": "嵌套仓库"
+    }
+  },
+  "ignoredRepos": {
+    "title": "已忽略的仓库",
+    "description": "已忽略的建议 — 在取消忽略之前不会在后续扫描中再次出现。",
+    "unignore": "取消忽略",
+    "unignoring": "取消忽略中…",
+    "unignoreFailed": "取消忽略此仓库失败。"
   },
   "intake": {
     "title": "团队立项事项",
@@ -37,7 +98,15 @@
       "planned": "已规划",
       "qa": "质量保证",
       "built": "已构建",
-      "released": "已发布"
+      "released": "已发布 / 已合并"
+    },
+    "noActiveWorktree": "没有活动的工作树",
+    "mergeDetected": "已合并(缺少 merge.json)",
+    "mergeDetectedTitle": "通过 git 提交 {{commit}} 检测到 — 此事项从未生成 merge.json",
+    "releasedGroup": {
+      "title": "已发布 / 已合并（{{count}}）",
+      "expand": "展开已发布/已合并事项",
+      "collapse": "折叠已发布/已合并事项"
     }
   }
 }

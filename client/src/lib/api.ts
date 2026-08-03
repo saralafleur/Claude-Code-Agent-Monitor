@@ -390,9 +390,11 @@ import type {
   Analytics,
   CostResult,
   DashboardEvent,
+  DetectedSiblingRepo,
   FocusSummaryCacheStats,
   FocusSummaryDayResponse,
   FocusSummaryTimelineResponse,
+  IgnoredRepo,
   ModelPricing,
   Project,
   ProjectRepoTopology,
@@ -2334,6 +2336,20 @@ export const api = {
         body: JSON.stringify({ pinned }),
       }),
     /**
+     * PATCH /api/projects/:id — toggle whether the "Suggested repos" section
+     * scans this project's parent directory for sibling git repos on disk.
+     * Defaults to false; PROJECT-CONTEXT.md-declared siblings and nested/child
+     * repo detection are unaffected and always run regardless of this setting.
+     * @param id                  The project id.
+     * @param siblingScanEnabled `true` to scan for on-disk siblings, `false` to skip it.
+     * @returns `{ project }` — the updated {@link Project}.
+     */
+    setSiblingScanEnabled: (id: string, siblingScanEnabled: boolean) =>
+      request<{ project: Project }>(`/projects/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ siblingScanEnabled }),
+      }),
+    /**
      * DELETE /api/projects/:id — delete a project. Its folder mappings go with
      * it; the underlying sessions are untouched and fall back to unassigned.
      * @param id The project id.
@@ -2364,6 +2380,24 @@ export const api = {
         method: "DELETE",
       }),
     /**
+     * PATCH /api/projects/:id/paths/:pathId — toggle whether a mapped folder
+     * is offered as a choice in the "open a new Claude terminal" pickers
+     * (see {@link ProjectPath.terminalDefault}). Returns the freshly
+     * recomputed {@link ProjectRepoTopology} (same shape as
+     * {@link api.projects.repos}), matching the ignore/unignore actions'
+     * convention.
+     * @param id              The project id.
+     * @param pathId          The folder-mapping row id (from
+     *                        {@link ProjectPath.id}).
+     * @param terminalDefault Whether this folder should be offered.
+     * @returns The freshly recomputed {@link ProjectRepoTopology}.
+     */
+    setPathTerminalDefault: (id: string, pathId: number, terminalDefault: boolean) =>
+      request<ProjectRepoTopology>(`/projects/${encodeURIComponent(id)}/paths/${pathId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ terminalDefault }),
+      }),
+    /**
      * GET /api/projects/:id/focus-report — a focus-time breakdown scoped to
      * this project's mapped folders: per-session segments (known item /
      * detour / feature / bug, each with idle-grace-discounted active time),
@@ -2375,14 +2409,44 @@ export const api = {
       request<FocusReport>(`/projects/${encodeURIComponent(id)}/focus-report`),
     /**
      * GET /api/projects/:id/repos — which of this project's mapped folders
-     * are git repos, their live worktrees, and any sibling repos detected
-     * via PROJECT-CONTEXT.md that aren't mapped yet (suggestions only — add
-     * one via {@link api.projects.addPath}). Computed live on every call.
+     * are git repos, their live worktrees, and any related repos detected
+     * (via PROJECT-CONTEXT.md or a live disk scan) that aren't mapped yet
+     * (suggestions only — add one via {@link api.projects.addPath}, or
+     * dismiss it via {@link api.projects.ignoreRepo}). Computed live on
+     * every call.
      * @param id The project id.
      * @returns The {@link ProjectRepoTopology}.
      */
     repos: (id: string) =>
       request<ProjectRepoTopology>(`/projects/${encodeURIComponent(id)}/repos`),
+    /**
+     * POST /api/projects/:id/ignored-repos — dismiss a detected-but-not-yet-
+     * mapped repo suggestion so it drops out of `detectedSiblings` on every
+     * future scan until {@link api.projects.unignoreRepo} brings it back.
+     * Idempotent — ignoring an already-ignored path just refreshes its
+     * stored name/source.
+     * @param id      The project id.
+     * @param sibling The suggestion to ignore (from `detectedSiblings`).
+     * @returns The freshly recomputed {@link ProjectRepoTopology}.
+     */
+    ignoreRepo: (id: string, sibling: Pick<DetectedSiblingRepo, "path" | "name" | "source">) =>
+      request<ProjectRepoTopology>(`/projects/${encodeURIComponent(id)}/ignored-repos`, {
+        method: "POST",
+        body: JSON.stringify(sibling),
+      }),
+    /**
+     * DELETE /api/projects/:id/ignored-repos/:ignoredId — un-ignore a
+     * previously-dismissed suggestion so it can surface again on the next
+     * scan.
+     * @param id        The project id.
+     * @param ignoredId The ignored-repo row id (from {@link IgnoredRepo.id}).
+     * @returns The freshly recomputed {@link ProjectRepoTopology}.
+     */
+    unignoreRepo: (id: string, ignoredId: IgnoredRepo["id"]) =>
+      request<ProjectRepoTopology>(
+        `/projects/${encodeURIComponent(id)}/ignored-repos/${ignoredId}`,
+        { method: "DELETE" }
+      ),
     /**
      * GET /api/projects/:id/intake — team-intake initiatives found under
      * this project's mapped folders, with a stage inferred from which known
@@ -2416,6 +2480,31 @@ export const api = {
       request<{ ok: true }>(`/projects/${encodeURIComponent(id)}/open-terminal`, {
         method: "POST",
         body: JSON.stringify({ ...(cwd ? { cwd } : {}), ...(name ? { name } : {}) }),
+      }),
+    /**
+     * POST /api/projects/:id/continue-worktree — opens a brand-new
+     * Terminal.app window in one specific worktree of one of this project's
+     * mapped repos and starts a FRESH `claude` instance there (macOS only) —
+     * deliberately never `-c`/`--continue` (silently resuming whatever prior
+     * conversation happened in that directory is unsafe: stale context, a
+     * different task than what's actually in progress, an inherited
+     * permission/tool state nobody reviewed) — seeded with a server-built
+     * resume prompt naming the worktree's branch/dirty state and nudging it
+     * to check `git status`/`git log`/`git diff` itself before picking work
+     * back up. `path` must be one of the live worktree paths returned by
+     * {@link ProjectApi.repos} — the server re-validates it against a fresh
+     * topology scan and rejects anything else. Rejects (see
+     * server/lib/terminal-focus.js's typed codes, surfaced via
+     * `Error.message`) when the platform isn't macOS, `path` isn't a known
+     * worktree, or Terminal automation fails.
+     * @param id   The project id.
+     * @param path The worktree's absolute path (a {@link WorktreeInfo.path}).
+     * @returns `{ ok: true }`.
+     */
+    continueWorktree: (id: string, path: string) =>
+      request<{ ok: true }>(`/projects/${encodeURIComponent(id)}/continue-worktree`, {
+        method: "POST",
+        body: JSON.stringify({ path }),
       }),
   },
 
@@ -3173,6 +3262,22 @@ export interface Account {
   latest_session_window_reset_raw: string | null;
   latest_week_window_pct: number | null;
   latest_week_reset_raw: string | null;
+  /** Consumption Rate card data (server/lib/consumption-rate.js): a %/hour
+   *  trend fit over this account's own captures since its current window
+   *  started, and - only when that trend is actually rising - the instant
+   *  it would cross 100%. Both null with fewer than two comparable captures
+   *  in the current window; `*_predicted_exhaustion_at` is also null (with
+   *  a non-null rate) when the trend is flat or falling, since no
+   *  exhaustion is predictable in that case. `*_burn_rate_observed_span_ms`
+   *  is the wall-clock span between the oldest and newest capture the fit
+   *  actually used - null under the same "fewer than two points" condition
+   *  as the rate itself. */
+  session_burn_rate_pct_per_hour: number | null;
+  session_predicted_exhaustion_at: string | null;
+  session_burn_rate_observed_span_ms: number | null;
+  week_burn_rate_pct_per_hour: number | null;
+  week_predicted_exhaustion_at: string | null;
+  week_burn_rate_observed_span_ms: number | null;
 }
 
 /** One suggested working directory for the Run page's cwd picker. */

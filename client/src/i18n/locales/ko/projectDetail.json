@@ -1,5 +1,6 @@
 {
   "backToProjects": "프로젝트로 돌아가기",
+  "backToProjectManager": "프로젝트 매니저로 돌아가기",
   "notFound": "프로젝트를 찾을 수 없습니다",
   "notFoundDesc": "이 프로젝트가 삭제되었거나 링크가 오래되었을 수 있습니다.",
   "errors": {
@@ -11,6 +12,9 @@
   },
   "repos": {
     "title": "저장소",
+    "refresh": "새로고침",
+    "refreshing": "스캔 중…",
+    "refreshFailed": "이 프로젝트의 저장소를 다시 스캔하지 못했습니다",
     "empty": "이 프로젝트에 매핑된 폴더 중 git 저장소가 아직 없습니다.",
     "worktrees_one": "워크트리 {{count}}개",
     "worktrees_other": "워크트리 {{count}}개",
@@ -20,14 +24,71 @@
     "clean": "깨끗함",
     "unknown": "알 수 없음",
     "nonRepoFoldersTitle": "기타 매핑된 폴더",
-    "nonRepoFolder": "git 저장소 아님"
+    "nonRepoFolder": "git 저장소 아님",
+    "remove": "제거",
+    "removeConfirm": "제거할까요?",
+    "removeFailed": "이 폴더를 프로젝트에서 제거하지 못했습니다",
+    "terminalDefault": {
+      "label": "새 터미널 옵션으로 제공",
+      "toggleFailed": "이 폴더의 터미널 설정을 업데이트하지 못했습니다"
+    },
+    "continueWorktree": {
+      "label": "이어하기",
+      "title": "여기서 새 claude 세션으로 터미널을 엽니다 — git 상태/로그를 확인해 이 워크트리에서 하던 작업을 이어가도록 안내하는 프롬프트가 미리 입력되어 있습니다.",
+      "opening": "여는 중…",
+      "opened": "열림",
+      "failed": "이 워크트리의 터미널을 열지 못했습니다"
+    },
+    "collapse": "접기",
+    "expand": "펼치기",
+    "viewMode": {
+      "label": "저장소 카드 보기 모드",
+      "compact": "간략히",
+      "compactHint": "간략히 보기 — 제거/추가/무시/무시 해제 작업을 숨기고 정보만 표시합니다.",
+      "full": "전체",
+      "fullHint": "전체 보기 — 모든 작업(제거, 프로젝트에 추가, 무시, 무시 해제)을 표시합니다."
+    },
+    "scanModal": {
+      "title": "저장소 스캔 결과",
+      "description": "이 프로젝트에 매핑된 폴더를 다시 스캔한 결과입니다.",
+      "close": "닫기",
+      "empty": "저장소, 추천 저장소, 비 git 폴더를 찾지 못했습니다.",
+      "reposFound_one": "저장소 {{count}}개 발견",
+      "reposFound_other": "저장소 {{count}}개 발견",
+      "siblingsFound_one": "추천 저장소 {{count}}개 발견",
+      "siblingsFound_other": "추천 저장소 {{count}}개 발견",
+      "siblingsHint": "추가하면 이 프로젝트의 저장소를 즉시 다시 스캔하여 그 저장소와 관련된 저장소도 찾아냅니다.",
+      "nonRepoFound_one": "기타 매핑된 폴더 {{count}}개",
+      "nonRepoFound_other": "기타 매핑된 폴더 {{count}}개"
+    }
   },
   "suggestedRepos": {
     "title": "추천 저장소",
-    "description": "매핑된 저장소의 PROJECT-CONTEXT.md에 명시되어 있지만 아직 이 프로젝트에 속하지 않음.",
+    "description": "디스크에서 발견되었거나 매핑된 저장소의 PROJECT-CONTEXT.md에 명시된, 아직 이 프로젝트에 속하지 않은 관련 저장소입니다.",
+    "empty": "현재 추천 항목이 없습니다.",
     "add": "프로젝트에 추가",
     "adding": "추가 중…",
-    "addFailed": "이 저장소를 프로젝트에 추가하지 못했습니다."
+    "addFailed": "이 저장소를 프로젝트에 추가하지 못했습니다.",
+    "ignore": "무시",
+    "ignoring": "무시하는 중…",
+    "ignoreFailed": "이 추천을 무시하지 못했습니다.",
+    "siblingScan": {
+      "label": "인접 저장소 스캔",
+      "hint": "기본적으로 꺼져 있습니다. 이 프로젝트의 상위 폴더에서 인접한 다른 git 저장소를 스캔합니다 — 관련 저장소가 나란히 있을 때는 유용하지만, 서로 관련 없는 저장소가 많은 평면 워크스페이스 폴더에서는 결과가 너무 많아질 수 있습니다.",
+      "toggleFailed": "인접 저장소 스캔 설정을 업데이트하지 못했습니다."
+    },
+    "source": {
+      "context": "PROJECT-CONTEXT.md",
+      "diskSibling": "인접 폴더",
+      "diskNested": "중첩된 저장소"
+    }
+  },
+  "ignoredRepos": {
+    "title": "무시된 저장소",
+    "description": "무시된 추천 항목입니다 — 무시 해제하기 전까지 이후 스캔에서 다시 나타나지 않습니다.",
+    "unignore": "무시 해제",
+    "unignoring": "무시 해제하는 중…",
+    "unignoreFailed": "이 저장소의 무시를 해제하지 못했습니다."
   },
   "intake": {
     "title": "팀 인테이크 이니셔티브",
@@ -37,7 +98,15 @@
       "planned": "계획됨",
       "qa": "QA",
       "built": "빌드됨",
-      "released": "릴리스됨"
+      "released": "릴리스됨 / 병합됨"
+    },
+    "noActiveWorktree": "활성 워크트리 없음",
+    "mergeDetected": "병합됨 (merge.json 없음)",
+    "mergeDetectedTitle": "git 커밋 {{commit}}을(를) 통해 감지됨 — 이 이니셔티브의 merge.json이 작성되지 않았습니다",
+    "releasedGroup": {
+      "title": "릴리스됨 / 병합됨 ({{count}}개)",
+      "expand": "릴리스됨 / 병합됨 이니셔티브 펼치기",
+      "collapse": "릴리스됨 / 병합됨 이니셔티브 접기"
     }
   }
 }

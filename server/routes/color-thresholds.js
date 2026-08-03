@@ -3,15 +3,21 @@
  * single global, server-shared config (this app has no user accounts, so
  * there is exactly one setting for every connected client/computer)
  * controlling where the green/yellow/orange/red bands fall for every
- * percentage-driven color on the Usage page. Two independent scopes, since
- * the session (5h) window and the weekly window are separate quotas:
+ * percentage-driven color on the Usage page. Four independent scopes:
+ * `session`/`weekly` (raw %-used, the original two, 0-100 scale) plus
+ * `sessionRate`/`weeklyRate` (the Consumption Rate card's pace-ratio — a
+ * RAW multiplier of sustainable pace, e.g. `1.5` for "1.5x sustainable
+ * pace," not a percentage), since a burn-rate pace ratio and a raw %-used
+ * don't belong on the same ramp or the same numeric scale:
  *
  *   GET /api/color-thresholds — current
- *     { session: {yellowAt,orangeAt,redAt}, weekly: {yellowAt,orangeAt,redAt} }
- *   PUT /api/color-thresholds — patch either/both scopes, and within a
- *     scope any subset of its three fields; broadcasts the resulting full
- *     state over the WebSocket (`color_thresholds_updated`) so every other
- *     connected client picks up the change live, without a reload.
+ *     { session: {...}, weekly: {...}, sessionRate: {...}, weeklyRate: {...} }
+ *     (each `{yellowAt,orangeAt,redAt}`)
+ *   PUT /api/color-thresholds — patch any subset of the four scopes, and
+ *     within a scope any subset of its three fields; broadcasts the
+ *     resulting full state over the WebSocket (`color_thresholds_updated`)
+ *     so every other connected client picks up the change live, without a
+ *     reload.
  *
  * Persisted in the singleton `color_thresholds` row (server/db.js). Wire
  * shape is camelCase; DB columns are snake_case — same convention
@@ -28,7 +34,17 @@ const router = Router();
 
 const MIN_VALUE = 0;
 const MAX_VALUE = 1000;
-const SCOPES = ["session", "weekly"];
+const SCOPES = ["session", "weekly", "sessionRate", "weeklyRate"];
+// Maps a wire scope name to its DB column prefix — sessionRate/weeklyRate
+// use a `_rate_` infix (session_rate_yellow_at) rather than `session` +
+// "Rate" concatenating directly, since the DB columns were added as their
+// own explicit prefix (see server/db.js's migration).
+const SCOPE_COLUMN_PREFIX = {
+  session: "session",
+  weekly: "weekly",
+  sessionRate: "session_rate",
+  weeklyRate: "weekly_rate",
+};
 const FIELDS = ["yellowAt", "orangeAt", "redAt"];
 
 class ValidationError extends Error {}
@@ -45,18 +61,16 @@ function validateValue(name, value) {
 }
 
 function serialize(row) {
-  return {
-    session: {
-      yellowAt: row.session_yellow_at,
-      orangeAt: row.session_orange_at,
-      redAt: row.session_red_at,
-    },
-    weekly: {
-      yellowAt: row.weekly_yellow_at,
-      orangeAt: row.weekly_orange_at,
-      redAt: row.weekly_red_at,
-    },
-  };
+  const result = {};
+  for (const scope of SCOPES) {
+    const prefix = SCOPE_COLUMN_PREFIX[scope];
+    result[scope] = {
+      yellowAt: row[`${prefix}_yellow_at`],
+      orangeAt: row[`${prefix}_orange_at`],
+      redAt: row[`${prefix}_red_at`],
+    };
+  }
+  return result;
 }
 
 // Validates a patch to one scope (any subset of yellowAt/orangeAt/redAt),
@@ -82,13 +96,13 @@ function validateScopePatch(scopeName, patch, current) {
   return merged;
 }
 
-// GET / — current global thresholds for both scopes.
+// GET / — current global thresholds for all four scopes.
 router.get("/", (_req, res) => {
   res.json(serialize(stmts.getColorThresholds.get()));
 });
 
-// PUT / — patch either/both of { session, weekly }; within a scope, any
-// subset of { yellowAt, orangeAt, redAt }.
+// PUT / — patch any subset of { session, weekly, sessionRate, weeklyRate };
+// within a scope, any subset of { yellowAt, orangeAt, redAt }.
 router.put("/", (req, res) => {
   const body = req.body || {};
   const current = serialize(stmts.getColorThresholds.get());
@@ -105,14 +119,14 @@ router.put("/", (req, res) => {
     }
     throw err;
   }
-  stmts.updateColorThresholds.run(
-    merged.session ? merged.session.yellowAt : null,
-    merged.session ? merged.session.orangeAt : null,
-    merged.session ? merged.session.redAt : null,
-    merged.weekly ? merged.weekly.yellowAt : null,
-    merged.weekly ? merged.weekly.orangeAt : null,
-    merged.weekly ? merged.weekly.redAt : null
+  // updateColorThresholds's positional params follow this same
+  // scope-then-field order (see server/db.js) — one COALESCE triplet per
+  // scope, in SCOPES order, so an unpatched scope's three params are all
+  // null and its existing values pass through untouched.
+  const args = SCOPES.flatMap((scope) =>
+    FIELDS.map((field) => (merged[scope] ? merged[scope][field] : null))
   );
+  stmts.updateColorThresholds.run(...args);
   const result = serialize(stmts.getColorThresholds.get());
   broadcast("color_thresholds_updated", result);
   res.json(result);

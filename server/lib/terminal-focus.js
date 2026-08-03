@@ -220,18 +220,28 @@ function runOpenTerminalScript(cdCommand, claudeCommand) {
  * Opens a brand-new Terminal.app window in `cwd` and starts a fresh `claude`
  * instance in it. The lower-level primitive shared by `openTerminalForSession`
  * (session-scoped: adds the NOT_LOCAL check and session-flavored NO_CWD
- * message below) and the Projects "open terminal in folder" picker
+ * message below), the Projects "open terminal in folder" picker
  * (project-scoped: a project's mapped folder has no notion of a Remote Data
  * Source session at all, so it calls this directly with an already-validated
- * cwd from the project's own `paths`).
+ * cwd from the project's own `paths`), and the Project Detail page's
+ * per-worktree "Continue" button (POST /:id/continue-worktree, which passes
+ * `prompt` below).
  * @param {string|null|undefined} cwd
  * @param {string|null|undefined} name Optional effort/session name. When
  *   given, passed as `claude -n <name>` so the fresh session starts already
  *   titled - the same custom-title channel as `/rename` and the picker's
  *   Ctrl+R (see server/routes/sessions.js's TRANSCRIPT_RENDER_TYPES comment).
+ * @param {string|null|undefined} prompt Optional initial message, passed as
+ *   claude's positional prompt argument so the fresh session's first turn is
+ *   already filled in. Deliberately never paired with `-c`/`--continue` (no
+ *   silent resume of a prior conversation for `cwd`) - continuing an old
+ *   conversation the caller hasn't inspected can drag in stale context, a
+ *   different task than the one actually in progress, or a permission/tool
+ *   state from a previous session; every session this opens starts clean,
+ *   oriented only by whatever `prompt` says.
  * @returns {{ok: true} | {ok: false, code: string, message: string}}
  */
-function openTerminalForCwd(cwd, name) {
+function openTerminalForCwd(cwd, name, prompt) {
   if (process.platform !== "darwin") {
     return {
       ok: false,
@@ -248,8 +258,9 @@ function openTerminalForCwd(cwd, name) {
   }
 
   const nameFlag = name ? ` -n ${exports.shellQuote(name)}` : "";
+  const promptArg = prompt ? ` ${exports.shellQuote(prompt)}` : "";
   const cdCommand = `cd ${exports.shellQuote(cwd)}`;
-  const claudeCommand = `claude${nameFlag}`;
+  const claudeCommand = `claude${nameFlag}${promptArg}`;
   try {
     exports.runOpenTerminalScript(cdCommand, claudeCommand);
   } catch (err) {

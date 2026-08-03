@@ -7,11 +7,16 @@
  * feedback surfacing the server's message, close behavior (Escape,
  * backdrop click, close button), the "Most used" / "All projects"
  * sectioning that promotes the top 5 projects by session_count above the
- * rest, and the optional effort-name field (persists across the
- * project/folder navigation, passed through to api.projects.openTerminal
- * only when non-blank) — same local pending/success/error conventions as
- * SessionCard's own terminal buttons (no toast system in this codebase, see
- * client/src/pages/Run.tsx).
+ * rest, the optional effort-name field (persists across the project/folder
+ * navigation, passed through to api.projects.openTerminal only when
+ * non-blank), the folder-picker screen showing just each folder's own name
+ * (pathTail) rather than its full path, and only offering/counting a
+ * project's `terminalDefault`-eligible folders (a folder explicitly excluded
+ * via `terminalDefault: false` is never offered, never counted towards the
+ * "N folders" label, and a project whose only eligible folder is a single
+ * one still opens it directly with no picker step) — same local
+ * pending/success/error conventions as SessionCard's own terminal buttons
+ * (no toast system in this codebase, see client/src/pages/Run.tsx).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -167,8 +172,9 @@ describe("OpenTerminalModal", () => {
 
     fireEvent.click(screen.getByText("Agent Monitor"));
     expect(openTerminalMock).not.toHaveBeenCalled();
-    expect(screen.getByText("/repo/agent-monitor")).toBeInTheDocument();
-    expect(screen.getByText("/repo/agent-monitor-docs")).toBeInTheDocument();
+    // Folder rows show just the folder's own name (pathTail), not the full path.
+    expect(screen.getByText("repo/agent-monitor")).toBeInTheDocument();
+    expect(screen.getByText("repo/agent-monitor-docs")).toBeInTheDocument();
     // The header now shows the project name (drilled in).
     expect(screen.getAllByText("Agent Monitor").length).toBeGreaterThan(0);
 
@@ -189,7 +195,7 @@ describe("OpenTerminalModal", () => {
 
     await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Agent Monitor"));
-    fireEvent.click(screen.getByText("/repo/agent-monitor-docs"));
+    fireEvent.click(screen.getByText("repo/agent-monitor-docs"));
 
     expect(openTerminalMock).toHaveBeenCalledWith("proj-1", "/repo/agent-monitor-docs");
   });
@@ -281,12 +287,69 @@ describe("OpenTerminalModal", () => {
       target: { value: "Docs pass" },
     });
     fireEvent.click(screen.getByText("Agent Monitor"));
-    fireEvent.click(screen.getByText("/repo/agent-monitor-docs"));
+    fireEvent.click(screen.getByText("repo/agent-monitor-docs"));
 
     expect(openTerminalMock).toHaveBeenCalledWith(
       "proj-1",
       "/repo/agent-monitor-docs",
       "Docs pass"
     );
+  });
+
+  it("excludes folders with terminalDefault: false from the folder count and picker", async () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    const project = makeProject({
+      paths: [
+        { id: 1, cwd: "/repo/agent-monitor" },
+        { id: 2, cwd: "/repo/agent-monitor-docs", terminalDefault: false },
+        { id: 3, cwd: "/repo/agent-monitor-scripts" },
+      ],
+    });
+    listMock.mockResolvedValue({ projects: [project], unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
+    // Only 2 of the 3 mapped folders are eligible.
+    expect(screen.getByText("2 folders")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Agent Monitor"));
+    expect(screen.getByText("repo/agent-monitor")).toBeInTheDocument();
+    expect(screen.getByText("repo/agent-monitor-scripts")).toBeInTheDocument();
+    expect(screen.queryByText("repo/agent-monitor-docs")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("repo/agent-monitor-scripts"));
+    expect(openTerminalMock).toHaveBeenCalledWith("proj-1", "/repo/agent-monitor-scripts");
+  });
+
+  it("opens the one eligible folder directly when every other mapped folder is excluded", async () => {
+    openTerminalMock.mockResolvedValue({ ok: true });
+    const project = makeProject({
+      paths: [
+        { id: 1, cwd: "/repo/agent-monitor" },
+        { id: 2, cwd: "/repo/agent-monitor-docs", terminalDefault: false },
+      ],
+    });
+    listMock.mockResolvedValue({ projects: [project], unassigned: { cwds: [] } });
+    const onClose = vi.fn();
+    render(<OpenTerminalModal onClose={onClose} />);
+
+    await waitFor(() => expect(screen.getByText("Agent Monitor")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Agent Monitor"));
+
+    expect(openTerminalMock).toHaveBeenCalledWith("proj-1", "/repo/agent-monitor");
+    expect(screen.getByText("Open terminal in project")).toBeInTheDocument();
+  });
+
+  it("disables a project whose every mapped folder is excluded from terminalDefault", async () => {
+    const project = makeProject({
+      name: "All Excluded",
+      paths: [{ id: 1, cwd: "/repo/agent-monitor", terminalDefault: false }],
+    });
+    listMock.mockResolvedValue({ projects: [project], unassigned: { cwds: [] } });
+    render(<OpenTerminalModal onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("All Excluded")).toBeInTheDocument());
+    const button = screen.getByText("All Excluded").closest("button");
+    expect(button).toBeDisabled();
   });
 });

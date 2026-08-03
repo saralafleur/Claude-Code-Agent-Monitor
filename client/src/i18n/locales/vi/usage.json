@@ -38,6 +38,8 @@
   },
   "accounts": {
     "title": "Tài khoản",
+    "expand": "Mở rộng tài khoản",
+    "collapse": "Thu gọn tài khoản",
     "refreshAll": "Làm mới tất cả",
     "refreshingAll": "Đang làm mới…",
     "addAccount": "Thêm tài khoản",
@@ -77,13 +79,29 @@
       "cappedByWeekly": "Bị giới hạn bởi hạn mức tuần (còn {{pct}}%)",
       "weeklyResetsIn": "Hạn mức tuần đặt lại sau {{when}}"
     },
+    "consumptionRate": {
+      "title": "Tốc độ tiêu thụ",
+      "subtitle": "Dự đoán, dựa trên tốc độ sử dụng gần đây của mỗi tài khoản, liệu tài khoản có dùng hết hạn mức trước khi cửa sổ phiên/tuần được đặt lại hay không.",
+      "session": "Phiên",
+      "weekly": "Hàng tuần",
+      "notEnoughData": "Chưa đủ dữ liệu",
+      "onTrack": "Ổn định — sẽ đặt lại trước khi dùng hết",
+      "runsOutIn": "Dùng hết trong",
+      "shortBy": "Thiếu hụt",
+      "rateFlat": "{{rate}} (không tăng)",
+      "ratePace": "{{rate}} · {{pace}}× tốc độ bền vững",
+      "observedOver": "quan sát trong {{span}}"
+    },
     "colorThresholds": {
       "title": "Ngưỡng màu sắc",
       "subtitle": "Cấu hình điểm chuyển màu xanh lá → vàng → cam → đỏ, áp dụng cho toàn bộ trang này.",
       "scope": {
         "session": "Cửa sổ phiên (5 giờ)",
-        "weekly": "Cửa sổ tuần"
+        "weekly": "Cửa sổ tuần",
+        "sessionRate": "Tốc độ tiêu thụ phiên",
+        "weeklyRate": "Tốc độ tiêu thụ hàng tuần"
       },
+      "rateScopeDescription": "Được đo bằng bội số của tốc độ bền vững, không phải phần trăm — 1.0 nghĩa là đang tiêu thụ đúng bằng tốc độ để chạm 100% ngay lúc đặt lại. Thường đặt trong khoảng 0.5 đến 1.5.",
       "yellowLabel": "Vàng bắt đầu ở",
       "orangeLabel": "Cam bắt đầu ở",
       "redLabel": "Đỏ bắt đầu ở",

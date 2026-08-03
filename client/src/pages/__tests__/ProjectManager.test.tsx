@@ -248,7 +248,9 @@ describe("ProjectManager page", () => {
 
     fireEvent.click(rowA);
 
-    expect(navigateMock).toHaveBeenCalledWith("/projects/proj-a");
+    expect(navigateMock).toHaveBeenCalledWith("/projects/proj-a", {
+      state: { from: "/project-manager" },
+    });
   });
 
   it("renders KPI tiles from the composed data, not re-derived independently", async () => {

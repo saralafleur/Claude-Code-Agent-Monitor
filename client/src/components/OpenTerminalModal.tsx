@@ -22,6 +22,17 @@
  * <name>` so the fresh session starts already titled - typing one is never
  * required, and a click on a project/folder still opens immediately with no
  * extra step either way.
+ *
+ * Only a project's `terminalDefault`-eligible folders (toggled per-folder on
+ * the Project Detail page's Repos card, on by default — see
+ * {@link ProjectPath.terminalDefault}) are counted and offered here: a
+ * project's "how many folders" count, whether its row opens directly vs.
+ * drills into the folder-picker step, and the folder-picker list itself all
+ * use just that eligible subset, mirroring the same filter the server
+ * enforces in POST `/:id/open-terminal`. Each row in the folder-picker step
+ * shows just the folder's own name (via `pathTail`), not its full path — the
+ * full path is still available as a hover title — since the picker is about
+ * telling folders apart quickly, not reading out filesystem paths.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -29,8 +40,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X, ChevronLeft, FolderOpen, SquareTerminal, Loader2, Check } from "lucide-react";
 import { api } from "../lib/api";
-import type { Project } from "../lib/types";
+import type { Project, ProjectPath } from "../lib/types";
 import { pathTail } from "../lib/format";
+
+// A folder counts as offerable here only when it hasn't been explicitly
+// excluded - undefined/true (the common, unmigrated-fixture-friendly case,
+// see ProjectPath.terminalDefault) both mean "eligible", only an explicit
+// `false` opts a folder out.
+function eligiblePaths(project: Project): ProjectPath[] {
+  return project.paths.filter((p) => p.terminalDefault !== false);
+}
 
 export interface OpenTerminalModalProps {
   onClose: () => void;
@@ -138,7 +157,7 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
 
   function handleProjectClick(project: Project) {
     if (openState === "pending") return;
-    const [only, ...otherPaths] = project.paths;
+    const [only, ...otherPaths] = eligiblePaths(project);
     if (!only) return;
     if (otherPaths.length === 0) {
       openCwd(project, only.cwd);
@@ -156,9 +175,10 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
   }
 
   function renderProjectRow(project: Project) {
-    const disabled = project.paths.length === 0;
-    const onlyPath = project.paths.length === 1 ? project.paths[0] : undefined;
-    const isOpeningThis = !!openingCwd && project.paths.some((p) => p.cwd === openingCwd);
+    const eligible = eligiblePaths(project);
+    const disabled = eligible.length === 0;
+    const onlyPath = eligible.length === 1 ? eligible[0] : undefined;
+    const isOpeningThis = !!openingCwd && eligible.some((p) => p.cwd === openingCwd);
     return (
       <button
         key={project.id}
@@ -176,7 +196,7 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
           <p className="text-[11px] text-gray-500 truncate">
             {onlyPath
               ? pathTail(onlyPath.cwd)
-              : t("openTerminalPicker.folderCount", { count: project.paths.length })}
+              : t("openTerminalPicker.folderCount", { count: eligible.length })}
           </p>
         </div>
         {isOpeningThis && openState === "pending" && (
@@ -289,7 +309,7 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
 
           {selected && (
             <div className="space-y-1">
-              {selected.paths.map((p) => {
+              {eligiblePaths(selected).map((p) => {
                 const isThis = openingCwd === p.cwd;
                 return (
                   <button
@@ -301,7 +321,7 @@ export function OpenTerminalModal({ onClose }: OpenTerminalModalProps) {
                     className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left text-gray-200 hover:bg-surface-4 transition-colors"
                   >
                     <FolderOpen className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-                    <span className="text-sm truncate flex-1">{p.cwd}</span>
+                    <span className="text-sm truncate flex-1">{pathTail(p.cwd)}</span>
                     {isThis && openState === "pending" && (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-accent flex-shrink-0" />
                     )}

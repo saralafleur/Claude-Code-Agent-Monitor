@@ -381,6 +381,54 @@ describe("openLoginTerminalForConfigDir — full branching", () => {
   });
 });
 
+describe("openTerminalForCwd — prompt argument (never -c/--continue)", () => {
+  beforeEach(() => {
+    terminalFocus.runOpenTerminalScript = () => "";
+  });
+
+  it("builds a bare `claude` command when name/prompt are both omitted", () => {
+    let seenClaude;
+    terminalFocus.runOpenTerminalScript = (_cd, claudeCommand) => {
+      seenClaude = claudeCommand;
+      return "";
+    };
+    terminalFocus.openTerminalForCwd("/repo/agent-monitor");
+    assert.equal(seenClaude, "claude");
+  });
+
+  it("appends the shell-quoted prompt as the trailing positional argument", () => {
+    let seenClaude;
+    terminalFocus.runOpenTerminalScript = (_cd, claudeCommand) => {
+      seenClaude = claudeCommand;
+      return "";
+    };
+    terminalFocus.openTerminalForCwd("/repo/agent-monitor", undefined, "Resume work here.");
+    assert.equal(seenClaude, "claude 'Resume work here.'");
+  });
+
+  it("combines -n <name> and the prompt in one command, and never appends -c", () => {
+    let seenClaude;
+    terminalFocus.runOpenTerminalScript = (_cd, claudeCommand) => {
+      seenClaude = claudeCommand;
+      return "";
+    };
+    terminalFocus.openTerminalForCwd("/repo/agent-monitor", "my effort", "Resume work here.");
+    assert.equal(seenClaude, "claude -n 'my effort' 'Resume work here.'");
+    assert.doesNotMatch(seenClaude, /-c\b/);
+    assert.doesNotMatch(seenClaude, /--continue/);
+  });
+
+  it("shell-quotes a prompt with an embedded single quote", () => {
+    let seenClaude;
+    terminalFocus.runOpenTerminalScript = (_cd, claudeCommand) => {
+      seenClaude = claudeCommand;
+      return "";
+    };
+    terminalFocus.openTerminalForCwd("/repo/agent-monitor", undefined, "it's uncommitted");
+    assert.equal(seenClaude, "claude 'it'\\''s uncommitted'");
+  });
+});
+
 describe("hook ingestion — pid resolved and persisted on SessionStart", () => {
   it("resolves the hint's real claude pid and stores it, first-seen-wins", async () => {
     terminalFocus.listProcesses = () =>

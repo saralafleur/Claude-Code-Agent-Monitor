@@ -3,9 +3,14 @@
  * @description Server-backed store for the Usage page's global green/
  * yellow/orange/red color thresholds - shared across every computer
  * connected to this dashboard (this app has no user accounts, so there is
- * exactly one setting for everyone). Two independent scopes, `session` and
- * `weekly`, since the session (5h) window and the weekly window are
- * separate quotas that shouldn't have to share one ramp. Hydrated from
+ * exactly one setting for everyone). Four independent scopes: `session` and
+ * `weekly` (raw %-used, the session (5h) window and the weekly window are
+ * separate quotas that shouldn't have to share one ramp) plus `sessionRate`
+ * and `weeklyRate` (the Consumption Rate card's pace-ratio - a raw
+ * multiplier of sustainable pace, e.g. `1.5` for "1.5x sustainable pace,"
+ * not a 0-100 percentage like the other two scopes - so it gets its own
+ * pair of bands on its own scale).
+ * Hydrated from
  * GET /api/color-thresholds on first subscribe and kept live via
  * `color_thresholds_updated` WebSocket pushes - mirrors monitorGroups.ts's
  * pattern for the Kanban Board layout. Unlike that store, there's no legacy
@@ -33,9 +38,22 @@ export const DEFAULT_COLOR_THRESHOLDS: ColorThresholds = {
   redAt: 100,
 };
 
+/** Same idea as `DEFAULT_COLOR_THRESHOLDS`, but for the Consumption Rate
+ *  card's pace-ratio (`sessionRate`/`weeklyRate`) - a RAW multiplier of
+ *  sustainable pace (the same number shown as "1.6x sustainable pace" in
+ *  the card itself, via `computePaceRatio`), not a 0-100 percentage. `1.0`
+ *  is exactly on pace to land at 100% right at reset. */
+export const DEFAULT_RATE_COLOR_THRESHOLDS: ColorThresholds = {
+  yellowAt: 0.5,
+  orangeAt: 1.0,
+  redAt: 1.5,
+};
+
 export const DEFAULT_COLOR_THRESHOLDS_CONFIG: ColorThresholdsConfig = {
   session: DEFAULT_COLOR_THRESHOLDS,
   weekly: DEFAULT_COLOR_THRESHOLDS,
+  sessionRate: DEFAULT_RATE_COLOR_THRESHOLDS,
+  weeklyRate: DEFAULT_RATE_COLOR_THRESHOLDS,
 };
 
 function isValidScope(value: unknown): value is ColorThresholds {
@@ -80,7 +98,14 @@ eventBus.subscribe((msg: WSMessage) => {
   try {
     if (msg.type !== "color_thresholds_updated") return;
     const data = msg.data as ColorThresholdsConfig;
-    if (!data || !isValidScope(data.session) || !isValidScope(data.weekly)) return;
+    if (
+      !data ||
+      !isValidScope(data.session) ||
+      !isValidScope(data.weekly) ||
+      !isValidScope(data.sessionRate) ||
+      !isValidScope(data.weeklyRate)
+    )
+      return;
     setSnapshot(data);
   } catch {
     /* never propagate into the bus dispatch loop */
@@ -138,10 +163,14 @@ export const colorThresholdsStore = {
   save(patch: {
     session?: Partial<ColorThresholds>;
     weekly?: Partial<ColorThresholds>;
+    sessionRate?: Partial<ColorThresholds>;
+    weeklyRate?: Partial<ColorThresholds>;
   }): Promise<ColorThresholdsConfig> {
     const optimistic: ColorThresholdsConfig = {
       session: { ...snapshot.session, ...patch.session },
       weekly: { ...snapshot.weekly, ...patch.weekly },
+      sessionRate: { ...snapshot.sessionRate, ...patch.sessionRate },
+      weeklyRate: { ...snapshot.weeklyRate, ...patch.weeklyRate },
     };
     setSnapshot(optimistic);
     return api.colorThresholds.update(patch).then((result) => {

@@ -341,7 +341,11 @@ export function ProjectManager() {
                     return (
                       <tr
                         key={project.id}
-                        onClick={() => navigate(`/projects/${project.id}`)}
+                        onClick={() =>
+                          navigate(`/projects/${project.id}`, {
+                            state: { from: "/project-manager" },
+                          })
+                        }
                         className="border-t border-border hover:bg-surface-4 cursor-pointer transition-colors"
                       >
                         <td className="px-4 py-3">

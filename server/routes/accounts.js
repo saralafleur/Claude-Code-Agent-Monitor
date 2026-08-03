@@ -18,7 +18,13 @@
  * server/lib/account-activity.js) rather than from anything
  * CLAUDE_CONFIG_DIR-local — and, deliberately, not from `last_capture_at`,
  * which only reflects manual dashboard refreshes, not actual account
- * activity.
+ * activity. Each account also carries a session/weekly burn-rate
+ * prediction (`*_burn_rate_pct_per_hour`, `*_predicted_exhaustion_at`,
+ * `*_burn_rate_observed_span_ms`) from server/lib/consumption-rate.js — the
+ * Consumption Rate card's data, a %/hour trend fit over this account's own
+ * recent captures projected forward to the instant it would cross 100%, if
+ * that trend is actually rising, plus how much wall-clock time that trend
+ * was actually fit over.
  *
  *   GET    /api/accounts                    — list accounts + each one's latest known %s
  *   POST   /api/accounts                    — add an account { label, configDir }
@@ -46,6 +52,7 @@ const { stmts } = require("../db");
 const { sameOriginGuard } = require("../lib/origin-guard");
 const { captureAccount } = require("../lib/account-capture");
 const { computeLastUsedAt, isAccountActive } = require("../lib/account-activity");
+const { computeConsumptionRate } = require("../lib/consumption-rate");
 const usageCapturesDb = require("../lib/usage-captures-db");
 // Required as a module object (not destructured) so tests can swap
 // `terminalFocus.openLoginTerminalForConfigDir` and this route picks the
@@ -60,6 +67,7 @@ router.use(sameOriginGuard);
 function serialize(row) {
   const latest = usageCapturesDb.listCaptures({ accountId: row.id, limit: 1 })[0] || null;
   const lastUsedAt = computeLastUsedAt(row.id);
+  const rate = computeConsumptionRate(row.id);
   return {
     id: row.id,
     label: row.label,
@@ -79,6 +87,12 @@ function serialize(row) {
     latest_session_window_reset_raw: latest?.session_window_reset_raw ?? null,
     latest_week_window_pct: latest?.week_window_pct ?? null,
     latest_week_reset_raw: latest?.week_reset_raw ?? null,
+    session_burn_rate_pct_per_hour: rate.session.ratePerHour,
+    session_predicted_exhaustion_at: rate.session.predictedExhaustionAt,
+    session_burn_rate_observed_span_ms: rate.session.observedSpanMs,
+    week_burn_rate_pct_per_hour: rate.week.ratePerHour,
+    week_predicted_exhaustion_at: rate.week.predictedExhaustionAt,
+    week_burn_rate_observed_span_ms: rate.week.observedSpanMs,
   };
 }
 

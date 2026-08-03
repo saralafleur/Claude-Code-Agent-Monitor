@@ -1,5 +1,6 @@
 {
   "backToProjects": "Back to Projects",
+  "backToProjectManager": "Back to Project Manager",
   "notFound": "Project not found",
   "notFoundDesc": "This project may have been deleted, or the link is out of date.",
   "errors": {
@@ -11,6 +12,9 @@
   },
   "repos": {
     "title": "Repos",
+    "refresh": "Refresh",
+    "refreshing": "Scanning…",
+    "refreshFailed": "Failed to rescan this project's repos",
     "empty": "None of this project's mapped folders are git repos yet.",
     "worktrees_one": "{{count}} worktree",
     "worktrees_other": "{{count}} worktrees",
@@ -20,14 +24,71 @@
     "clean": "Clean",
     "unknown": "Unknown",
     "nonRepoFoldersTitle": "Other mapped folders",
-    "nonRepoFolder": "Not a git repo"
+    "nonRepoFolder": "Not a git repo",
+    "remove": "Remove",
+    "removeConfirm": "Remove?",
+    "removeFailed": "Failed to remove this folder from the project",
+    "terminalDefault": {
+      "label": "Offer for new terminal",
+      "toggleFailed": "Failed to update this folder's terminal setting"
+    },
+    "continueWorktree": {
+      "label": "Continue",
+      "title": "Open a terminal here with a fresh claude session, seeded with a prompt to check git status/log and pick up where this worktree left off.",
+      "opening": "Opening…",
+      "opened": "Opened",
+      "failed": "Failed to open a terminal for this worktree"
+    },
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "viewMode": {
+      "label": "Repos card view mode",
+      "compact": "Compact",
+      "compactHint": "Compact view — hides Remove/Add/Ignore/Unignore actions, information only.",
+      "full": "Full",
+      "fullHint": "Full view — shows every action (Remove, Add to project, Ignore, Unignore)."
+    },
+    "scanModal": {
+      "title": "Repo scan results",
+      "description": "Here's what the rescan found in this project's mapped folders.",
+      "close": "Close",
+      "empty": "No repos, suggestions, or non-repo folders found.",
+      "reposFound_one": "{{count}} repo found",
+      "reposFound_other": "{{count}} repos found",
+      "siblingsFound_one": "{{count}} suggested repo found",
+      "siblingsFound_other": "{{count}} suggested repos found",
+      "siblingsHint": "Adding one rescans this project's repos right away, so it can surface its own related repos too.",
+      "nonRepoFound_one": "{{count}} other mapped folder",
+      "nonRepoFound_other": "{{count}} other mapped folders"
+    }
   },
   "suggestedRepos": {
     "title": "Suggested repos",
-    "description": "Named in a mapped repo's PROJECT-CONTEXT.md, not yet part of this project.",
+    "description": "Related repos found on disk or named in a mapped repo's PROJECT-CONTEXT.md, not yet part of this project.",
+    "empty": "No suggestions right now.",
     "add": "Add to project",
     "adding": "Adding…",
-    "addFailed": "Failed to add this repo to the project."
+    "addFailed": "Failed to add this repo to the project.",
+    "ignore": "Ignore",
+    "ignoring": "Ignoring…",
+    "ignoreFailed": "Failed to ignore this suggestion.",
+    "siblingScan": {
+      "label": "Scan for sibling repos",
+      "hint": "Off by default. Scans this project's parent folder for other git repos sitting next to it — useful when related repos live side by side, but noisy in a flat workspace folder with many unrelated repos.",
+      "toggleFailed": "Failed to update the sibling-scan setting."
+    },
+    "source": {
+      "context": "PROJECT-CONTEXT.md",
+      "diskSibling": "sibling folder",
+      "diskNested": "nested repo"
+    }
+  },
+  "ignoredRepos": {
+    "title": "Ignored repos",
+    "description": "Dismissed suggestions — they won't reappear on future scans until unignored.",
+    "unignore": "Unignore",
+    "unignoring": "Unignoring…",
+    "unignoreFailed": "Failed to unignore this repo."
   },
   "intake": {
     "title": "Team-Intake Initiatives",
@@ -37,7 +98,15 @@
       "planned": "Planned",
       "qa": "QA",
       "built": "Built",
-      "released": "Released"
+      "released": "Released / Merged"
+    },
+    "noActiveWorktree": "No active worktree",
+    "mergeDetected": "Merged (no merge.json)",
+    "mergeDetectedTitle": "Detected via git commit {{commit}} — merge.json was never written for this initiative",
+    "releasedGroup": {
+      "title": "Released / Merged ({{count}})",
+      "expand": "Expand Released / Merged initiatives",
+      "collapse": "Collapse Released / Merged initiatives"
     }
   }
 }

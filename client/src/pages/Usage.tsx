@@ -2,8 +2,9 @@
  * @file Usage.tsx
  * @description Shows Claude rate-limit/usage standing for the currently
  * logged-in CLI session (the legacy/global view, driving
- * server/lib/usage-capture.js over tmux) plus, in the Accounts panel above
- * it, any number of separately named Claude accounts side by side - each
+ * server/lib/usage-capture.js over tmux) plus, in the collapsible Accounts
+ * panel below the status cards, any number of separately named Claude
+ * accounts side by side - each
  * account's session/weekly rate-limit bars are always visible in its row
  * (reading its own CLAUDE_CONFIG_DIR's CLI-stored OAuth credential and
  * fetching usage directly via server/lib/claude-cli-credentials.js +
@@ -33,7 +34,12 @@
  * account's own `is_active`/`last_used_at` fields from GET /api/accounts -
  * inferred server-side from real movement in that account's own session/
  * weekly rate-limit percentage between captures (server/lib/account-
- * activity.js), not from anything tied to its CLAUDE_CONFIG_DIR.
+ * activity.js), not from anything tied to its CLAUDE_CONFIG_DIR. And
+ * `ConsumptionRateCard`, which predicts per account when its session and
+ * weekly quotas will run out at their current pace and whether that happens
+ * before or after the window resets, driven by each account's own
+ * `*_burn_rate_pct_per_hour`/`*_predicted_exhaustion_at` fields from GET
+ * /api/accounts (server/lib/consumption-rate.js's %/hour trend fit).
  *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
@@ -87,6 +93,18 @@ function formatCost(cost: number | null): string {
   return `$${cost.toFixed(3)}`;
 }
 
+/** `23.4%/hr` - the Consumption Rate card's session-scope burn rate. */
+function formatRatePerHour(ratePerHour: number): string {
+  return `${ratePerHour.toFixed(1)}%/hr`;
+}
+
+/** `3.8%/day` - the weekly scope's burn rate. `ratePerHour` (the fitted
+ *  trend's actual unit) reads as a near-zero, unreadable number over a
+ *  7-day window, so this is the same trend re-expressed per day instead. */
+function formatRatePerDay(ratePerHour: number): string {
+  return `${(ratePerHour * 24).toFixed(1)}%/day`;
+}
+
 function formatTokenCount(n: number | null): string {
   if (n == null || !Number.isFinite(n)) return "—";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
@@ -107,6 +125,18 @@ const BAND_TEXT_CLASS: Record<ColorBand, string> = {
   yellow: "text-yellow-400",
   orange: "text-orange-400",
   red: "text-red-400",
+};
+/** Soft pill tint per band - same `bg-{color}-500/10 border-{color}-500/30
+ *  text-{color}-400` idiom `StatusBadge`/`AccountStatusBadge` already use,
+ *  paired with the `.badge` class (index.css) for the Consumption Rate
+ *  card's verdict pills, so a graded ("safe" can render yellow/orange, see
+ *  `ConsumptionRateScopeRow`) status still reads as one consistent pill
+ *  family with the rest of the page instead of a one-off. */
+const BAND_BADGE_CLASS: Record<ColorBand, string> = {
+  green: "bg-emerald-500/10 border-emerald-500/30 text-emerald-400",
+  yellow: "bg-yellow-500/10 border-yellow-500/30 text-yellow-400",
+  orange: "bg-orange-500/10 border-orange-500/30 text-orange-400",
+  red: "bg-red-500/10 border-red-500/30 text-red-400",
 };
 
 /**
@@ -139,6 +169,83 @@ function weeklyPctColor(pct: number | null, thresholds: ColorThresholds): string
 function pctTextColor(pct: number | null, thresholds: ColorThresholds): string {
   if (pct == null) return "text-gray-400";
   return BAND_TEXT_CLASS[colorBand(pct, thresholds)];
+}
+
+/**
+ * The Consumption Rate card's per-scope verdict, derived from an account's
+ * burn-rate prediction (server/lib/consumption-rate.js) plus that window's
+ * own reset time. `"no-data"` when there's no trend to fit yet, `"safe"`
+ * when the trend is flat/falling or would only cross 100% after the window
+ * has already reset (so the reset resolves it first), and `"at-risk"` with
+ * a countdown `runwayMs` to the predicted exhaustion instant, plus
+ * `shortfallMs` - how much EARLIER than the reset that exhaustion is
+ * predicted to land (`resetMs - exhaustionMs`), i.e. if the window resets
+ * in 6 days but the trend predicts running out in 4, `shortfallMs` is the
+ * 2-day gap. Unlike `runwayMs`, this doesn't shrink as `now` ticks forward
+ * - both ends of the gap (predicted exhaustion, reset) are fixed instants -
+ * so it stays constant until the underlying trend itself changes. The
+ * "at-risk" row's color comes from `computePaceRatio` (times-faster-than-
+ * sustainable), not from this state - see `ConsumptionRateScopeRow`.
+ */
+type ConsumptionRiskState =
+  | { kind: "no-data" }
+  | { kind: "safe" }
+  | { kind: "at-risk"; runwayMs: number; shortfallMs: number };
+
+function computeConsumptionRisk(
+  ratePerHour: number | null,
+  predictedExhaustionAt: string | null,
+  resetRaw: string | null,
+  now: number
+): ConsumptionRiskState {
+  if (ratePerHour == null) return { kind: "no-data" };
+  if (ratePerHour <= 0 || !predictedExhaustionAt || !resetRaw) return { kind: "safe" };
+  const resetMs = new Date(resetRaw).getTime();
+  const exhaustionMs = new Date(predictedExhaustionAt).getTime();
+  if (Number.isNaN(resetMs) || Number.isNaN(exhaustionMs) || exhaustionMs >= resetMs) {
+    return { kind: "safe" };
+  }
+  const runwayMs = Math.max(0, exhaustionMs - now);
+  const shortfallMs = resetMs - exhaustionMs;
+  return { kind: "at-risk", runwayMs, shortfallMs };
+}
+
+/**
+ * How many times faster (or slower) the current burn rate is than the
+ * SUSTAINABLE pace - the rate that would land exactly at 100% right when
+ * this window resets, `(100 - currentPct) / hoursUntilReset`. A raw "%/hr"
+ * number alone can't say whether that's fast or slow (23%/hr is nothing 10
+ * minutes into a fresh 5h window, alarming with 10 minutes left) - this
+ * ratio normalizes for exactly that, which is the "is this normal or way
+ * too much" signal a flat rate can't give on its own. `null` when there
+ * isn't enough to compute it (no rate yet, missing percentage/reset, or
+ * the window is past its own reset instant); `0` for a flat/falling rate,
+ * since that's strictly slower than any positive sustainable pace;
+ * `null` (rather than `Infinity`) once already at 100%, since a ratio
+ * against zero remaining percentage isn't a meaningful multiple.
+ *
+ * `* 100` is what `ConsumptionRateScopeRow` feeds into `colorBand` against
+ * the `sessionRate`/`weeklyRate` thresholds - 1.6x sustainable pace reads as
+ * 160%, so it starts crossing into the yellow/orange/red bands past 100
+ * rather than only ever coloring within 0-100 like a plain percentage.
+ */
+function computePaceRatio(
+  ratePerHour: number | null,
+  currentPct: number | null,
+  resetRaw: string | null,
+  now: number
+): number | null {
+  if (ratePerHour == null || currentPct == null || !resetRaw) return null;
+  if (ratePerHour <= 0) return 0;
+  const resetMs = new Date(resetRaw).getTime();
+  if (Number.isNaN(resetMs)) return null;
+  const hoursUntilReset = (resetMs - now) / 3_600_000;
+  if (hoursUntilReset <= 0) return null;
+  const remainingPct = Math.max(0, 100 - currentPct);
+  if (remainingPct <= 0) return null;
+  const sustainableRate = remainingPct / hoursUntilReset;
+  if (sustainableRate <= 0) return null;
+  return ratePerHour / sustainableRate;
 }
 
 /**
@@ -414,6 +521,9 @@ function AccountsPanel({
   // Bumped after every capture so an expanded account row's own history
   // re-fetches, independent of the parent's `onChanged` (accounts list refresh).
   const [refreshTick, setRefreshTick] = useState(0);
+  // Collapsed by default - the list itself is secondary to the reset/activity
+  // cards below it, and most sessions only need to glance at account status.
+  const [collapsed, setCollapsed] = useState(true);
 
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
@@ -488,10 +598,21 @@ function AccountsPanel({
   return (
     <div className="card">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          title={collapsed ? t("accounts.expand") : t("accounts.collapse")}
+          className="flex items-center gap-2 min-w-0 text-left"
+        >
+          {collapsed ? (
+            <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
+          )}
           <Users className="w-4 h-4 text-gray-400" />
           <h2 className="text-sm font-semibold text-gray-200">{t("accounts.title")}</h2>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -509,7 +630,7 @@ function AccountsPanel({
         </div>
       </div>
 
-      {adding && (
+      {!collapsed && adding && (
         <form onSubmit={handleAdd} className="px-4 py-3 border-b border-border space-y-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
@@ -543,25 +664,26 @@ function AccountsPanel({
         </form>
       )}
 
-      {error && <p className="px-4 py-3 text-xs text-red-400">{error}</p>}
-      {loginError && <p className="px-4 py-3 text-xs text-red-400">{loginError}</p>}
+      {!collapsed && error && <p className="px-4 py-3 text-xs text-red-400">{error}</p>}
+      {!collapsed && loginError && <p className="px-4 py-3 text-xs text-red-400">{loginError}</p>}
 
-      {!loading && !error && accounts.length === 0 ? (
-        <p className="px-4 py-6 text-xs text-gray-500 text-center">{t("accounts.empty")}</p>
-      ) : (
-        accounts.map((account) => (
-          <AccountRow
-            key={account.id}
-            account={account}
-            captureBusy={captureBusyIds.has(account.id)}
-            confirmingRemove={confirmRemoveId === account.id}
-            refreshTick={refreshTick}
-            onCapture={handleCapture}
-            onRemoveClick={handleRemoveClick}
-            onLogin={handleLogin}
-          />
-        ))
-      )}
+      {!collapsed &&
+        (!loading && !error && accounts.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-gray-500 text-center">{t("accounts.empty")}</p>
+        ) : (
+          accounts.map((account) => (
+            <AccountRow
+              key={account.id}
+              account={account}
+              captureBusy={captureBusyIds.has(account.id)}
+              confirmingRemove={confirmRemoveId === account.id}
+              refreshTick={refreshTick}
+              onCapture={handleCapture}
+              onRemoveClick={handleRemoveClick}
+              onLogin={handleLogin}
+            />
+          ))
+        ))}
     </div>
   );
 }
@@ -780,6 +902,202 @@ function AccountActivityCard({ accounts }: { accounts: Account[] }) {
             ) : (
               <span className="text-gray-500 flex-shrink-0">{t("accounts.activity.never")}</span>
             )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One scope's (session or weekly) verdict row within {@link
+ * ConsumptionRateCard} - "not enough data yet" (plain muted text), "on
+ * track" or a countdown to the predicted exhaustion instant, both rendered
+ * as a `.badge` pill (same soft-tint idiom `StatusBadge`/`AccountStatusBadge`
+ * already use elsewhere on this page) so the verdict reads as one scannable
+ * unit instead of loose colored text. Both pill variants are graded through
+ * `colorBand` against the SAME raw pace-ratio number (`computePaceRatio` -
+ * how many times faster the current burn is than the sustainable pace, e.g.
+ * `1.6` for "1.6x") shown in the stats line underneath, rather than a
+ * separate percentage, so the color always matches the number the user is
+ * actually reading - an on-track account creeping up past 1x sustainable
+ * pace can show a yellow/orange pill before it ever flips into "at risk."
+ * When at risk, a "Short by" tag beside the pill spells out the actual gap
+ * - `risk.shortfallMs`, the difference between the reset instant and the
+ * predicted exhaustion instant - since "runs out in 4 days" alone doesn't
+ * say whether that's uncomfortably close to a 4.5-day reset or nowhere near
+ * a 10-day one. The stats line names its own basis - `observedSpanMs`
+ * (server/lib/consumption-rate.js) - as its own `whitespace-nowrap` segment
+ * (not string-concatenated into the rate text) so it wraps as a whole unit
+ * on narrow viewports instead of splitting mid-duration.
+ *
+ * Renders as a Fragment (two top-level children: the scope label, then the
+ * rest) rather than a wrapping `<div>` so the caller can lay both scope
+ * rows out as direct children of one shared CSS grid - the label column
+ * then auto-sizes to whichever of "Session"/"Weekly" (or their localized
+ * equivalents) is wider, keeping both rows aligned without a hardcoded,
+ * locale-unsafe pixel width.
+ */
+function ConsumptionRateScopeRow({
+  label,
+  ratePerHour,
+  currentPct,
+  predictedExhaustionAt,
+  resetRaw,
+  observedSpanMs,
+  thresholds,
+  now,
+  formatCountdown,
+  formatRate,
+}: {
+  label: string;
+  ratePerHour: number | null;
+  currentPct: number | null;
+  predictedExhaustionAt: string | null;
+  resetRaw: string | null;
+  observedSpanMs: number | null;
+  thresholds: ColorThresholds;
+  now: number;
+  formatCountdown: (ms: number) => string;
+  formatRate: (ratePerHour: number) => string;
+}) {
+  const { t } = useTranslation("usage");
+  const risk = computeConsumptionRisk(ratePerHour, predictedExhaustionAt, resetRaw, now);
+  const paceRatio =
+    ratePerHour != null ? computePaceRatio(ratePerHour, currentPct, resetRaw, now) : null;
+  // `paceRatio` is null when there isn't enough to compute a sustainable
+  // pace to compare against (see `computePaceRatio`) - falls back to the
+  // safest read for an "on track" row (nothing suggests risk) and the
+  // worst read for an "at-risk" row (paceRatio is null there only when
+  // already at/over 100% of the window).
+  const band = (fallback: ColorBand): ColorBand =>
+    paceRatio != null ? colorBand(paceRatio, thresholds) : fallback;
+
+  return (
+    <>
+      <span className="whitespace-nowrap pt-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+        {label}
+      </span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {risk.kind === "no-data" ? (
+            <span className="text-xs text-gray-500">
+              {t("accounts.consumptionRate.notEnoughData")}
+            </span>
+          ) : risk.kind === "safe" ? (
+            <span className={`badge ${BAND_BADGE_CLASS[band("green")]}`}>
+              <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
+              {t("accounts.consumptionRate.onTrack")}
+            </span>
+          ) : (
+            <span className={`badge ${BAND_BADGE_CLASS[band("red")]}`}>
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              {t("accounts.consumptionRate.runsOutIn")}
+              <span className="font-mono font-bold text-gray-50">
+                {formatCountdown(risk.runwayMs)}
+              </span>
+            </span>
+          )}
+          {risk.kind === "at-risk" && (
+            <span className="whitespace-nowrap text-[11px] text-gray-500">
+              {t("accounts.consumptionRate.shortBy")}{" "}
+              <span className="font-mono font-semibold text-gray-300">
+                {formatCountdown(risk.shortfallMs)}
+              </span>
+            </span>
+          )}
+        </div>
+        {ratePerHour != null && (
+          <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 mt-1 text-[11px] font-mono text-gray-500">
+            <span className="whitespace-nowrap">
+              {ratePerHour <= 0
+                ? // Clamp to 0 for display: a flat/falling fit is often a
+                  // tiny negative float (regression noise), which would
+                  // otherwise render as a confusing "-0.0%/hr".
+                  t("accounts.consumptionRate.rateFlat", { rate: formatRate(0) })
+                : paceRatio != null
+                  ? t("accounts.consumptionRate.ratePace", {
+                      rate: formatRate(ratePerHour),
+                      pace: paceRatio.toFixed(1),
+                    })
+                  : formatRate(ratePerHour)}
+            </span>
+            {observedSpanMs != null && (
+              <span className="whitespace-nowrap text-gray-600">
+                ·{" "}
+                {t("accounts.consumptionRate.observedOver", {
+                  span: formatCountdown(observedSpanMs),
+                })}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Predicts, per account, when its session and weekly quotas will run out if
+ * current usage keeps climbing at its recent pace (the %/hour trend
+ * server/lib/consumption-rate.js fits over that account's own recent
+ * captures), and whether that predicted exhaustion actually lands before
+ * the window's own reset - a rising trend that resets first is "on track"
+ * regardless of how steep it looks. Colored by the `sessionRate`/
+ * `weeklyRate` threshold scopes (see `computeConsumptionRisk`), which are
+ * independent of the raw %-used bands the rest of this page uses: a slow
+ * climb toward 100% reads very differently depending on how much window
+ * time is actually left, which a raw percentage alone can't capture.
+ */
+function ConsumptionRateCard({ accounts }: { accounts: Account[] }) {
+  const { t } = useTranslation("usage");
+  const { sessionRate: sessionRateThresholds, weeklyRate: weeklyRateThresholds } =
+    useColorThresholds();
+  if (accounts.length === 0) return null;
+
+  const now = Date.now();
+
+  return (
+    <div className="card p-4">
+      <h2 className="text-sm font-semibold text-gray-200">{t("accounts.consumptionRate.title")}</h2>
+      <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.consumptionRate.subtitle")}</p>
+      <div className="space-y-2">
+        {accounts.map((account) => (
+          <div
+            key={account.id}
+            className="rounded-lg border border-border/60 bg-surface-2/40 p-3 text-xs"
+          >
+            <p className="text-gray-300 font-medium truncate mb-2">{account.label}</p>
+            {/* Both scope rows are direct children of this grid (each row
+                renders a Fragment - see ConsumptionRateScopeRow) so the
+                label column auto-sizes to the wider of the two, keeping
+                "Session"/"Weekly" aligned without a hardcoded width. */}
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 items-start">
+              <ConsumptionRateScopeRow
+                label={t("accounts.consumptionRate.session")}
+                ratePerHour={account.session_burn_rate_pct_per_hour}
+                currentPct={account.latest_session_window_pct}
+                predictedExhaustionAt={account.session_predicted_exhaustion_at}
+                resetRaw={account.latest_session_window_reset_raw}
+                observedSpanMs={account.session_burn_rate_observed_span_ms}
+                thresholds={sessionRateThresholds}
+                now={now}
+                formatCountdown={formatMs}
+                formatRate={formatRatePerHour}
+              />
+              <ConsumptionRateScopeRow
+                label={t("accounts.consumptionRate.weekly")}
+                ratePerHour={account.week_burn_rate_pct_per_hour}
+                currentPct={account.latest_week_window_pct}
+                predictedExhaustionAt={account.week_predicted_exhaustion_at}
+                resetRaw={account.latest_week_reset_raw}
+                observedSpanMs={account.week_burn_rate_observed_span_ms}
+                thresholds={weeklyRateThresholds}
+                now={now}
+                formatCountdown={formatMsLong}
+                formatRate={formatRatePerDay}
+              />
+            </div>
           </div>
         ))}
       </div>
@@ -1024,17 +1342,27 @@ function scopesEqual(a: ColorThresholds, b: ColorThresholds): boolean {
 
 /**
  * One scope's (session or weekly) three inputs + live preview strip, used
- * twice by {@link ColorThresholdsCard} - session listed first, then weekly,
- * since they're independent settings rather than one shared ramp.
+ * four times by {@link ColorThresholdsCard} - session/weekly (raw %-used,
+ * `previewMax` 100) first, then their Consumption Rate `*Rate` counterparts
+ * (a raw pace-ratio multiplier, not a percentage - `previewMax` scales to
+ * the configured `redAt` instead of a fixed 100, and `step`/`description`
+ * reflect the decimal, sub-100 range those two are actually measured in -
+ * see `DEFAULT_RATE_COLOR_THRESHOLDS`).
  */
 function ColorThresholdsScopeFields({
   scopeLabel,
+  description,
   value,
   onChange,
+  step = 1,
+  previewMax = 100,
 }: {
   scopeLabel: string;
+  description?: string;
   value: ColorThresholds;
   onChange: (field: keyof ColorThresholds, next: number) => void;
+  step?: number;
+  previewMax?: number;
 }) {
   const { t } = useTranslation("usage");
   const fields: Array<{ field: keyof ColorThresholds; dot: string; label: string }> = [
@@ -1042,11 +1370,17 @@ function ColorThresholdsScopeFields({
     { field: "orangeAt", dot: "bg-orange-500", label: t("accounts.colorThresholds.orangeLabel") },
     { field: "redAt", dot: "bg-red-500", label: t("accounts.colorThresholds.redLabel") },
   ];
+  // Fixed 100 only makes sense as the "full scale" for the raw %-used
+  // scopes; the rate scopes' redAt is itself only ~1.5 by default, so the
+  // last segment scales off whichever of `previewMax` or `redAt` is larger
+  // instead of going almost entirely red.
+  const scaleMax = Math.max(previewMax, value.redAt);
   return (
     <div>
       <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">
         {scopeLabel}
       </h3>
+      {description && <p className="text-[11px] text-gray-500 mb-2">{description}</p>}
       <div className="h-2 rounded-full overflow-hidden flex border border-border mb-3">
         <div className="bg-emerald-500" style={{ flex: Math.max(0, value.yellowAt) }} />
         <div
@@ -1057,7 +1391,7 @@ function ColorThresholdsScopeFields({
           className="bg-orange-500"
           style={{ flex: Math.max(0, value.redAt - value.orangeAt) }}
         />
-        <div className="bg-red-500" style={{ flex: Math.max(0, 100 - value.redAt) }} />
+        <div className="bg-red-500" style={{ flex: Math.max(0, scaleMax - value.redAt) }} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {fields.map(({ field, dot, label }) => (
@@ -1070,6 +1404,7 @@ function ColorThresholdsScopeFields({
               type="number"
               min={0}
               max={1000}
+              step={step}
               value={value[field]}
               onChange={(e: ChangeEvent<HTMLInputElement>) => {
                 const next = Number(e.target.value);
@@ -1084,16 +1419,25 @@ function ColorThresholdsScopeFields({
   );
 }
 
+/** The four {@link ColorThresholdsConfig} keys, in display order - session
+ *  and weekly (raw %-used) first, then their Consumption Rate (runway-risk)
+ *  counterparts. */
+const COLOR_THRESHOLD_SCOPES = ["session", "weekly", "sessionRate", "weeklyRate"] as const;
+type ColorThresholdScope = (typeof COLOR_THRESHOLD_SCOPES)[number];
+
 /**
  * Global settings card for the green/yellow/orange/red bands every
  * percentage-driven color on this page (`colorBand` and its callers above)
  * reads from - editable here, persisted server-side via
  * client/src/lib/colorThresholds.ts, and shared live across every connected
- * client. Two independent scopes, session then weekly (they're separate
- * quotas, not one shared ramp - see `ColorThresholdsConfig`). Edits are
- * staged in local `draft` state so a mid-edit keystroke doesn't trigger a
- * save on every render; only "Save" (once both scopes are valid) actually
- * persists.
+ * client. Four independent scopes (see `COLOR_THRESHOLD_SCOPES` -
+ * they're separate quantities, not one shared ramp - see
+ * `ColorThresholdsConfig`). Edits are staged in local `draft` state so a
+ * mid-edit keystroke doesn't trigger a save on every render; only "Save"
+ * (once every scope is valid) actually persists. Collapsed by default (same
+ * chevron-toggle idiom as `RawTextSection`/`HistoryRow` below) - a
+ * rarely-touched config card, so it shouldn't compete for space with the
+ * account data every visit actually comes here to read.
  */
 function ColorThresholdsCard() {
   const { t } = useTranslation("usage");
@@ -1101,6 +1445,7 @@ function ColorThresholdsCard() {
   const [draft, setDraft] = useState<ColorThresholdsConfig>(thresholds);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(true);
 
   // A live push (another tab, another computer) should win over an untouched
   // draft - but not clobber an edit in progress, so only resync while the
@@ -1112,13 +1457,13 @@ function ColorThresholdsCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thresholds]);
 
-  const isValid = scopeIsValid(draft.session) && scopeIsValid(draft.weekly);
-  const isDirty =
-    !scopesEqual(draft.session, thresholds.session) ||
-    !scopesEqual(draft.weekly, thresholds.weekly);
+  const isValid = COLOR_THRESHOLD_SCOPES.every((scope) => scopeIsValid(draft[scope]));
+  const isDirty = COLOR_THRESHOLD_SCOPES.some(
+    (scope) => !scopesEqual(draft[scope], thresholds[scope])
+  );
 
   const handleScopeChange =
-    (scope: "session" | "weekly") => (field: keyof ColorThresholds, next: number) => {
+    (scope: ColorThresholdScope) => (field: keyof ColorThresholds, next: number) => {
       setDraft((d) => ({ ...d, [scope]: { ...d[scope], [field]: next } }));
       setError(null);
     };
@@ -1148,42 +1493,68 @@ function ColorThresholdsCard() {
 
   return (
     <div className="card p-4">
-      <h2 className="text-sm font-semibold text-gray-200">{t("accounts.colorThresholds.title")}</h2>
-      <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.colorThresholds.subtitle")}</p>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center gap-2 w-full text-left"
+      >
+        {collapsed ? (
+          <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+        )}
+        <h2 className="text-sm font-semibold text-gray-200">
+          {t("accounts.colorThresholds.title")}
+        </h2>
+      </button>
 
-      <div className="space-y-4">
-        <ColorThresholdsScopeFields
-          scopeLabel={t("accounts.colorThresholds.scope.session")}
-          value={draft.session}
-          onChange={handleScopeChange("session")}
-        />
-        <ColorThresholdsScopeFields
-          scopeLabel={t("accounts.colorThresholds.scope.weekly")}
-          value={draft.weekly}
-          onChange={handleScopeChange("weekly")}
-        />
-      </div>
+      {!collapsed && (
+        <>
+          <p className="text-xs text-gray-500 mt-0.5 mb-3 ml-[1.375rem]">
+            {t("accounts.colorThresholds.subtitle")}
+          </p>
 
-      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+          <div className="space-y-4">
+            {COLOR_THRESHOLD_SCOPES.map((scope) => {
+              const isRateScope = scope === "sessionRate" || scope === "weeklyRate";
+              return (
+                <ColorThresholdsScopeFields
+                  key={scope}
+                  scopeLabel={t(`accounts.colorThresholds.scope.${scope}`)}
+                  description={
+                    isRateScope ? t("accounts.colorThresholds.rateScopeDescription") : undefined
+                  }
+                  value={draft[scope]}
+                  onChange={handleScopeChange(scope)}
+                  step={isRateScope ? 0.1 : 1}
+                  previewMax={isRateScope ? 2 : 100}
+                />
+              );
+            })}
+          </div>
 
-      <div className="flex items-center gap-2 mt-4">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !isValid || !isDirty}
-          className="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {saving ? t("accounts.colorThresholds.saving") : t("accounts.colorThresholds.save")}
-        </button>
-        <button
-          type="button"
-          onClick={handleResetDefaults}
-          disabled={saving}
-          className="btn-ghost text-xs disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {t("accounts.colorThresholds.resetDefaults")}
-        </button>
-      </div>
+          {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+
+          <div className="flex items-center gap-2 mt-4">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !isValid || !isDirty}
+              className="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? t("accounts.colorThresholds.saving") : t("accounts.colorThresholds.save")}
+            </button>
+            <button
+              type="button"
+              onClick={handleResetDefaults}
+              disabled={saving}
+              className="btn-ghost text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {t("accounts.colorThresholds.resetDefaults")}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1529,22 +1900,25 @@ export function Usage() {
 
   return (
     <div className="space-y-6">
+      {accounts.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
+          <div className="space-y-4">
+            <SessionResetTimeline accounts={accounts} />
+            <AccountsResetCalendar accounts={accounts} />
+          </div>
+          <div className="space-y-4">
+            <AccountActivityCard accounts={accounts} />
+            <ConsumptionRateCard accounts={accounts} />
+          </div>
+        </div>
+      )}
+
       <AccountsPanel
         accounts={accounts}
         loading={accountsLoading}
         error={accountsError}
         onChanged={fetchAccounts}
       />
-
-      {accounts.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
-          <SessionResetTimeline accounts={accounts} />
-          <div className="space-y-4">
-            <AccountActivityCard accounts={accounts} />
-            <AccountsResetCalendar accounts={accounts} />
-          </div>
-        </div>
-      )}
 
       {accounts.length > 0 && <ColorThresholdsCard />}
 

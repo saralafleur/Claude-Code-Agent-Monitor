@@ -38,6 +38,8 @@
   },
   "accounts": {
     "title": "账户",
+    "expand": "展开账户",
+    "collapse": "收起账户",
     "refreshAll": "全部刷新",
     "refreshingAll": "正在刷新…",
     "addAccount": "添加账户",
@@ -77,13 +79,29 @@
       "cappedByWeekly": "受周限额限制（剩余 {{pct}}%）",
       "weeklyResetsIn": "周限额将在 {{when}} 后重置"
     },
+    "consumptionRate": {
+      "title": "消耗速率",
+      "subtitle": "根据每个账户最近的使用速度，预测会话/周窗口是否会在重置前耗尽额度。",
+      "session": "会话",
+      "weekly": "每周",
+      "notEnoughData": "数据尚不足",
+      "onTrack": "正常 — 将在耗尽前重置",
+      "runsOutIn": "耗尽倒计时",
+      "shortBy": "缺口",
+      "rateFlat": "{{rate}}（未上升）",
+      "ratePace": "{{rate}} · 可持续速率的 {{pace}} 倍",
+      "observedOver": "观测时长 {{span}}"
+    },
     "colorThresholds": {
       "title": "颜色阈值",
       "subtitle": "配置绿色 → 黄色 → 橙色 → 红色使用量颜色的切换点，适用于本页面全局。",
       "scope": {
         "session": "会话窗口（5小时）",
-        "weekly": "周窗口"
+        "weekly": "周窗口",
+        "sessionRate": "会话消耗速率",
+        "weeklyRate": "每周消耗速率"
       },
+      "rateScopeDescription": "以可持续速率的倍数衡量，而非百分比 —— 1.0 表示消耗速度恰好会在窗口重置时刚好达到 100%。通常设置在 0.5 到 1.5 之间。",
       "yellowLabel": "黄色起始于",
       "orangeLabel": "橙色起始于",
       "redLabel": "红色起始于",

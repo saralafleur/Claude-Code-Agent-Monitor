@@ -1,5 +1,6 @@
 {
   "backToProjects": "Quay lại Dự án",
+  "backToProjectManager": "Quay lại Quản lý dự án",
   "notFound": "Không tìm thấy dự án",
   "notFoundDesc": "Dự án này có thể đã bị xóa, hoặc liên kết đã lỗi thời.",
   "errors": {
@@ -11,6 +12,9 @@
   },
   "repos": {
     "title": "Kho mã nguồn",
+    "refresh": "Làm mới",
+    "refreshing": "Đang quét…",
+    "refreshFailed": "Không thể quét lại kho mã nguồn của dự án này",
     "empty": "Chưa có thư mục nào được ánh xạ của dự án này là kho git.",
     "worktrees_one": "{{count}} worktree",
     "worktrees_other": "{{count}} worktree",
@@ -20,14 +24,71 @@
     "clean": "Sạch",
     "unknown": "Không xác định",
     "nonRepoFoldersTitle": "Thư mục đã ánh xạ khác",
-    "nonRepoFolder": "Không phải kho git"
+    "nonRepoFolder": "Không phải kho git",
+    "remove": "Xóa",
+    "removeConfirm": "Xóa?",
+    "removeFailed": "Không thể xóa thư mục này khỏi dự án",
+    "terminalDefault": {
+      "label": "Cung cấp cho terminal mới",
+      "toggleFailed": "Không thể cập nhật cài đặt terminal của thư mục này"
+    },
+    "continueWorktree": {
+      "label": "Tiếp tục",
+      "title": "Mở terminal tại đây với một phiên claude hoàn toàn mới, kèm sẵn gợi ý kiểm tra git status/log để tiếp tục công việc đang dang dở của worktree này.",
+      "opening": "Đang mở…",
+      "opened": "Đã mở",
+      "failed": "Không thể mở terminal cho worktree này"
+    },
+    "collapse": "Thu gọn",
+    "expand": "Mở rộng",
+    "viewMode": {
+      "label": "Chế độ xem thẻ Kho mã nguồn",
+      "compact": "Tối giản",
+      "compactHint": "Chế độ tối giản — ẩn các thao tác Xóa/Thêm/Bỏ qua/Khôi phục, chỉ hiển thị thông tin.",
+      "full": "Đầy đủ",
+      "fullHint": "Chế độ đầy đủ — hiển thị mọi thao tác (Xóa, Thêm vào dự án, Bỏ qua, Khôi phục)."
+    },
+    "scanModal": {
+      "title": "Kết quả quét kho mã nguồn",
+      "description": "Đây là những gì lần quét lại tìm thấy trong các thư mục đã ánh xạ của dự án này.",
+      "close": "Đóng",
+      "empty": "Không tìm thấy kho mã nguồn, đề xuất, hoặc thư mục không phải git nào.",
+      "reposFound_one": "Tìm thấy {{count}} kho mã nguồn",
+      "reposFound_other": "Tìm thấy {{count}} kho mã nguồn",
+      "siblingsFound_one": "Tìm thấy {{count}} kho mã nguồn được đề xuất",
+      "siblingsFound_other": "Tìm thấy {{count}} kho mã nguồn được đề xuất",
+      "siblingsHint": "Thêm một kho sẽ quét lại ngay các kho của dự án này, để có thể phát hiện thêm các kho liên quan đến chính nó.",
+      "nonRepoFound_one": "{{count}} thư mục đã ánh xạ khác",
+      "nonRepoFound_other": "{{count}} thư mục đã ánh xạ khác"
+    }
   },
   "suggestedRepos": {
     "title": "Kho mã nguồn được đề xuất",
-    "description": "Được nêu trong PROJECT-CONTEXT.md của một kho đã ánh xạ, chưa thuộc dự án này.",
+    "description": "Các kho mã nguồn liên quan được tìm thấy trên đĩa hoặc được nêu trong PROJECT-CONTEXT.md của một kho đã ánh xạ, chưa thuộc dự án này.",
+    "empty": "Hiện không có đề xuất nào.",
     "add": "Thêm vào dự án",
     "adding": "Đang thêm…",
-    "addFailed": "Không thể thêm kho này vào dự án."
+    "addFailed": "Không thể thêm kho này vào dự án.",
+    "ignore": "Bỏ qua",
+    "ignoring": "Đang bỏ qua…",
+    "ignoreFailed": "Không thể bỏ qua đề xuất này.",
+    "siblingScan": {
+      "label": "Quét kho liền kề",
+      "hint": "Mặc định tắt. Quét thư mục cha của dự án này để tìm các kho git khác nằm cạnh nó — hữu ích khi các kho liên quan nằm cạnh nhau, nhưng gây nhiễu trong thư mục workspace phẳng chứa nhiều kho không liên quan.",
+      "toggleFailed": "Không thể cập nhật cài đặt quét kho liền kề."
+    },
+    "source": {
+      "context": "PROJECT-CONTEXT.md",
+      "diskSibling": "thư mục liền kề",
+      "diskNested": "kho lồng nhau"
+    }
+  },
+  "ignoredRepos": {
+    "title": "Kho đã bỏ qua",
+    "description": "Các đề xuất đã bị loại bỏ — sẽ không xuất hiện lại ở các lần quét sau cho đến khi được khôi phục.",
+    "unignore": "Khôi phục",
+    "unignoring": "Đang khôi phục…",
+    "unignoreFailed": "Không thể khôi phục kho này."
   },
   "intake": {
     "title": "Sáng kiến Team-Intake",
@@ -37,7 +98,15 @@
       "planned": "Đã lên kế hoạch",
       "qa": "QA",
       "built": "Đã xây dựng",
-      "released": "Đã phát hành"
+      "released": "Đã phát hành / Hợp nhất"
+    },
+    "noActiveWorktree": "Không có worktree đang hoạt động",
+    "mergeDetected": "Đã hợp nhất (chưa có merge.json)",
+    "mergeDetectedTitle": "Phát hiện qua commit git {{commit}} — merge.json chưa từng được tạo cho sáng kiến này",
+    "releasedGroup": {
+      "title": "Đã phát hành / Hợp nhất ({{count}})",
+      "expand": "Mở rộng các sáng kiến Đã phát hành / Hợp nhất",
+      "collapse": "Thu gọn các sáng kiến Đã phát hành / Hợp nhất"
     }
   }
 }

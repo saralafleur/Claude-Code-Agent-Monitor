@@ -394,6 +394,70 @@ describe("account activity (last_used_at / is_active)", () => {
   });
 });
 
+describe("consumption rate (burn rate / predicted exhaustion)", () => {
+  let configDir;
+  let accountId;
+
+  before(async () => {
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), "ccam-acct-rate-"));
+    const res = await post("/api/accounts", { label: "Rate Test", configDir });
+    accountId = res.body.account.id;
+  });
+  after(() => {
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  async function captureWith(sessionPct, sessionResetRaw) {
+    mock.method(claudeCliCredentials, "readCredential", async () => ({
+      status: "ok",
+      accessToken: "sk-ant-oat-fake",
+      accountEmail: "rate@example.com",
+      accountOrg: null,
+    }));
+    const usageFetchOauth = require("../lib/usage-fetch-oauth");
+    mock.method(usageFetchOauth, "fetchUsageViaOAuth", async () => ({
+      status: "ok",
+      sessionWindowPct: sessionPct,
+      sessionWindowResetRaw: sessionResetRaw,
+      weekWindowPct: 0,
+      weekResetRaw: null,
+      httpStatus: 200,
+      errorMessage: null,
+    }));
+    await post(`/api/accounts/${accountId}/capture`, {});
+  }
+
+  it("reports null rate/prediction fields with only one capture — nothing to fit a trend through yet", async () => {
+    // 4h elapsed in the 5h window, so it's still the current window.
+    await captureWith(20, new Date(Date.now() + 3_600_000).toISOString());
+
+    const list = await get("/api/accounts");
+    const row = list.body.accounts.find((a) => a.id === accountId);
+    assert.equal(row.session_burn_rate_pct_per_hour, null);
+    assert.equal(row.session_predicted_exhaustion_at, null);
+    assert.equal(row.session_burn_rate_observed_span_ms, null);
+  });
+
+  it("reports a rising rate + predicted exhaustion once a second capture confirms the trend", async () => {
+    // A second real capture, still inside the same 5h window as the
+    // previous test's, with a higher percentage — two real rows are now on
+    // record, which is all `predictExhaustion` needs to fit a (very steep,
+    // since these two captures land moments apart in wall-clock time) rising
+    // trend and project it forward.
+    const resetRaw = new Date(Date.now() + 3_600_000).toISOString();
+    await captureWith(40, resetRaw);
+
+    const list = await get("/api/accounts");
+    const row = list.body.accounts.find((a) => a.id === accountId);
+    assert.ok(row.session_burn_rate_pct_per_hour > 0);
+    assert.ok(row.session_predicted_exhaustion_at);
+    // Two real captures now exist a few ms apart in wall-clock time — the
+    // exact span isn't deterministic, but it must be a real non-null number.
+    assert.equal(typeof row.session_burn_rate_observed_span_ms, "number");
+    assert.ok(row.session_burn_rate_observed_span_ms >= 0);
+  });
+});
+
 describe("GET /api/usage accountId filter", () => {
   it("scopes usage history to one account when accountId is passed", async () => {
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "ccam-acct-usagefilter-"));

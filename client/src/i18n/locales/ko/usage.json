@@ -38,6 +38,8 @@
   },
   "accounts": {
     "title": "계정",
+    "expand": "계정 펼치기",
+    "collapse": "계정 접기",
     "refreshAll": "모두 새로고침",
     "refreshingAll": "새로고침 중…",
     "addAccount": "계정 추가",
@@ -77,13 +79,29 @@
       "cappedByWeekly": "주간 한도로 제한됨 ({{pct}}% 남음)",
       "weeklyResetsIn": "주간 리셋까지 {{when}}"
     },
+    "consumptionRate": {
+      "title": "소비 속도",
+      "subtitle": "각 계정의 최근 사용 속도를 기준으로, 세션/주간 윈도우가 리셋되기 전에 한도를 초과할지 예측합니다.",
+      "session": "세션",
+      "weekly": "주간",
+      "notEnoughData": "아직 데이터가 충분하지 않음",
+      "onTrack": "정상 — 한도 도달 전에 리셋됨",
+      "runsOutIn": "소진까지",
+      "shortBy": "부족한 시간",
+      "rateFlat": "{{rate}} (증가 없음)",
+      "ratePace": "{{rate}} · 지속 가능한 속도의 {{pace}}배",
+      "observedOver": "{{span}} 동안 관찰됨"
+    },
     "colorThresholds": {
       "title": "색상 임계값",
       "subtitle": "이 페이지 전체에 적용되는 초록 → 노랑 → 주황 → 빨강 사용량 색상 전환 지점을 설정합니다.",
       "scope": {
         "session": "세션 윈도우 (5시간)",
-        "weekly": "주간 윈도우"
+        "weekly": "주간 윈도우",
+        "sessionRate": "세션 소비 속도",
+        "weeklyRate": "주간 소비 속도"
       },
+      "rateScopeDescription": "백분율이 아닌 지속 가능한 속도의 배수로 측정됩니다 — 1.0은 리셋 시점에 정확히 100%에 도달할 만큼의 속도로 소비 중임을 의미합니다. 일반적으로 0.5에서 1.5 사이로 설정합니다.",
       "yellowLabel": "노랑 시작 지점",
       "orangeLabel": "주황 시작 지점",
       "redLabel": "빨강 시작 지점",

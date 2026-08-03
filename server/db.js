@@ -532,6 +532,27 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_project_paths_project ON project_paths(project_id);
 
+  -- A project-scoped "don't suggest this again" list for the Project Detail
+  -- page's Repos card (see server/lib/repo-topology.js). Ignoring a detected
+  -- but not-yet-mapped repo suggestion writes a row here; name/source are
+  -- captured at ignore time (not re-derived) so the Ignored section can
+  -- render without re-running the live disk scan for just this path.
+  -- Un-ignoring deletes the row, which is enough to make the suggestion
+  -- reappear on the next scan - buildProjectRepoTopology filters
+  -- detectedSiblings against this table every call, nothing is cached.
+  CREATE TABLE IF NOT EXISTS project_ignored_repos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    ignored_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_project_ignored_repos_project_path
+    ON project_ignored_repos(project_id, path);
+
   -- Per-repo plans ingested from <cwd>/AGENT-PLAN.md. Keyed by cwd (projects
   -- aggregate via the project_paths join, exactly like sessions do). The file
   -- is the human-owned source of truth; the dashboard only mirrors it.
@@ -1227,6 +1248,40 @@ try {
   db.prepare("ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0").run();
 }
 
+// Migrate: add `sibling_scan_enabled` to projects — gates the disk-based
+// sibling-repo scan in repo-topology's "Suggested repos" feature. Defaults
+// OFF because scanning a project's parent directory for other git repos is
+// noisy in flat multi-project workspaces (every unrelated repo cloned into
+// the same folder gets suggested); nested/children scanning and PROJECT-
+// CONTEXT.md-declared siblings are unaffected and always run. Additive +
+// NOT NULL DEFAULT 0, so every historical project reads as sibling-scan-off.
+try {
+  db.prepare("SELECT sibling_scan_enabled FROM projects LIMIT 1").get();
+} catch {
+  db.prepare(
+    "ALTER TABLE projects ADD COLUMN sibling_scan_enabled INTEGER NOT NULL DEFAULT 0"
+  ).run();
+}
+
+// Migrate: add `terminal_default` to project_paths — lets a project with
+// several mapped folders exclude some of them from the "open a new Claude
+// terminal" pickers (OpenTerminalModal's folder step, and the Project Detail
+// page's per-folder toggle that drives it). Additive + NOT NULL DEFAULT 1,
+// so every historical mapping (added before this column existed) keeps
+// showing up in the picker exactly as it does today. Going forward, only a
+// project's first mapped folder is left on this column default — the
+// app-level insert logic in server/routes/projects.js explicitly flips
+// every folder mapped alongside or after it to off, so a freshly created
+// multi-folder project doesn't flood the picker with folders the user
+// hasn't chosen to use that way yet.
+try {
+  db.prepare("SELECT terminal_default FROM project_paths LIMIT 1").get();
+} catch {
+  db.prepare(
+    "ALTER TABLE project_paths ADD COLUMN terminal_default INTEGER NOT NULL DEFAULT 1"
+  ).run();
+}
+
 // Remote data sources: other machines whose Claude Code history this dashboard
 // pulls in over SSH. Config only — NO secrets are stored here: authentication
 // always defers to the host's own SSH stack (~/.ssh/config, ssh-agent, keys,
@@ -1272,13 +1327,16 @@ db.prepare("INSERT OR IGNORE INTO dashboard_layout (id) VALUES (1)").run();
 // one setting applies to every connected client) controlling where the
 // green→yellow→orange→red bands fall for every percentage-driven color in
 // the Usage page (session/weekly rate-limit bars, the session-reset marker,
-// the "capped by weekly" callout). Two independent scopes, since the
-// session (5h) window and the weekly window are separate quotas that
-// shouldn't have to share one ramp — `session_*` columns color anything
-// driven by `latest_session_window_pct`, `weekly_*` anything driven by
-// `latest_week_window_pct`. Each `*_yellow_at`/`*_orange_at`/`*_red_at` is
-// the percentage that band STARTS at; below `*_yellow_at` is always green.
-// See server/routes/color-thresholds.js.
+// the "capped by weekly" callout, the Consumption Rate card). Four
+// independent scopes, since these are separate quantities that shouldn't
+// have to share one ramp — `session_*` columns color anything driven by
+// `latest_session_window_pct`, `weekly_*` anything driven by
+// `latest_week_window_pct`, `session_rate_*`/`weekly_rate_*` color the
+// Consumption Rate card's runway-risk percentage (how much of a window's
+// remaining time a predicted burn-rate trend would eat before that window
+// resets) for the session and weekly windows respectively. Each
+// `*_yellow_at`/`*_orange_at`/`*_red_at` is the percentage that band STARTS
+// at; below `*_yellow_at` is always green. See server/routes/color-thresholds.js.
 db.exec(`
   CREATE TABLE IF NOT EXISTS color_thresholds (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1288,10 +1346,37 @@ db.exec(`
     weekly_yellow_at REAL NOT NULL DEFAULT 50,
     weekly_orange_at REAL NOT NULL DEFAULT 80,
     weekly_red_at REAL NOT NULL DEFAULT 100,
+    session_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
+    session_rate_orange_at REAL NOT NULL DEFAULT 1.0,
+    session_rate_red_at REAL NOT NULL DEFAULT 1.5,
+    weekly_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
+    weekly_rate_orange_at REAL NOT NULL DEFAULT 1.0,
+    weekly_rate_red_at REAL NOT NULL DEFAULT 1.5,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   );
 `);
 db.prepare("INSERT OR IGNORE INTO color_thresholds (id) VALUES (1)").run();
+
+// Migrate: session_rate_*/weekly_rate_* (the Consumption Rate card's own
+// color bands — how much of a quota window's remaining runway a predicted
+// burn-rate trend eats before reset, not the raw %-used the session/weekly
+// scopes already cover) were added after this table's first release.
+// `CREATE TABLE IF NOT EXISTS` above is a no-op against an existing DB that
+// predates these columns, so backfill them the same additive,
+// default-seeded way the session/weekly split above once was — no
+// destructive drop needed this time since these are purely new columns,
+// not a reshaped existing scope.
+const colorThresholdsRateColumns = db.prepare("PRAGMA table_info(color_thresholds)").all();
+if (!colorThresholdsRateColumns.some((col) => col.name === "session_rate_yellow_at")) {
+  db.exec(`
+    ALTER TABLE color_thresholds ADD COLUMN session_rate_yellow_at REAL NOT NULL DEFAULT 0.5;
+    ALTER TABLE color_thresholds ADD COLUMN session_rate_orange_at REAL NOT NULL DEFAULT 1.0;
+    ALTER TABLE color_thresholds ADD COLUMN session_rate_red_at REAL NOT NULL DEFAULT 1.5;
+    ALTER TABLE color_thresholds ADD COLUMN weekly_rate_yellow_at REAL NOT NULL DEFAULT 0.5;
+    ALTER TABLE color_thresholds ADD COLUMN weekly_rate_orange_at REAL NOT NULL DEFAULT 1.0;
+    ALTER TABLE color_thresholds ADD COLUMN weekly_rate_red_at REAL NOT NULL DEFAULT 1.5;
+  `);
+}
 
 // Migrate: color_thresholds started life (same day, pre-release) as one
 // shared yellow_at/orange_at/red_at set before splitting into independent
@@ -1829,7 +1914,8 @@ const stmts = {
   ),
 
   // ── Color thresholds (global Usage-page green/yellow/orange/red bands,
-  //    independently configurable for the session vs weekly window) ────────
+  //    independently configurable for session, weekly, session-rate, and
+  //    weekly-rate) ──────────────────────────────────────────────────────
   getColorThresholds: db.prepare("SELECT * FROM color_thresholds WHERE id = 1"),
   updateColorThresholds: db.prepare(
     `UPDATE color_thresholds SET
@@ -1839,6 +1925,12 @@ const stmts = {
        weekly_yellow_at = COALESCE(?, weekly_yellow_at),
        weekly_orange_at = COALESCE(?, weekly_orange_at),
        weekly_red_at = COALESCE(?, weekly_red_at),
+       session_rate_yellow_at = COALESCE(?, session_rate_yellow_at),
+       session_rate_orange_at = COALESCE(?, session_rate_orange_at),
+       session_rate_red_at = COALESCE(?, session_rate_red_at),
+       weekly_rate_yellow_at = COALESCE(?, weekly_rate_yellow_at),
+       weekly_rate_orange_at = COALESCE(?, weekly_rate_orange_at),
+       weekly_rate_red_at = COALESCE(?, weekly_rate_red_at),
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = 1`
   ),
@@ -2400,12 +2492,33 @@ const stmts = {
   setProjectPinned: db.prepare(
     "UPDATE projects SET pinned = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
   ),
+  setProjectSiblingScanEnabled: db.prepare(
+    "UPDATE projects SET sibling_scan_enabled = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+  ),
   deleteProject: db.prepare("DELETE FROM projects WHERE id = ?"),
   insertProjectPath: db.prepare("INSERT INTO project_paths (project_id, cwd) VALUES (?, ?)"),
   deleteProjectPath: db.prepare("DELETE FROM project_paths WHERE id = ? AND project_id = ?"),
+  setProjectPathTerminalDefault: db.prepare(
+    "UPDATE project_paths SET terminal_default = ? WHERE id = ? AND project_id = ?"
+  ),
   getProjectPathByCwd: db.prepare("SELECT * FROM project_paths WHERE cwd = ?"),
   listProjectPaths: db.prepare("SELECT * FROM project_paths WHERE project_id = ? ORDER BY cwd ASC"),
   listAllProjectPaths: db.prepare("SELECT * FROM project_paths ORDER BY cwd ASC"),
+  // Idempotent: re-ignoring an already-ignored path (e.g. re-clicking after
+  // a rescan changed its detected name) refreshes the row instead of erroring
+  // on the (project_id, path) uniqueness constraint.
+  insertIgnoredRepo: db.prepare(
+    `INSERT INTO project_ignored_repos (project_id, path, name, source) VALUES (?, ?, ?, ?)
+     ON CONFLICT(project_id, path) DO UPDATE SET
+       name = excluded.name, source = excluded.source,
+       ignored_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+  ),
+  deleteIgnoredRepo: db.prepare(
+    "DELETE FROM project_ignored_repos WHERE id = ? AND project_id = ?"
+  ),
+  listIgnoredRepos: db.prepare(
+    "SELECT * FROM project_ignored_repos WHERE project_id = ? ORDER BY ignored_at DESC"
+  ),
 
   // ── Plans & session focus ─────────────────────────────────────────────────
   // Upsert keyed by cwd. created_at survives re-ingest; missing_at clears on
