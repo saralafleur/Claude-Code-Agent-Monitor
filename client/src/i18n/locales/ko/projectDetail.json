@@ -121,5 +121,44 @@
     "budgetExceeded": "아직 확인되지 않음 — 이번 페이지 로드의 저장소 한도에 도달했습니다",
     "gitError": "이 저장소를 확인할 수 없습니다 (git 오류)",
     "notARepo": "git 저장소가 아닙니다"
+  },
+  "planLedger": {
+    "title": "계획 생애주기 & 가치 원장",
+    "openPlans": {
+      "title": "진행 중인 계획",
+      "empty": "아직 진행 중인 계획이 없습니다.",
+      "close": "종료",
+      "closing": "종료하는 중…",
+      "closeNotePlaceholder": "종료 메모 (선택 사항)"
+    },
+    "closedPlans": {
+      "title": "이력",
+      "empty": "아직 종료된 세대가 없습니다.",
+      "collapse": "접기",
+      "expand": "펼치기"
+    },
+    "items": {
+      "empty": "아직 항목이 없습니다."
+    },
+    "pool": {
+      "title": "가치 풀",
+      "empty": "현재 미확보 항목이 없습니다.",
+      "claim": "확보",
+      "claiming": "확보하는 중…",
+      "claimTarget": "확보할 항목"
+    },
+    "health": {
+      "unclaimedPoolSize": "미확보 유닛",
+      "openPlanCount": "진행 중인 계획",
+      "lastClosure": "마지막 종료",
+      "noClosures": "아직 종료 이력 없음",
+      "daysAgo_one": "{{count}}일 전",
+      "daysAgo_other": "{{count}}일 전"
+    },
+    "attribution": {
+      "mechanical": "기계적",
+      "correlational": "상관적",
+      "judgment": "판단"
+    }
   }
 }

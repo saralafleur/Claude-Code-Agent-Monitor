@@ -121,5 +121,44 @@
     "budgetExceeded": "Chưa được kiểm tra — đã đạt giới hạn kho cho lần tải trang này",
     "gitError": "Không thể kiểm tra kho này (lỗi git)",
     "notARepo": "Không phải kho lưu trữ git"
+  },
+  "planLedger": {
+    "title": "Vòng đời Kế hoạch & Sổ cái Giá trị",
+    "openPlans": {
+      "title": "Kế hoạch đang mở",
+      "empty": "Chưa có kế hoạch nào đang mở.",
+      "close": "Đóng",
+      "closing": "Đang đóng…",
+      "closeNotePlaceholder": "Ghi chú đóng (tùy chọn)"
+    },
+    "closedPlans": {
+      "title": "Lịch sử",
+      "empty": "Chưa có thế hệ nào đã đóng.",
+      "collapse": "Thu gọn",
+      "expand": "Mở rộng"
+    },
+    "items": {
+      "empty": "Chưa có mục nào."
+    },
+    "pool": {
+      "title": "Kho giá trị",
+      "empty": "Hiện không có đơn vị nào chưa được ghi nhận.",
+      "claim": "Ghi nhận",
+      "claiming": "Đang ghi nhận…",
+      "claimTarget": "Ghi nhận vào"
+    },
+    "health": {
+      "unclaimedPoolSize": "Đơn vị chưa ghi nhận",
+      "openPlanCount": "Kế hoạch đang mở",
+      "lastClosure": "Lần đóng gần nhất",
+      "noClosures": "Chưa có lần đóng nào",
+      "daysAgo_one": "{{count}} ngày trước",
+      "daysAgo_other": "{{count}} ngày trước"
+    },
+    "attribution": {
+      "mechanical": "Cơ học",
+      "correlational": "Tương quan",
+      "judgment": "Phán đoán"
+    }
   }
 }

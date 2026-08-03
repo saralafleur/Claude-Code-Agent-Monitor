@@ -121,5 +121,44 @@
     "budgetExceeded": "尚未检查——本次页面加载已达到仓库数量上限",
     "gitError": "无法检查此仓库（git 错误）",
     "notARepo": "不是 Git 仓库"
+  },
+  "planLedger": {
+    "title": "计划生命周期与价值账本",
+    "openPlans": {
+      "title": "进行中的计划",
+      "empty": "目前没有进行中的计划。",
+      "close": "结束",
+      "closing": "结束中…",
+      "closeNotePlaceholder": "结束备注（可选）"
+    },
+    "closedPlans": {
+      "title": "历史",
+      "empty": "尚无已结束的世代。",
+      "collapse": "折叠",
+      "expand": "展开"
+    },
+    "items": {
+      "empty": "尚无事项。"
+    },
+    "pool": {
+      "title": "价值池",
+      "empty": "目前没有未认领的项目。",
+      "claim": "认领",
+      "claiming": "认领中…",
+      "claimTarget": "认领至"
+    },
+    "health": {
+      "unclaimedPoolSize": "未认领单元",
+      "openPlanCount": "进行中的计划",
+      "lastClosure": "上次结束",
+      "noClosures": "尚无结束记录",
+      "daysAgo_one": "{{count}} 天前",
+      "daysAgo_other": "{{count}} 天前"
+    },
+    "attribution": {
+      "mechanical": "机械",
+      "correlational": "相关",
+      "judgment": "判断"
+    }
   }
 }

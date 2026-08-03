@@ -520,6 +520,21 @@ vi.mock("../../lib/api", async (importOriginal) => {
         todos: r({ todos: null, updated_at: null }),
         setItemTarget: r({ ok: true, item: {} }),
       },
+      // Project Detail page's PlanLedgerPanel card (slice 5) - deterministically
+      // empty here so every other screen mounts the panel without crashing;
+      // the "Project detail" case below overrides these with populated data.
+      projectPlans: {
+        list: r({ plans: [] }),
+        pool: r({ units: [], identityWarnings: [] }),
+        health: r({
+          unclaimedPoolSize: 0,
+          lastClosureAt: null,
+          daysSinceLastClosure: null,
+          openPlanCount: 0,
+        }),
+        claim: r({ claim: {} }),
+        close: r({ plan: {} }),
+      },
       // Layer-7 Project Manager page (build task 6) - GET /api/portfolio/summary
       // and the layer-6 decision queue, both deterministically empty here.
       portfolio: { summary: r({ projects: [] }) },

@@ -139,6 +139,11 @@ const sessionsListMock = vi.fn();
 const projectRollupMock = vi.fn();
 const focusAllMock = vi.fn();
 const trunkDriftMock = vi.fn();
+const projectPlansListMock = vi.fn();
+const projectPlansPoolMock = vi.fn();
+const projectPlansHealthMock = vi.fn();
+const projectPlansClaimMock = vi.fn();
+const projectPlansCloseMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -154,6 +159,13 @@ vi.mock("../../lib/api", () => ({
       setPathTerminalDefault: (...args: unknown[]) => setPathTerminalDefaultMock(...args),
       continueWorktree: (...args: unknown[]) => continueWorktreeMock(...args),
       trunkDrift: (...args: unknown[]) => trunkDriftMock(...args),
+    },
+    projectPlans: {
+      list: (...args: unknown[]) => projectPlansListMock(...args),
+      pool: (...args: unknown[]) => projectPlansPoolMock(...args),
+      health: (...args: unknown[]) => projectPlansHealthMock(...args),
+      claim: (...args: unknown[]) => projectPlansClaimMock(...args),
+      close: (...args: unknown[]) => projectPlansCloseMock(...args),
     },
     sessions: {
       list: (...args: unknown[]) => sessionsListMock(...args),
@@ -203,6 +215,17 @@ describe("ProjectDetail page", () => {
     setPathTerminalDefaultMock.mockResolvedValue(mockRepoTopology);
     continueWorktreeMock.mockResolvedValue({ ok: true });
     trunkDriftMock.mockResolvedValue({ repos: [] });
+    // projectPlans API mocks (F2: shared setup in beforeEach, not per-case)
+    projectPlansListMock.mockResolvedValue({ plans: [] });
+    projectPlansPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    projectPlansHealthMock.mockResolvedValue({
+      unclaimedPoolSize: 0,
+      lastClosureAt: null,
+      daysSinceLastClosure: null,
+      openPlanCount: 0,
+    });
+    projectPlansClaimMock.mockResolvedValue({ claim: {} });
+    projectPlansCloseMock.mockResolvedValue({ plan: {} });
   });
 
   it("shows a not-found state for an unknown project id", async () => {
@@ -731,6 +754,88 @@ describe("ProjectDetail page", () => {
     // is rendered more than once on this page (shared mock fixtures used
     // elsewhere on the screen also render it), so scope with getAllByText
     // rather than the unscoped, collision-prone getByText.
+    expect(screen.getByText("Agent Monitor")).toBeInTheDocument();
+    expect(screen.getAllByText("repo/agent-monitor").length).toBeGreaterThan(0);
+  });
+
+  it("renders the PlanLedgerPanel card beside existing cards (F2)", async () => {
+    // Mock plan data to be returned by the projectPlans API
+    const mockPlan = {
+      plan: {
+        id: 1,
+        project_id: "proj-1",
+        title: "Phase 1: Planning",
+        status: "open",
+        origin: "manual",
+        ordinal: 1,
+        opened_at: "2026-06-01T00:00:00.000Z",
+        closed_at: null,
+        closure_note: null,
+        succeeds_plan_id: null,
+        created_at: "2026-06-01T00:00:00.000Z",
+        updated_at: "2026-06-01T00:00:00.000Z",
+      },
+      items: [
+        {
+          id: 10,
+          plan_id: 1,
+          position: 1,
+          text: "Write test plan",
+          detail: null,
+          acceptance: null,
+          checked: false,
+          parent_item_id: null,
+          imported_item_id: null,
+          created_at: "2026-06-01T00:00:00.000Z",
+          updated_at: "2026-06-01T00:00:00.000Z",
+          claims: [],
+        },
+      ],
+    };
+
+    projectPlansListMock.mockResolvedValue({ plans: [mockPlan] });
+    projectPlansPoolMock.mockResolvedValue({
+      units: [
+        {
+          id: "trunk_commit:abc123",
+          source: "trunk_commit",
+          sourceRef: "abc123",
+          attribution: "mechanical",
+          discoveredAt: "2026-06-01T00:00:00.000Z",
+        },
+      ],
+      identityWarnings: [],
+    });
+    projectPlansHealthMock.mockResolvedValue({
+      unclaimedPoolSize: 5,
+      lastClosureAt: "2026-05-01T00:00:00.000Z",
+      daysSinceLastClosure: 31,
+      openPlanCount: 1,
+    });
+
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    // PlanLedgerPanel card should render alongside existing cards
+    // Look for plan title from the mocked data
+    await waitFor(() => {
+      expect(screen.getByText("Phase 1: Planning")).toBeInTheDocument();
+    });
+
+    // Verify the panel rendered items from the plan. "Write test plan" also
+    // appears as a claim-target <option> in the pool pane's picker, so scope
+    // this to the open-plans pane's item list rather than a page-wide query.
+    const openPlansPane = document.querySelector('[data-test="open-plans-pane"]') as HTMLElement;
+    expect(within(openPlansPane).getByText("Write test plan")).toBeInTheDocument();
+
+    // Verify health numbers are displayed (proof of successful API call).
+    // Scope to the health strip: "5"/"unclaimed"/"pool" each independently
+    // match multiple unrelated nodes elsewhere in the page.
+    const healthStrip = document.querySelector('[data-test="plan-ledger-health"]') as HTMLElement;
+    expect(healthStrip).toBeTruthy();
+    expect(within(healthStrip).getByText("5")).toBeInTheDocument();
+
+    // Existing cards should still be present (not displaced by the new card)
     expect(screen.getByText("Agent Monitor")).toBeInTheDocument();
     expect(screen.getAllByText("repo/agent-monitor").length).toBeGreaterThan(0);
   });
