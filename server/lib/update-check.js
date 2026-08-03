@@ -11,13 +11,12 @@ const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 const { isolatedGitEnv } = require("./git-env");
+const { listRemotes, pickCanonicalRemote, REMOTE_PRIORITY } = require("./git-refs");
 
 const DEFAULT_ROOT = path.join(__dirname, "..", "..");
 
-// Standard convention for fork workflows: "upstream" points at the canonical
-// repo, "origin" points at the user's fork. Prefer upstream when both exist.
-const REMOTE_PRIORITY = ["upstream", "origin"];
-
+// This module's own execGit stays private (120s default — sized for `git
+// fetch`, unlike git-refs.js's 10s-default copy used for cheap ref reads).
 function execGit(cwd, args, opts = {}) {
   const timeout = opts.timeout ?? 120_000;
   return new Promise((resolve, reject) => {
@@ -31,26 +30,6 @@ function execGit(cwd, args, opts = {}) {
       }
     );
   });
-}
-
-async function listRemotes(gitRoot) {
-  try {
-    const out = await execGit(gitRoot, ["remote"], { timeout: 10_000 });
-    return out
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-async function pickCanonicalRemote(gitRoot) {
-  const remotes = await listRemotes(gitRoot);
-  for (const candidate of REMOTE_PRIORITY) {
-    if (remotes.includes(candidate)) return candidate;
-  }
-  return remotes[0] || null;
 }
 
 async function resolveCompareRefForRemote(gitRoot, remote) {

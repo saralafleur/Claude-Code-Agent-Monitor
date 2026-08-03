@@ -901,6 +901,8 @@ CREATE INDEX idx_detour_dispositions_resolved_item ON detour_dispositions(resolv
 
 Managed through `/api/detours/*`; see [docs/API.md](./API.md).
 
+**Phase 1b deferral note (trunk-drift-detection, `intake/2026-08-02-trunk-drift-detection/`):** Phase 1a of that effort shipped a read-only, live-computed direct-to-trunk commit detector (`server/lib/trunk-drift.js`, `GET /api/projects/:id/trunk-drift`) with **no schema change here** — it reads no SQLite and writes nothing. A planned Phase 1b would widen this table's `source` `CHECK` to accept a third value, `'trunk_drift'` (via a new generic `rebuildTableAtomically` helper, since SQLite can't add a `CHECK` via `ALTER TABLE`), and add a `recordTrunkDriftDetour`/`backfillTrunkDriftDetours` write path so each direct-to-trunk commit becomes a `pending` row the existing `reconciliation.js` pass picks up unmodified. **That work is gated on WATCH-5** (`intake/2026-08-02-trunk-drift-detection/decisions.md`) — Sara closing a live pending write-back trial — and has not started; the schema above is accurate as of Phase 1a.
+
 ---
 
 ### decision_queue

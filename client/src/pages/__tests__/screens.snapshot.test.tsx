@@ -487,6 +487,9 @@ vi.mock("../../lib/api", async (importOriginal) => {
         // mock block.
         repos: r({ project_id: "", repos: [], nonRepoFolders: [], detectedSiblings: [] }),
         intake: r({ project_id: "", initiatives: [] }),
+        // Project Detail page's read-only trunk-drift card (Phase 1a) -
+        // deterministically empty, same idiom as repos/intake above.
+        trunkDrift: r({ repos: [] }),
       },
       plans: {
         list: r({ plans: [] }),

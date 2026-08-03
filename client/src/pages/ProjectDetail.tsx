@@ -34,6 +34,7 @@ import {
   Loader2,
   Plus,
   ListChecks,
+  GitCommitHorizontal,
   CircleCheck,
   CircleAlert,
   CircleHelp,
@@ -44,14 +45,16 @@ import { CardSkeleton } from "../components/Skeleton";
 import { PlanPanel } from "../components/PlanPanel";
 import { PlanModal, type PlanModalEntry } from "../components/PlanModal";
 import { useFocusMap } from "../lib/focusStore";
-import { pathTail } from "../lib/format";
+import { pathTail, timeAgo } from "../lib/format";
 import type {
   DetectedSiblingRepo,
   IntakeStage,
   Project,
   ProjectIntakeReport,
   ProjectRepoTopology,
+  ProjectTrunkDriftResponse,
   Session,
+  TrunkDriftResult,
   WorktreeInfo,
 } from "../lib/types";
 
@@ -134,6 +137,123 @@ function RepoCard({ cwd, worktrees, t }: { cwd: string; worktrees: WorktreeInfo[
   );
 }
 
+/** One commit row in a {@link TrunkDriftCard} — short SHA, subject, author,
+ *  relative date, and the shortstat delta. Each field is its own DOM node
+ *  (never string-concatenated) so it's individually text-matchable. */
+function TrunkDriftCommitRow({
+  commit,
+}: {
+  commit: NonNullable<TrunkDriftResult["commits"]>[number];
+}) {
+  return (
+    <div className="flex items-start gap-2 py-1 text-xs">
+      <span className="font-mono text-gray-500 flex-shrink-0">{commit.shortSha}</span>
+      <div className="min-w-0 flex-1">
+        <span className="text-gray-300">{commit.subject}</span>
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+          <span>{commit.authorName}</span>
+          <span>·</span>
+          <span>{timeAgo(commit.committedAt)}</span>
+          <span>·</span>
+          <span className="font-mono">
+            +{commit.insertions}/-{commit.deletions} in {commit.filesChanged}{" "}
+            {commit.filesChanged === 1 ? "file" : "files"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Maps each `skipped` reason to its own distinct copy rather than
+// collapsing every reason into the generic "Unknown trunk branch" text.
+// `budget_exceeded` in particular is misleading under that generic copy —
+// the trunk branch IS knowable there, it just wasn't checked yet this page
+// load (server/routes/projects.js's per-request cap) — so it, `git_error`,
+// and `not_a_repo` each get copy that describes what actually happened.
+// `no_default_branch` is the one case "Unknown trunk branch" genuinely
+// describes, so it keeps using `trunkDrift.unknown`.
+function trunkDriftSkipText(skipped: NonNullable<TrunkDriftResult["skipped"]>, t: TFunc): string {
+  switch (skipped) {
+    case "budget_exceeded":
+      return t("trunkDrift.budgetExceeded");
+    case "git_error":
+      return t("trunkDrift.gitError");
+    case "not_a_repo":
+      return t("trunkDrift.notARepo");
+    case "no_default_branch":
+    case "no_commits":
+    default:
+      return t("trunkDrift.unknown");
+  }
+}
+
+/** Read-only "Direct-to-trunk work" card for one mapped repo (Phase 1a — see
+ *  server/lib/trunk-drift.js). `skipped` renders as an explicit "unknown"
+ *  state — visually and textually distinct from the genuinely-clean
+ *  (`commits: []`, `skipped: null`) state, since a client that ever renders
+ *  both the same way is exactly the "silent false clean" failure mode this
+ *  feature exists to catch. No badge, no verdict button, no classification
+ *  vocabulary — this card is read-only. */
+function TrunkDriftCard({ cwd, drift, t }: { cwd: string; drift: TrunkDriftResult; t: TFunc }) {
+  return (
+    <div
+      data-testid="trunk-drift-card"
+      className="rounded-lg border border-border bg-surface-1/60 p-3 space-y-2"
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <GitCommitHorizontal className="w-3.5 h-3.5 text-accent flex-shrink-0" />
+        <span className="text-sm font-medium text-gray-200 truncate" title={cwd}>
+          {t("trunkDrift.title")}
+        </span>
+        <span className="ml-auto text-[11px] text-gray-500 flex-shrink-0 truncate" title={cwd}>
+          {pathTail(cwd)}
+        </span>
+      </div>
+      {drift.skipped ? (
+        <p className="text-xs text-gray-500 italic">{trunkDriftSkipText(drift.skipped, t)}</p>
+      ) : (
+        <>
+          <div className="text-[11px] text-gray-500">
+            {drift.defaultBranch && (
+              <>
+                {t("trunkDrift.defaultBranch")}:{" "}
+                <span className="text-gray-400">{drift.defaultBranch}</span>
+                {" · "}
+              </>
+            )}
+            {/* drift.lookbackDays ?? 7: this branch only renders when
+                drift.skipped is null (a real, populated detectTrunkDrift
+                result), where the server always sets lookbackDays — so this
+                fallback never overrides a real server-provided value. It
+                exists only as defense-in-depth against a malformed payload,
+                and 7 matches trunk-drift.js's own
+                DEFAULT_TRUNK_DRIFT_LOOKBACK_DAYS, so it can never silently
+                disagree with the server's own default. */}
+            {t("trunkDrift.lookbackWindow", { days: drift.lookbackDays ?? 7 })}
+            {" · "}
+            {drift.commitCount ?? 0} {t("trunkDrift.commitCount")}
+          </div>
+          {drift.commits && drift.commits.length > 0 ? (
+            <div className="space-y-0.5">
+              {drift.commits.map((commit) => (
+                <TrunkDriftCommitRow key={commit.sha} commit={commit} />
+              ))}
+              {drift.truncated && (
+                <p className="text-[11px] text-amber-500/80 italic pt-1">
+                  {t("trunkDrift.truncated")}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 italic">{t("trunkDrift.empty")}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function SuggestedRepoRow({
   sibling,
   busy,
@@ -176,6 +296,7 @@ export function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [repoTopology, setRepoTopology] = useState<ProjectRepoTopology | null>(null);
   const [intakeReport, setIntakeReport] = useState<ProjectIntakeReport | null>(null);
+  const [trunkDrift, setTrunkDrift] = useState<ProjectTrunkDriftResponse | null>(null);
   const [planEntries, setPlanEntries] = useState<PlanModalEntry[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -208,6 +329,16 @@ export function ProjectDetail() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+
+    // Trunk-drift is fetched independently of the block above: it is a
+    // slower, best-effort, read-only card, and a failure here must not
+    // block or blank out the rest of the page (project name, existing
+    // Repos/Plan/Intake cards) — degrade this card alone.
+    try {
+      setTrunkDrift(await api.projects.trunkDrift(id));
+    } catch {
+      setTrunkDrift(null);
     }
   }, [id]);
 
@@ -318,6 +449,18 @@ export function ProjectDetail() {
           </div>
         )}
       </section>
+
+      {trunkDrift && trunkDrift.repos.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-gray-300">{t("trunkDrift.title")}</h2>
+          <p className="text-xs text-gray-500">{t("trunkDrift.description")}</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {trunkDrift.repos.map((repo) => (
+              <TrunkDriftCard key={repo.cwd} cwd={repo.cwd} drift={repo.drift} t={t} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {repoTopology && repoTopology.detectedSiblings.length > 0 && (
         <section className="space-y-2">

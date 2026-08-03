@@ -530,3 +530,445 @@ describe("classifyFlaggedDetours", () => {
     }
   });
 });
+
+describe("parseDispositionOutput logging (Block A — DEC-4 carve-out, G6)", () => {
+  const { classifyFlaggedDetours, __injectSpawnForTest } = require("../lib/reconciliation");
+  let tempDir;
+  let dbModule;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "reconciliation-parse-logging-test-"));
+    const testDbPath = path.join(tempDir, "test.db");
+    process.env.DASHBOARD_DB_PATH = testDbPath;
+
+    // Clear any cached db module
+    delete require.cache[require.resolve("../db")];
+    dbModule = require("../db");
+  });
+
+  afterEach(() => {
+    __injectSpawnForTest(null);
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Best effort
+    }
+    delete process.env.DASHBOARD_DB_PATH;
+  });
+
+  it("A1: terminal catch (unparseable JSON) logs exactly once, result.size still 0", async () => {
+    const testCwd = "/test/cwd-a1";
+    const logCalls = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      logCalls.push({ level: "error", args });
+      originalError(...args);
+    };
+    console.warn = (...args) => {
+      logCalls.push({ level: "warn", args });
+      originalWarn(...args);
+    };
+
+    try {
+      // Stub spawn to return invalid JSON. Both the CLI probe
+      // (`claude --version`) and the actual classification spawn go through
+      // this same stub — it must emit "exit" (not "close"), since that's
+      // the only event both probeClaudeCli (focus-inference.js) and
+      // runClaudePromptJson actually listen for; a stub that only emits
+      // "close" never resolves either promise until its own timeout fires.
+      __injectSpawnForTest(() => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = { on: () => {} };
+        child.stderr = { on: () => {} };
+        setTimeout(() => {
+          child.emit("exit", 0);
+        }, 10);
+        return child;
+      });
+
+      const result = await classifyFlaggedDetours(dbModule, testCwd, [
+        { id: 1, label: "test detour" },
+      ]);
+
+      assert.equal(result.size, 0, "result.size should be 0 (unchanged)");
+      // Tightened to match the actual expected log text (mirrors how A2
+      // asserts on its own "parsed" substring below) rather than accepting
+      // any log output — a bare `logCalls.length >= 1` would also pass for
+      // an unrelated log line, defeating the point of this case.
+      const hasUnparseableLog = logCalls.some((call) =>
+        call.args.some(
+          (arg) => typeof arg === "string" && arg.toLowerCase().includes("unparseable")
+        )
+      );
+      assert.ok(
+        hasUnparseableLog,
+        `should log the disposition-output-unparseable message, got logs: ${JSON.stringify(logCalls)}`
+      );
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+
+  it("A2: parsed 0 verdicts for non-empty batch logs exactly once, result.size still 0", async () => {
+    const testCwd = "/test/cwd-a2";
+    const logCalls = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      logCalls.push({ level: "error", args });
+      originalError(...args);
+    };
+    console.warn = (...args) => {
+      logCalls.push({ level: "warn", args });
+      originalWarn(...args);
+    };
+
+    try {
+      // Stub spawn to return empty JSON array (parsed successfully but no
+      // verdicts). Emits "exit" (see A1's comment for why "close" doesn't
+      // resolve either the probe or the classification promise).
+      __injectSpawnForTest(() => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = {
+          on: (event, handler) => {
+            if (event === "data") {
+              handler("[]");
+            }
+          },
+        };
+        child.stderr = { on: () => {} };
+        setTimeout(() => {
+          child.emit("exit", 0);
+        }, 10);
+        return child;
+      });
+
+      const result = await classifyFlaggedDetours(dbModule, testCwd, [
+        { id: 1, label: "test detour" },
+      ]);
+
+      assert.equal(result.size, 0, "result.size should be 0 (unchanged)");
+      // Should log because we had flagged items but got 0 verdicts back
+      const hasLog = logCalls.some((call) =>
+        call.args.some((arg) => typeof arg === "string" && arg.toLowerCase().includes("parsed"))
+      );
+      assert.ok(
+        hasLog,
+        `should log the zero-verdicts-for-non-empty-batch message, got logs: ${JSON.stringify(logCalls)}`
+      );
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+
+  it("A3: happy path (parsed, got verdicts) logs zero times", async () => {
+    const testCwd = "/test/cwd-a3";
+    const logCalls = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      logCalls.push({ level: "error", args });
+      originalError(...args);
+    };
+    console.warn = (...args) => {
+      logCalls.push({ level: "warn", args });
+      originalWarn(...args);
+    };
+
+    try {
+      // Stub spawn to return valid JSON with one verdict, in the shape
+      // parseDispositionOutput actually parses: `{ verdicts: [...] }`
+      // (a bare array has no `.verdicts` and no `.disposition`, so it
+      // matches neither of parseDispositionOutput's two accepted shapes
+      // and would silently produce zero verdicts). Emits "exit" (see A1's
+      // comment for why "close" doesn't resolve either promise).
+      __injectSpawnForTest(() => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = {
+          on: (event, handler) => {
+            if (event === "data") {
+              handler(
+                JSON.stringify({
+                  verdicts: [{ id: 1, disposition: "discard" }],
+                })
+              );
+            }
+          },
+        };
+        child.stderr = { on: () => {} };
+        setTimeout(() => {
+          child.emit("exit", 0);
+        }, 10);
+        return child;
+      });
+
+      const result = await classifyFlaggedDetours(dbModule, testCwd, [
+        { id: 1, label: "test detour" },
+      ]);
+
+      assert.equal(result.size, 1, "should have 1 verdict");
+      // Log calls should not include the zero-verdict message
+      const hasZeroVerdictLog = logCalls.some((call) =>
+        call.args.some(
+          (arg) => typeof arg === "string" && arg.toLowerCase().includes("zero verdicts")
+        )
+      );
+      assert.ok(!hasZeroVerdictLog, "should not log zero-verdicts message on happy path");
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+});
+
+describe("classifyFlaggedDetours logging widening (Block B — DEC-4 scope, G3)", () => {
+  const { classifyFlaggedDetours, __injectSpawnForTest } = require("../lib/reconciliation");
+  let tempDir;
+  let dbModule;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "reconciliation-classify-logging-test-"));
+    const testDbPath = path.join(tempDir, "test.db");
+    process.env.DASHBOARD_DB_PATH = testDbPath;
+
+    // Clear any cached db module
+    delete require.cache[require.resolve("../db")];
+    dbModule = require("../db");
+  });
+
+  afterEach(() => {
+    __injectSpawnForTest(null);
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Best effort
+    }
+    delete process.env.DASHBOARD_DB_PATH;
+  });
+
+  it("B1: exit 4 (CLI unavailable) logs exactly once with distinguishable text", async () => {
+    const testCwd = "/test/cwd-b1";
+    const logCalls = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      logCalls.push({ level: "error", args: args.join(" ") });
+      originalError(...args);
+    };
+    console.warn = (...args) => {
+      logCalls.push({ level: "warn", args: args.join(" ") });
+      originalWarn(...args);
+    };
+
+    try {
+      // Stub spawn to always fail (CLI not available). Only the CLI probe
+      // (`claude --version`) is ever reached here — classifyFlaggedDetours
+      // returns before spawning the actual classification prompt once
+      // probeClaudeCli resolves `false`. Emits "exit" (not "close"): that's
+      // the only event probeClaudeCli itself listens for
+      // (focus-inference.js); a stub that only emits "close" never resolves
+      // the probe promise until its own 5s timeout fires.
+      __injectSpawnForTest(() => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = { on: () => {} };
+        child.stderr = { on: () => {} };
+        setTimeout(() => {
+          child.emit("exit", 1);
+        }, 10);
+        return child;
+      });
+
+      const result = await classifyFlaggedDetours(dbModule, testCwd, [{ id: 1, label: "test" }]);
+
+      assert.equal(result.size, 0, "result.size should remain 0");
+      const b1Logs = logCalls.filter(
+        (c) => c.args.toLowerCase().includes("cli") || c.args.toLowerCase().includes("unavailable")
+      );
+      assert.ok(
+        b1Logs.length >= 1,
+        `should log about CLI being unavailable, got logs: ${JSON.stringify(logCalls)}`
+      );
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+
+  it("B2: exit 5 (CLI answered nothing) logs exactly once with distinguishable text from B1", async () => {
+    const testCwd = "/test/cwd-b2";
+    const logCalls = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      logCalls.push({ level: "error", args: args.join(" ") });
+      originalError(...args);
+    };
+    console.warn = (...args) => {
+      logCalls.push({ level: "warn", args: args.join(" ") });
+      originalWarn(...args);
+    };
+
+    try {
+      // Dispatch on the spawned args: the CLI probe (`claude --version`)
+      // must succeed (so classifyFlaggedDetours actually reaches
+      // runClaudePromptJson), while the real classification spawn must
+      // exit non-zero with no stdout — that's what makes
+      // runClaudePromptJson resolve a genuine `null` (via its
+      // `code !== 0 -> done(null)` path), not an empty string. An
+      // unconditional exit(0)-with-no-data stub instead resolves
+      // stdout to `""`, which is `!= null` and never reaches exit 5's
+      // "CLI returned no output" branch at all — it falls through to
+      // parseDispositionOutput's unrelated "unparseable" catch, the same
+      // log text as A1/B1, defeating the whole point of this case.
+      __injectSpawnForTest((_cmd, args) => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = { on: () => {} };
+        child.stderr = { on: () => {} };
+        const isProbe = Array.isArray(args) && args.includes("--version");
+        setTimeout(() => {
+          child.emit("exit", isProbe ? 0 : 1);
+        }, 10);
+        return child;
+      });
+
+      const result = await classifyFlaggedDetours(dbModule, testCwd, [{ id: 1, label: "test" }]);
+
+      assert.equal(result.size, 0, "result.size should remain 0");
+      const b2Logs = logCalls.filter(
+        (c) =>
+          c.args.toLowerCase().includes("no output") ||
+          c.args.toLowerCase().includes("nothing") ||
+          c.args.toLowerCase().includes("null")
+      );
+      assert.ok(
+        b2Logs.length >= 1,
+        `should log about CLI returning nothing, got logs: ${JSON.stringify(logCalls)}`
+      );
+
+      // Verify the log text is different from B1's log
+      // (This is the "distinguishable in log" requirement for WATCH-5's trial)
+      const b2Text = logCalls.map((c) => c.args).join(" ");
+      assert.ok(
+        b2Text.toLowerCase().includes("output") || b2Text.toLowerCase().includes("nothing"),
+        "B2 log should mention output/nothing, not just unavailable"
+      );
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+
+  it("B1 vs B2: exit-4 and exit-5 log text are distinguishable (captured directly, not pattern-matched independently)", async () => {
+    // S6: B1 and B2 each independently pattern-match their own log text
+    // against a regex, which can pass even if both scenarios happen to
+    // produce the exact same string (two different regexes can both match
+    // one shared sentence). This test captures BOTH actual log strings in
+    // one run and diffs them directly — the real "distinguishable in the
+    // log" proof WATCH-5's trial needs.
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    async function captureLogText(testCwd, spawnStub) {
+      const logCalls = [];
+      console.error = (...args) => {
+        logCalls.push(args.join(" "));
+        originalError(...args);
+      };
+      console.warn = (...args) => {
+        logCalls.push(args.join(" "));
+        originalWarn(...args);
+      };
+      try {
+        __injectSpawnForTest(spawnStub);
+        await classifyFlaggedDetours(dbModule, testCwd, [{ id: 1, label: "test" }]);
+        return logCalls.join(" | ");
+      } finally {
+        console.error = originalError;
+        console.warn = originalWarn;
+        __injectSpawnForTest(null);
+      }
+    }
+
+    try {
+      // Exit 4: CLI unavailable — the probe itself fails.
+      const exit4Text = await captureLogText("/test/cwd-b1-vs-b2-exit4", () => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = { on: () => {} };
+        child.stderr = { on: () => {} };
+        setTimeout(() => child.emit("exit", 1), 10);
+        return child;
+      });
+
+      // Exit 5: CLI probes available, but the real classification spawn
+      // answers nothing (non-zero exit, no stdout -> genuine `null`).
+      const exit5Text = await captureLogText("/test/cwd-b1-vs-b2-exit5", (_cmd, args) => {
+        const { EventEmitter } = require("events");
+        const child = new EventEmitter();
+        child.stdout = { on: () => {} };
+        child.stderr = { on: () => {} };
+        const isProbe = Array.isArray(args) && args.includes("--version");
+        setTimeout(() => child.emit("exit", isProbe ? 0 : 1), 10);
+        return child;
+      });
+
+      assert.ok(exit4Text.length > 0, "exit-4 scenario should have logged something");
+      assert.ok(exit5Text.length > 0, "exit-5 scenario should have logged something");
+      assert.notEqual(
+        exit4Text,
+        exit5Text,
+        `CLI-unavailable (exit 4) and CLI-returned-nothing (exit 5) must produce distinguishable log text — got identical text: ${exit4Text}`
+      );
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+
+  it("B3: exits 1–3 (no flagged detours) logs zero times", async () => {
+    const testCwd = "/test/cwd-b3";
+    const logCalls = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      logCalls.push({ level: "error", args });
+      originalError(...args);
+    };
+    console.warn = (...args) => {
+      logCalls.push({ level: "warn", args });
+      originalWarn(...args);
+    };
+
+    try {
+      // Empty flagged array → no processing, no logs
+      const result = await classifyFlaggedDetours(dbModule, testCwd, []);
+
+      assert.equal(result.size, 0, "result.size should be 0");
+      assert.equal(logCalls.length, 0, "should not log for healthy quiet tick (empty flagged)");
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      __injectSpawnForTest(null);
+    }
+  });
+});

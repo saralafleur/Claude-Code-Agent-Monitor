@@ -24,6 +24,7 @@ process.env.DASHBOARD_DB_PATH = TEST_DB;
 const { createApp, startServer } = require("../index");
 const { db, stmts } = require("../db");
 const terminalFocus = require("../lib/terminal-focus");
+const { TRUNK_DRIFT_ROUTE_SKIP_REASONS } = require("../routes/projects");
 
 const realOpenTerminalForCwd = terminalFocus.openTerminalForCwd;
 
@@ -108,6 +109,15 @@ for (const key of [
   delete ISOLATED_GIT_ENV[key];
 }
 
+// Backdated well outside trunk-drift's default 7-day lookback window — a
+// real repo's root commit predates any lookback window by a wide margin, so
+// a fixture root commit left at "now" (git's default with no committer-date
+// override) would spuriously show up as its own extra "direct commit"
+// alongside whatever a trunk-drift test case seeds on top of it. See
+// server/__tests__/trunk-drift.test.js's own makeWorkingRepo for the fuller
+// explanation.
+const ROOT_COMMIT_DAYS_AGO = 30;
+
 function makeFixtureRepo(name) {
   const repo = path.join(FS_FIXTURE_ROOT, name);
   fs.mkdirSync(repo, { recursive: true });
@@ -121,10 +131,11 @@ function makeFixtureRepo(name) {
     stdio: "ignore",
     env: ISOLATED_GIT_ENV,
   });
+  const rootDate = new Date(Date.now() - ROOT_COMMIT_DAYS_AGO * 24 * 60 * 60 * 1000).toISOString();
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"], {
     cwd: repo,
     stdio: "ignore",
-    env: ISOLATED_GIT_ENV,
+    env: { ...ISOLATED_GIT_ENV, GIT_COMMITTER_DATE: rootDate, GIT_AUTHOR_DATE: rootDate },
   });
   return repo;
 }
@@ -521,6 +532,218 @@ describe("GET /:id/repos", () => {
     assert.equal(res.body.repos[0].worktrees[0].dirty, false);
     assert.equal(res.body.nonRepoFolders.length, 1);
     assert.equal(res.body.nonRepoFolders[0].cwd, plainFolder);
+  });
+});
+
+describe("GET /:id/trunk-drift", () => {
+  it("R1: 404 unknown project", async () => {
+    const res = await fetch("/api/projects/does-not-exist/trunk-drift");
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
+  });
+
+  it("R2: project with no mapped folders returns empty repos", async () => {
+    const created = await post("/api/projects", { name: "TrunkDrift Empty Project" });
+    const res = await fetch(`/api/projects/${created.body.project.id}/trunk-drift`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.repos, []);
+  });
+
+  it("R3: mapped non-repo folder is filtered out", async () => {
+    const repo = makeFixtureRepo("trunk-drift-real-repo");
+    const plainFolder = path.join(FS_FIXTURE_ROOT, "trunk-drift-plain-folder");
+    fs.mkdirSync(plainFolder, { recursive: true });
+
+    const created = await post("/api/projects", {
+      name: "TrunkDrift Filter Project",
+      cwds: [repo, plainFolder],
+    });
+
+    const res = await fetch(`/api/projects/${created.body.project.id}/trunk-drift`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.repos.length, 1);
+    assert.equal(res.body.repos[0].cwd, repo);
+    assert.equal("nonRepoFolders" in res.body, false);
+  });
+
+  it("R4: populated drift for a fixture repo with one direct commit", async () => {
+    const repo = makeFixtureRepo("trunk-drift-direct-commit");
+    // Add a direct commit to the repo
+    const env = { ...ISOLATED_GIT_ENV };
+    const testFile = path.join(repo, "test-trunk-drift.txt");
+    fs.writeFileSync(testFile, "direct commit\n");
+    execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=Test", "add", "."], {
+      cwd: repo,
+      stdio: "ignore",
+      env,
+    });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.email=test@test",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "trunk drift test commit",
+      ],
+      {
+        cwd: repo,
+        stdio: "ignore",
+        env,
+      }
+    );
+    const commitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: repo,
+      encoding: "utf8",
+      env,
+    }).trim();
+    const shortSha = commitSha.substring(0, 7);
+
+    const created = await post("/api/projects", {
+      name: "TrunkDrift Direct Project",
+      cwds: [repo],
+    });
+
+    const res = await fetch(`/api/projects/${created.body.project.id}/trunk-drift`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.repos.length, 1);
+    assert.ok(res.body.repos[0].drift);
+    assert.equal(res.body.repos[0].drift.skipped, null);
+    assert.equal(res.body.repos[0].drift.defaultBranch, "master");
+    assert.equal(res.body.repos[0].drift.commits.length, 1);
+    assert.equal(res.body.repos[0].drift.commits[0].sha, commitSha);
+    assert.equal(res.body.repos[0].drift.commits[0].shortSha, shortSha);
+    assert.ok(res.body.repos[0].drift.commits[0].subject.includes("trunk drift"));
+  });
+
+  it("R5: mixed-state aggregation — healthy repo, empty repo, corrupted repo in one response (G5)", async () => {
+    const healthyRepo = makeFixtureRepo("trunk-drift-r5-healthy");
+    const emptyRepo = path.join(FS_FIXTURE_ROOT, "trunk-drift-r5-empty");
+    fs.mkdirSync(emptyRepo, { recursive: true });
+    execFileSync("git", ["init", emptyRepo], {
+      stdio: "ignore",
+      env: ISOLATED_GIT_ENV,
+    });
+
+    // Add a direct commit to healthy repo
+    const env = { ...ISOLATED_GIT_ENV };
+    const testFile = path.join(healthyRepo, "test.txt");
+    fs.writeFileSync(testFile, "drift\n");
+    execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=Test", "add", "."], {
+      cwd: healthyRepo,
+      stdio: "ignore",
+      env,
+    });
+    execFileSync(
+      "git",
+      ["-c", "user.email=test@test", "-c", "user.name=Test", "commit", "-m", "direct commit"],
+      {
+        cwd: healthyRepo,
+        stdio: "ignore",
+        env,
+      }
+    );
+
+    // Create corrupt repo by deleting objects
+    const corruptRepo = makeFixtureRepo("trunk-drift-r5-corrupt");
+    const objectsDir = path.join(corruptRepo, ".git", "objects");
+    for (const item of fs.readdirSync(objectsDir)) {
+      const itemPath = path.join(objectsDir, item);
+      if (fs.lstatSync(itemPath).isDirectory()) {
+        fs.rmSync(itemPath, { recursive: true });
+      } else {
+        fs.unlinkSync(itemPath);
+      }
+    }
+
+    const created = await post("/api/projects", {
+      name: "TrunkDrift Mixed Project",
+      cwds: [healthyRepo, emptyRepo, corruptRepo],
+    });
+
+    const res = await fetch(`/api/projects/${created.body.project.id}/trunk-drift`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.repos.length, 3);
+
+    const healthy = res.body.repos.find((r) => r.cwd === healthyRepo);
+    const empty = res.body.repos.find((r) => r.cwd === emptyRepo);
+    const corrupt = res.body.repos.find((r) => r.cwd === corruptRepo);
+
+    assert.equal(healthy.drift.skipped, null);
+    assert.equal(
+      healthy.drift.commits.length,
+      1,
+      "healthy repo should have 1 direct commit, not degraded"
+    );
+
+    assert.equal(empty.drift.skipped, "no_commits");
+
+    assert.equal(corrupt.drift.skipped, "git_error", "corrupt repo should have git_error");
+
+    // All skipped values should be valid — derived from the route's own
+    // exported TRUNK_DRIFT_ROUTE_SKIP_REASONS (R5-vocab), not a fourth
+    // hand-typed copy that can silently fall out of sync (e.g. missing
+    // "budget_exceeded" when the request-budget cap was added).
+    for (const repo of res.body.repos) {
+      assert.ok(
+        repo.drift.skipped === null || TRUNK_DRIFT_ROUTE_SKIP_REASONS.includes(repo.drift.skipped),
+        `invalid skipped value: ${repo.drift.skipped}`
+      );
+    }
+  });
+
+  it("R5b (S7): 26 mapped repos — exactly 25 get a real detection, the rest are budget_exceeded, none dropped", async () => {
+    const REPO_COUNT = 26;
+    const repos = [];
+    for (let i = 0; i < REPO_COUNT; i++) {
+      repos.push(makeFixtureRepo(`trunk-drift-budget-${i}`));
+    }
+
+    const created = await post("/api/projects", {
+      name: "TrunkDrift Budget Project",
+      cwds: repos,
+    });
+
+    const res = await fetch(`/api/projects/${created.body.project.id}/trunk-drift`);
+    assert.equal(res.status, 200);
+    // Nothing silently dropped: every mapped repo still appears in `repos`.
+    assert.equal(res.body.repos.length, REPO_COUNT);
+
+    const budgetExceeded = res.body.repos.filter((r) => r.drift.skipped === "budget_exceeded");
+    const real = res.body.repos.filter((r) => r.drift.skipped !== "budget_exceeded");
+
+    assert.equal(
+      real.length,
+      25,
+      "exactly MAX_TRUNK_DRIFT_CHECKS_PER_REQUEST repos should get a real detection"
+    );
+    assert.equal(
+      budgetExceeded.length,
+      REPO_COUNT - 25,
+      "the rest should be marked budget_exceeded"
+    );
+    for (const r of budgetExceeded) {
+      assert.equal(r.drift.repoPath, r.cwd);
+    }
+  });
+
+  it("R6: GET /:id/repos response shape unchanged", async () => {
+    const repo = makeFixtureRepo("trunk-drift-r6-repos");
+    const created = await post("/api/projects", {
+      name: "TrunkDrift Repos Compat",
+      cwds: [repo],
+    });
+
+    const res = await fetch(`/api/projects/${created.body.project.id}/repos`);
+    assert.equal(res.status, 200);
+    // Real response shape (server/lib/repo-topology.js's buildProjectRepoTopology
+    // return value, spread under project_id in the route handler) — no
+    // "ignoredRepos" key exists anywhere in product code.
+    const expectedKeys = ["detectedSiblings", "nonRepoFolders", "project_id", "repos"].sort();
+    const actualKeys = Object.keys(res.body).sort();
+    assert.deepEqual(actualKeys, expectedKeys);
   });
 });
 

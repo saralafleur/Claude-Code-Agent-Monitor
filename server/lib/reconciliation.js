@@ -233,8 +233,18 @@ function parseDispositionOutput(stdout, flagged) {
       // one detour was in this batch, so no id disambiguation was needed.
       applyVerdict(parsed, flagged.length === 1 ? flagged[0].id : null);
     }
+    if (out.size === 0 && flagged.length > 0) {
+      console.error(
+        "[reconciliation] parsed 0 verdicts for non-empty flagged batch, length:",
+        flagged.length
+      );
+    }
     return out;
-  } catch {
+  } catch (err) {
+    console.error(
+      "[reconciliation] disposition output unparseable — 0 verdicts this tick",
+      err?.message
+    );
     return new Map();
   }
 }
@@ -252,13 +262,24 @@ async function classifyFlaggedDetours(dbModule, target, flagged, opts = {}) {
 
   const focusInference = require("./focus-inference");
   const available = await focusInference.probeClaudeCli();
-  if (!available) return new Map();
+  if (!available) {
+    // Exit 4 (DEC-4 widened scope): the CLI itself isn't runnable — distinct
+    // from exit 5 below (CLI ran but answered nothing) so DEC-7's live trial
+    // can tell "tool missing" apart from "tool answered nothing" in the log.
+    console.error("[reconciliation] Claude CLI not available — cannot classify");
+    return new Map();
+  }
 
   const cwd = typeof target === "string" ? target : target.cwd;
   const items = (dbModule.stmts.listPlanItems.all(cwd) || []).filter((i) => i.item_number != null);
   const prompt = buildDispositionPrompt(flagged, { items });
   const stdout = await focusInference.runClaudePromptJson(prompt, opts);
-  if (stdout == null) return new Map();
+  if (stdout == null) {
+    // Exit 5 (DEC-4 widened scope, the dominant real-world failure mode):
+    // the CLI probed available but returned no output for this prompt.
+    console.error("[reconciliation] Claude CLI returned no output — cannot classify");
+    return new Map();
+  }
   return parseDispositionOutput(stdout, flagged);
 }
 

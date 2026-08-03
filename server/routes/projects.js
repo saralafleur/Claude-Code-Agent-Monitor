@@ -23,8 +23,9 @@ const { v4: uuidv4 } = require("uuid");
 const dbModule = require("../db");
 const { stmts, db } = dbModule;
 const { buildProjectFocusReport } = require("../lib/focus-report");
-const { buildProjectRepoTopology } = require("../lib/repo-topology");
+const { buildProjectRepoTopology, isGitRepo } = require("../lib/repo-topology");
 const { scanProjectIntake } = require("../lib/intake-scan");
+const { detectTrunkDrift, TRUNK_DRIFT_SKIP_REASONS } = require("../lib/trunk-drift");
 // Required as a module object (not destructured) so tests can swap
 // `terminalFocus.openTerminalForCwd` and this route picks the stub up at
 // call time — same idiom routes/sessions.js uses for its own terminal-focus
@@ -32,6 +33,28 @@ const { scanProjectIntake } = require("../lib/intake-scan");
 const terminalFocus = require("../lib/terminal-focus");
 
 const router = Router();
+
+// Sibling of repo-topology.js's MAX_DIRTY_CHECKS_PER_REQUEST (25): caps how
+// many mapped repos this route will actually run detectTrunkDrift's `git
+// log` walk for on one page load, so a project with an unusually large
+// number of mapped folders can't turn one request into dozens of blocking
+// git calls. Repos beyond the cap are still listed (never silently dropped
+// from `repos`) with an explicit `drift.skipped: "budget_exceeded"` rather
+// than a real (or fabricated) result.
+const MAX_TRUNK_DRIFT_CHECKS_PER_REQUEST = 25;
+
+// Route-level skip reason: this request-budget cap can only ever be hit
+// here (detectTrunkDrift itself has no concept of a per-request budget), so
+// it is layered on top of the detector's own canonical vocabulary
+// (server/lib/trunk-drift.js's TRUNK_DRIFT_SKIP_REASONS) rather than
+// hand-typed alongside it. Exported so the test suite validates against
+// this same combined list instead of hand-typing its own third copy
+// (R5-vocab) — keep client/src/lib/types.ts's TrunkDriftResult["skipped"]
+// union in sync with this list by hand; a client/server split is
+// unavoidable across the Node/Vite boundary (see DERIVED-DUAL-VIEW in
+// PROJECT-CONTEXT.md for the general convention this follows).
+const BUDGET_EXCEEDED_REASON = "budget_exceeded";
+const TRUNK_DRIFT_ROUTE_SKIP_REASONS = [...TRUNK_DRIFT_SKIP_REASONS, BUDGET_EXCEEDED_REASON];
 
 /**
  * Grouped per-cwd session stats in one query, so listing N projects costs one
@@ -288,6 +311,53 @@ router.get("/:id/repos", async (req, res) => {
   res.json({ project_id: project.id, ...topology });
 });
 
+// GET /api/projects/:id/trunk-drift - per-mapped-repo direct-to-trunk commit
+// detection (see server/lib/trunk-drift.js), computed live on every call, no
+// persistence, no seenShas (Phase 1a writes nothing). Non-repo mapped
+// folders are silently skipped (no "nonRepoFolders" key — unlike /repos,
+// this endpoint's payload is only ever the repos themselves). Per-repo
+// failure isolation (G5): one repo's git error must never suppress another
+// repo's populated result in the same response, so each repo's detection is
+// wrapped in its own try/catch. Capped at
+// MAX_TRUNK_DRIFT_CHECKS_PER_REQUEST actual detectTrunkDrift calls per
+// request (sibling of repo-topology.js's MAX_DIRTY_CHECKS_PER_REQUEST) —
+// repos beyond the cap still appear in `repos`, never dropped, with
+// `drift.skipped: "budget_exceeded"` rather than a real result.
+router.get("/:id/trunk-drift", async (req, res) => {
+  const project = stmts.getProject.get(req.params.id);
+  if (!project) {
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+  }
+
+  const paths = stmts.listProjectPaths.all(project.id);
+  const repos = [];
+  let checksRemaining = MAX_TRUNK_DRIFT_CHECKS_PER_REQUEST;
+  for (const p of paths) {
+    if (!isGitRepo(p.cwd)) continue;
+    if (checksRemaining <= 0) {
+      repos.push({
+        cwd: p.cwd,
+        pathId: p.id,
+        drift: { skipped: BUDGET_EXCEEDED_REASON, repoPath: p.cwd },
+      });
+      continue;
+    }
+    checksRemaining -= 1;
+    try {
+      const drift = await detectTrunkDrift(p.cwd);
+      repos.push({ cwd: p.cwd, pathId: p.id, drift });
+    } catch {
+      // Per-repo failure isolation (G5): detectTrunkDrift itself never
+      // throws, but an unexpected error here must still degrade only this
+      // repo's own entry, never the whole response or a sibling repo's
+      // already-populated result.
+      repos.push({ cwd: p.cwd, pathId: p.id, drift: { skipped: "git_error", repoPath: p.cwd } });
+    }
+  }
+
+  res.json({ repos });
+});
+
 // GET /api/projects/:id/intake - team-intake initiatives found under this
 // project's mapped folders' intake/<slug>/ directories, with a stage
 // inferred from which known delivery-team artifact files exist (see
@@ -358,3 +428,4 @@ router.post("/:id/open-terminal", (req, res) => {
 });
 
 module.exports = router;
+module.exports.TRUNK_DRIFT_ROUTE_SKIP_REASONS = TRUNK_DRIFT_ROUTE_SKIP_REASONS;

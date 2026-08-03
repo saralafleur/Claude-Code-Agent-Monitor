@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import i18n from "i18next";
+import enProjectDetail from "../locales/en/projectDetail.json";
 
 const LOCALES = ["en", "ko", "vi", "zh"] as const;
 
@@ -149,5 +150,54 @@ describe("i18n resources", () => {
       await i18n.changeLanguage("en");
       expect(i18n.t("plan:report.board.concurrentSessions")).toBe("Concurrent agent sessions");
     });
+  });
+
+  describe("projectDetail:trunkDrift completeness (registry-derived, all locales) — Phase 1a trunk-drift detection", () => {
+    // Derived from the en locale file (source of truth) rather than
+    // hand-typed, so any future key added under trunkDrift.* (e.g. the
+    // "truncated" key added during the S9 fix) automatically requires
+    // coverage in every locale instead of silently being skipped by a
+    // stale hand-typed list.
+    const TRUNK_DRIFT_KEYS = Object.keys(enProjectDetail.trunkDrift) as Array<
+      keyof typeof enProjectDetail.trunkDrift
+    >;
+
+    for (const locale of LOCALES) {
+      for (const key of TRUNK_DRIFT_KEYS) {
+        it(`resolves projectDetail:trunkDrift.${key} to a non-empty string for locale "${locale}"`, async () => {
+          await i18n.changeLanguage(locale);
+          const value = i18n.t(`projectDetail:trunkDrift.${key}`);
+          // i18next's missing-key fallback returns the literal dotted key
+          // (ns prefix stripped), so this catches missing keys and empty strings.
+          expect(value).not.toBe(`trunkDrift.${key}`);
+          expect(typeof value).toBe("string");
+          expect(value.length).toBeGreaterThan(0);
+        });
+      }
+    }
+
+    it("ensures empty and unknown states render as distinctly different strings in English (never-guess-clean invariant)", async () => {
+      await i18n.changeLanguage("en");
+      const emptyText = i18n.t("projectDetail:trunkDrift.empty");
+      const unknownText = i18n.t("projectDetail:trunkDrift.unknown");
+      expect(emptyText).not.toBe(unknownText);
+      expect(emptyText.length).toBeGreaterThan(0);
+      expect(unknownText.length).toBeGreaterThan(0);
+    });
+
+    for (const locale of LOCALES) {
+      it(`actually interpolates {{days}} into trunkDrift.lookbackWindow for locale "${locale}" (BL-4 regression guard)`, async () => {
+        await i18n.changeLanguage(locale);
+        // A locale reverted to a literal hardcoded string (e.g. "past 7
+        // days" with no {{days}} placeholder) would still pass every
+        // non-empty/non-key-literal assertion above, because nothing
+        // exercises the interpolation path with a non-default value.
+        // Calling t() with days: 30 and asserting the 30 shows up (and the
+        // stale hardcoded 7 does not) catches that regression directly.
+        const value = i18n.t("projectDetail:trunkDrift.lookbackWindow", { days: 30 });
+        expect(value).toContain("30");
+        expect(value).not.toContain("7");
+      });
+    }
   });
 });

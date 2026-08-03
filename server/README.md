@@ -1666,6 +1666,7 @@ DASHBOARD_FOCUS_INFER_MODE=llm     # Focus-inference classifier: llm (heuristic 
 DASHBOARD_FOCUS_INFER_MODEL=haiku  # Model passed to the focus-inference `claude -p --model` spawn
 DASHBOARD_FOCUS_SUMMARY_MODEL=sonnet # Model for the Focus page's window summary (GET /api/focus-report/summary); falls back to DASHBOARD_FOCUS_INFER_MODEL, then haiku
 DASHBOARD_FOCUS_INFER_TIMEOUT_MS=30000 # Kill timer (ms) for a single focus-inference spawn (SIGTERM, then SIGKILL)
+DASHBOARD_TRUNK_DRIFT_LOOKBACK_DAYS=7 # Direct-to-trunk detection (GET /api/projects/:id/trunk-drift, server/lib/trunk-drift.js) lookback window in days; Phase 1a is read-only, on-demand per page load
 
 # Remote Data Sources (SSH pull; see the Remote Data Sources section)
 DASHBOARD_REMOTE_SYNC_MS=60000         # Remote-source sync poll interval (ms); 0 disables the poller
