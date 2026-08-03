@@ -67,7 +67,7 @@ sequencing gates.
 
 ### DEC-2 — Trunk-drift Phase 1a must merge before slice 1
 
-- **Status:** DEPENDENCY (hard gate, 2026-08-02)
+- **Status:** DEPENDENCY — **SATISFIED (2026-08-02)**: trunk-drift Phase 1a merged to master at `554f7d1` (worktree/session check performed; conflicts resolved both-sides-kept; suites 1425/1425 server + 771/771 client post-merge).
 - **What:** `intake/2026-08-02-trunk-drift-detection` **Phase 1a** must be on
   `master` before slice 1 of this build starts. It lands `server/lib/git-refs.js`
   (`execGit`, `resolveDefaultBranch`, `isGitRepo`) and `server/lib/trunk-drift.js`
@@ -235,18 +235,27 @@ sequencing gates.
 
 ### DEC-13 — Clean up the `DND`/`dnd` duplicate project before the live trial
 
-- **Status:** **PENDING (Sara)** — PM S-10; data hygiene, not a design question
-- **Facts:** `/Users/sara/CODE-LOCAL/SARA/DND` and `.../dnd` are the **same
-  directory** (identical inode `17996204`) but exist as two `plans` rows with an
-  identical `content_hash`, mapped in `project_paths` to two different
-  `project_id`s.
-- **Why it must precede the trial:** read-side canonicalization (see DEC-15)
+- **Status:** **DECIDED — RESOLVED (2026-08-03, Sara)**
+- **Facts (as found):** `/Users/sara/CODE-LOCAL/SARA/DND` and `.../dnd` are the
+  **same directory** (identical inode `17996204`) but existed as two `plans`
+  rows with an identical `content_hash`, mapped in `project_paths` to two
+  different `project_id`s.
+- **Why it had to precede the trial:** read-side canonicalization (see DEC-15)
   fixes fan-out *within* one project's assembly; it structurally cannot merge two
-  different `project_id`s. If the duplicate stands, the checkpoint measures the
-  ledger against a fleet that is itself double-counted — and the headline
-  "what did this project deliver" answer comes from one of the two ids.
-- **Recommendation:** merge/delete the duplicate project mapping (dashboard
-  Projects page), then take the DB backup, then run the trial.
+  different `project_id`s. If the duplicate stood, the checkpoint would measure
+  the ledger against a fleet that was itself double-counted — and the headline
+  "what did this project deliver" answer would come from one of the two ids.
+- **Resolution, verified live against the dashboard DB:** exactly one project
+  remains mapped to the directory — `project_id 26b989c5-8f85-4020-9406-a87c7843d336`
+  (`name: "D&D"`), with a single `project_paths` row pointing at
+  `/Users/sara/CODE-LOCAL/SARA/dnd`. No orphaned second project row or second
+  `project_paths` mapping for this directory exists. `DND`/`dnd` still resolve
+  to the same physical directory on disk (expected — case-insensitive
+  filesystem, unrelated to this fix), but it is no longer double-registered.
+- **Downstream effect:** this was the last blocker DEC-2 through DEC-13 named
+  ahead of the slice-4 checkpoint. DEC-11 (prior live trial) and DEC-12
+  (confirming the checkpoint is a gate) remain open but don't block starting
+  the checkpoint itself.
 
 ### DEC-14 — WATCH: transitional dual plan surface
 
@@ -387,3 +396,26 @@ sequencing gates.
   reuse the sibling query's fetch-all-then-sort-numerically pattern) the next
   time `server/lib/focus-report.js` is touched, or as a standalone one-line
   fix with its own red-first test. Sara may prioritize directly.
+
+### DEC-21 — SHIP gate resolved for real; committed and pushed
+
+- **Status:** DECIDED-AUTO (2026-08-03, Step 8 SHIP gate, auto-pilot)
+- **What happened:** build-lead's report (drafted while the client suite was
+  genuinely unrun/unknown) flagged O-8 (whole-namespace i18n key-set parity)
+  as an unbuilt, vacuous stub. The orchestrator closed it for real —
+  registry-derived, plural-suffix-aware key-set comparison across all
+  namespaces × 4 locales, live-mutation-proven — which required touching
+  client code (client/src/i18n/__tests__/i18n.test.ts) and fixed one real,
+  pre-existing translation gap it surfaced (sessions.remoteSourceBadgeTitle
+  missing from ko/vi/zh — added). That made `npm run test:client` runnable
+  for the first time this build; result 773/773, unaffected.
+- **Decision:** with server (1531/1531) and client (773/773) both genuinely
+  green, the `.husky/pre-commit` hook's real requirement was satisfied
+  without `--no-verify` and without a human bypass decision. Per this run's
+  auto-pilot mode, Step 8 executed as designed: committed `f1799e9` on
+  `effort/2026-08-02-plan-lifecycle-value-ledger`, pushed to `origin` (fork
+  remote, never `upstream`, never the default branch). No PR opened — none
+  requested.
+- **Still open, unaffected by this:** DEC-10/11/12/13 and QDEC-14/15 remain
+  PENDING (Sara) — none of them gated the commit itself, only slice 4/5 and
+  two smaller CLI/API-shape preferences.
