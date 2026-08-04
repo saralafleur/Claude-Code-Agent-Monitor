@@ -18,6 +18,10 @@
     "info": "Nhắc nhở",
     "good": "Ghi nhận tích cực"
   },
+  "severityLabel": {
+    "info": "Bình thường",
+    "warning": "Cần chú ý"
+  },
   "statusLabel": {
     "acknowledged": "Đã xác nhận",
     "dismissed": "Đã bỏ qua",
@@ -43,7 +47,10 @@
     "saved": "Đã lưu",
     "resetDefault": "Đặt lại mặc định",
     "minError": "Phải lớn hơn hoặc bằng {{min}}",
-    "parseError": "Nhập một số, ví dụ 500k hoặc 1.2m"
+    "parseError": "Nhập một số, ví dụ 500k hoặc 1.2m",
+    "kindOverrideLabel": "Loại",
+    "severityOverrideLabel": "Mức độ",
+    "useDefaultOption": "Dùng mặc định ({{value}})"
   },
   "practices": {
     "sessionTokenCeiling": {

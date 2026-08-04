@@ -37,6 +37,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const { getDataDir } = require("./lib/claude-home");
+const { SEVERITY_VALUES } = require("./lib/playbook/practices");
 
 /**
  * Seed `targetPath` from the richest pre-existing database when none exists
@@ -1520,6 +1521,13 @@ db.exec(`
   );
 `);
 
+// Single SQL-literal rendering of SEVERITY_VALUES, shared by every place
+// below that needs `severity` enum membership as inline SQL (both
+// CHECK-constraint DDLs and the WATCH-3 pre-flight scan's NOT IN clause) —
+// so widening SEVERITY_VALUES later can't silently desync the DB-level
+// constraint/scan from the app-level enum (§9.2/S2 follow-up).
+const SEVERITY_SQL_LIST = SEVERITY_VALUES.map((v) => `'${v}'`).join(",");
+
 // coach_observations — a detected occurrence of a practice firing for a
 // scope (session/project/global) at a point in time. No message/
 // recommendation TEXT columns: this app has no server-side i18n, so display
@@ -1529,7 +1537,12 @@ db.exec(`
 // bare SQL keyword `values`, to avoid any reserved-word friction). `status`
 // starts at 'open'; the dedup index below is how the engine avoids
 // re-firing the same practice+scope while an observation for it is still
-// open.
+// open. `severity`'s CHECK is pinned to exactly the two values
+// server/lib/playbook/practices.js's SEVERITY_VALUES exports (DEC-1,
+// intake/2026-08-02-practice-kind-override) — this covers FRESH installs
+// only; see the guarded rebuild immediately below for existing ones (SQLite
+// cannot add a CHECK via ALTER TABLE, so a `CREATE TABLE IF NOT EXISTS`
+// change alone would silently no-op on every upgraded DB — §9.5).
 db.exec(`
   CREATE TABLE IF NOT EXISTS coach_observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1537,7 +1550,7 @@ db.exec(`
     scope_type TEXT NOT NULL CHECK(scope_type IN ('session','project','global')),
     scope_id TEXT,
     kind TEXT NOT NULL CHECK(kind IN ('risk','info','good')),
-    severity TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK(severity IN (${SEVERITY_SQL_LIST})),
     values_json TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','acknowledged','dismissed','resolved')),
     detected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -1548,6 +1561,169 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_coach_observations_detected_at
     ON coach_observations (detected_at DESC);
 `);
+
+// Guarded, ONE-ATOMIC-TRANSACTION table rebuild for existing installs whose
+// coach_observations predates the severity CHECK above (§9.6 NON-ATOMIC
+// REBUILD; intake/2026-08-02-practice-kind-override, corrected per the
+// build brief's F1/F2 — supersedes the plan_items-style rename-first/
+// unwrapped-statements shape used elsewhere in this file). Modeled on the
+// `agents` rebuild below (the one existing rebuild in this file that already
+// gets atomicity right), NOT on plan_items/webhook_targets/token_usage.
+//
+// Why atomicity here is load-bearing (and not just tidiness): if the
+// create/copy/drop/rename sequence were split into separate autocommitted
+// statements and the process died partway through, the *next* boot's
+// idempotency guard would read the CURRENT table's `sqlite_master.sql` text
+// — if that text already shows the CHECK-bearing shape (e.g. the rename
+// already completed), the guard concludes "already migrated" and never
+// retries, silently orphaning every historical Observation in a table this
+// code no longer reads from. Wrapping the whole DDL sequence in one
+// BEGIN…COMMIT means a mid-migration crash rolls back to the exact
+// pre-migration state — nothing is ever left half-done.
+//
+// `rebuildTableAtomically()` is the shared helper (durable-cure D1,
+// test-plan.md "Durable-cure decision") — it owns the idempotency check,
+// the orphan-table defense (F2), the pre-flight-skip hook (WATCH-3), and
+// index recreation; each call site supplies only its own DDL. Do NOT retrofit
+// this helper onto plan_items/webhook_targets/token_usage's existing
+// rebuilds in this change — that is tracked separately (D2,
+// server/__tests__/db-migration.test.js's `REBUILD_CASES` registry).
+/**
+ * Rebuilds `table` via create-new → copy → drop-old → rename, atomically.
+ *
+ * @param {object} opts
+ * @param {string} opts.table - table name (e.g. "coach_observations").
+ * @param {(sql: string) => boolean} opts.isAlreadyMigrated - given the
+ *   table's current `sqlite_master.sql` text, returns true if the rebuild
+ *   has already run (idempotency guard).
+ * @param {() => boolean} [opts.preflightCheck] - runs before the rebuild;
+ *   return false to skip the rebuild (log, don't throw, don't rewrite any
+ *   row) — e.g. WATCH-3's "existing data doesn't fit the new CHECK" scan.
+ * @param {() => void} opts.execute - performs the actual
+ *   `db.exec("BEGIN; CREATE TABLE ${table}_new (...); INSERT INTO
+ *   ${table}_new SELECT ... FROM ${table}; DROP TABLE ${table}; ALTER TABLE
+ *   ${table}_new RENAME TO ${table}; COMMIT;")` — written by the caller (not
+ *   templated here) so each table's DDL stays a single, auditable literal.
+ * @param {string[]} [opts.indexes] - `CREATE INDEX IF NOT EXISTS` statements
+ *   to reissue after the rebuild (the old table's indexes are dropped along
+ *   with it).
+ * @returns {boolean} true if the rebuild ran, false if it was skipped
+ *   (already migrated, an orphan was found, or the pre-flight check failed).
+ */
+function rebuildTableAtomically({ table, isAlreadyMigrated, preflightCheck, execute, indexes }) {
+  const meta = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`).get(table);
+  if (!meta) return false; // table doesn't exist yet — nothing to rebuild
+  if (isAlreadyMigrated(meta.sql)) return false; // idempotent no-op
+
+  // Orphan defense (F2): should be unreachable if the rebuild below is truly
+  // atomic — that's exactly why it's worth having. `_old` is checked even
+  // though this helper's own shape never produces one (create-new-then-
+  // rename, not rename-first) — belt-and-suspenders against any other stray
+  // leftover. Never throw: db.js runs at `require()` time, and a throw here
+  // would brick the Express server, MCP server, Electron app, and VS Code
+  // extension simultaneously.
+  const orphans = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, ?)`)
+    .all(`${table}_old`, `${table}_new`);
+  if (orphans.length > 0) {
+    console.error(
+      `[db] ${table} rebuild skipped: found orphaned table(s) ` +
+        `${orphans.map((r) => r.name).join(", ")} from a previous interrupted ` +
+        `migration attempt. Leaving ${table} on its pre-migration schema — ` +
+        `manual inspection required. No data was touched.`
+    );
+    return false;
+  }
+
+  if (preflightCheck && !preflightCheck()) {
+    console.warn(
+      `[db] ${table} rebuild skipped: pre-flight scan found data that does not ` +
+        `fit the new constraint. Leaving ${table} on its pre-migration schema ` +
+        `rather than rewriting or dropping any existing row.`
+    );
+    return false;
+  }
+
+  // SQLite ignores this pragma if issued inside a transaction, so it must be
+  // (and is) a separate statement, before BEGIN — never folded into the
+  // `execute()` transaction below.
+  db.pragma("foreign_keys = OFF");
+  try {
+    execute();
+  } catch (err) {
+    // Never throw out of here: db.js runs at require() time, and a throw
+    // would brick the Express server, MCP server, Electron app, and VS Code
+    // extension simultaneously (same rule as the orphan-defense/pre-flight
+    // branches above). A realistic trigger is SQLITE_BUSY from a concurrent
+    // process holding a lock during the exclusive DROP/RENAME. If `execute`'s
+    // own `db.exec("BEGIN; ...")` failed partway, the transaction may still
+    // be open — roll it back explicitly before returning, since `PRAGMA
+    // foreign_keys` below is a silent no-op inside an open transaction and
+    // wouldn't otherwise take effect on this path.
+    if (db.inTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* best-effort — nothing more we can safely do here */
+      }
+    }
+    console.error(
+      `[db] ${table} rebuild failed; rolled back, leaving the pre-migration schema in place.`,
+      err
+    );
+    return false;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+  for (const indexSql of indexes || []) {
+    db.exec(indexSql);
+  }
+  return true;
+}
+
+rebuildTableAtomically({
+  table: "coach_observations",
+  isAlreadyMigrated: (sql) => !!sql && sql.includes("CHECK(severity IN"),
+  // WATCH-3: this feature's whole premise is that coach_observations rows
+  // are frozen historical facts, so an out-of-enum severity value already on
+  // disk must never be rewritten to satisfy the new constraint. Skip the
+  // rebuild entirely instead (the install keeps app-layer enum enforcement
+  // via SEVERITY_VALUES/coerceEnum, just not the DB-level CHECK).
+  preflightCheck: () => {
+    const bad = db
+      .prepare(
+        `SELECT COUNT(*) AS cnt FROM coach_observations WHERE severity NOT IN (${SEVERITY_SQL_LIST})`
+      )
+      .get().cnt;
+    return bad === 0;
+  },
+  execute: () =>
+    db.exec(`
+      BEGIN;
+      CREATE TABLE coach_observations_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        practice_id TEXT NOT NULL,
+        scope_type TEXT NOT NULL CHECK(scope_type IN ('session','project','global')),
+        scope_id TEXT,
+        kind TEXT NOT NULL CHECK(kind IN ('risk','info','good')),
+        severity TEXT NOT NULL CHECK(severity IN (${SEVERITY_SQL_LIST})),
+        values_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','acknowledged','dismissed','resolved')),
+        detected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        responded_at TEXT
+      );
+      INSERT INTO coach_observations_new SELECT * FROM coach_observations;
+      DROP TABLE coach_observations;
+      ALTER TABLE coach_observations_new RENAME TO coach_observations;
+      COMMIT;
+    `),
+  indexes: [
+    `CREATE INDEX IF NOT EXISTS idx_coach_observations_open
+       ON coach_observations (practice_id, scope_type, scope_id, status);`,
+    `CREATE INDEX IF NOT EXISTS idx_coach_observations_detected_at
+       ON coach_observations (detected_at DESC);`,
+  ],
+});
 
 // Focus-summary access log: one row per focus-window-summary cache
 // resolution (hit or miss), fed from server/lib/focus-summary.js at each

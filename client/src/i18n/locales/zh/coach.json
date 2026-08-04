@@ -18,6 +18,10 @@
     "info": "提醒",
     "good": "正向反馈"
   },
+  "severityLabel": {
+    "info": "常规",
+    "warning": "需关注"
+  },
   "statusLabel": {
     "acknowledged": "已确认",
     "dismissed": "已忽略",
@@ -43,7 +47,10 @@
     "saved": "已保存",
     "resetDefault": "恢复默认值",
     "minError": "不能小于 {{min}}",
-    "parseError": "请输入数字，例如 500k 或 1.2m"
+    "parseError": "请输入数字，例如 500k 或 1.2m",
+    "kindOverrideLabel": "类型",
+    "severityOverrideLabel": "严重程度",
+    "useDefaultOption": "使用默认 ({{value}})"
   },
   "practices": {
     "sessionTokenCeiling": {

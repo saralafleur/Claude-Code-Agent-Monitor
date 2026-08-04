@@ -28,11 +28,106 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Compass } from "lucide-react";
-import { usePlaybookPractices, playbookStore } from "../lib/playbookStore";
+import { usePlaybookPractices, playbookStore, resolveDraftKind } from "../lib/playbookStore";
 import { CoachTabs } from "../components/coach/CoachTabs";
 import { ObservationCard } from "../components/coach/ObservationCard";
 import { parseTokenShorthand, fmtTokensFull } from "../lib/format";
-import type { PlaybookPractice } from "../lib/types";
+import type { ObservationKind, ObservationSeverity, PlaybookPractice } from "../lib/types";
+
+const KIND_OPTIONS: ObservationKind[] = ["risk", "info", "good"];
+const SEVERITY_OPTIONS: ObservationSeverity[] = ["info", "warning"];
+
+/** Shared kind/severity override selector, rendered on every practice card
+ *  (DEC-2 — the override mechanism is generic, no per-practice special
+ *  case). Free choice of any value, including "downgrades" (DEC-4) — no
+ *  ordering is enforced or implied by the option order below. The first
+ *  option on each selector is "use default", which sends `null` (clears any
+ *  stored override back to the catalog value) rather than omitting the key.
+ *
+ *  WATCH-2: the severity selector here has no visible effect anywhere in the
+ *  product today — `ObservationCard.tsx` never renders severity, so a
+ *  `severityOverride` only ever shows up in the raw API/WS payload, not in
+ *  any preview or the live Feed. The control is still wired end-to-end
+ *  (saved, resolved, round-tripped) so it's ready the moment a consumer
+ *  renders severity; it isn't dead code, just not yet visibly wired up. */
+function OverrideSelects({
+  practice,
+  kindDraft,
+  severityDraft,
+  onKind,
+  onSeverity,
+}: {
+  practice: PlaybookPractice;
+  kindDraft: ObservationKind | null | undefined;
+  severityDraft: ObservationSeverity | null | undefined;
+  onKind: (v: ObservationKind | null) => void;
+  onSeverity: (v: ObservationSeverity | null) => void;
+}) {
+  const { t } = useTranslation("coach");
+  // Destructured (not read as dot-notation off `practice` inline below) so
+  // this file has zero raw reads of the practice's catalog kind/severity
+  // fields outside their PlaybookPractice interface declaration in
+  // types.ts — enforced by playbook-resolver-guard.test.js's client-
+  // display-path assertion. Reading the catalog value here is still
+  // correct, not a resolver bypass: the "use default (X)" option is
+  // supposed to name the catalog default, not the resolved value.
+  const {
+    kind: catalogKind,
+    defaultSeverity: catalogSeverity,
+    kindOverride,
+    severityOverride,
+  } = practice;
+  const kindValue = kindDraft !== undefined ? kindDraft : kindOverride;
+  const severityValue = severityDraft !== undefined ? severityDraft : severityOverride;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 gap-3 max-w-xs">
+      <label className="block text-xs text-gray-400">
+        <span className="block text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+          {t("playbook.kindOverrideLabel")}
+        </span>
+        <select
+          value={kindValue ?? ""}
+          onChange={(e) =>
+            onKind(e.target.value === "" ? null : (e.target.value as ObservationKind))
+          }
+          className="w-full bg-surface-3 border border-border rounded-lg text-gray-100 text-xs px-2 py-1.5"
+        >
+          <option value="">
+            {t("playbook.useDefaultOption", { value: t(`kindLabel.${catalogKind}`) })}
+          </option>
+          {KIND_OPTIONS.map((value) => (
+            <option key={value} value={value}>
+              {t(`kindLabel.${value}`)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block text-xs text-gray-400">
+        <span className="block text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+          {t("playbook.severityOverrideLabel")}
+        </span>
+        <select
+          value={severityValue ?? ""}
+          onChange={(e) =>
+            onSeverity(e.target.value === "" ? null : (e.target.value as ObservationSeverity))
+          }
+          className="w-full bg-surface-3 border border-border rounded-lg text-gray-100 text-xs px-2 py-1.5"
+        >
+          <option value="">
+            {t("playbook.useDefaultOption", { value: t(`severityLabel.${catalogSeverity}`) })}
+          </option>
+          {SEVERITY_OPTIONS.map((value) => (
+            <option key={value} value={value}>
+              {t(`severityLabel.${value}`)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
 
 interface PracticeCardProps {
   practice: PlaybookPractice;
@@ -161,6 +256,10 @@ function SessionTokenCeilingCard({ practice }: PracticeCardProps) {
   const [enabled, setEnabled] = useState(practice.enabled);
   const [draft, setDraft] = useState<Record<string, number>>(practice.config);
   const [thresholdText, setThresholdText] = useState("");
+  const [kindDraft, setKindDraft] = useState<ObservationKind | null | undefined>(undefined);
+  const [severityDraft, setSeverityDraft] = useState<ObservationSeverity | null | undefined>(
+    undefined
+  );
   const seeded = useRef(false);
   const { saving, savedPulse, save } = useSavePulse();
 
@@ -177,7 +276,11 @@ function SessionTokenCeilingCard({ practice }: PracticeCardProps) {
   if (!field) return null;
 
   const draftValue = draft[field.key] ?? field.default;
-  const isDirty = enabled !== practice.enabled || draftValue !== practice.config[field.key];
+  const isDirty =
+    enabled !== practice.enabled ||
+    draftValue !== practice.config[field.key] ||
+    (kindDraft !== undefined && kindDraft !== practice.kindOverride) ||
+    (severityDraft !== undefined && severityDraft !== practice.severityOverride);
   const parsedThreshold = parseTokenShorthand(thresholdText);
   const isValid = parsedThreshold !== null && parsedThreshold >= field.min;
 
@@ -248,13 +351,23 @@ function SessionTokenCeilingCard({ practice }: PracticeCardProps) {
         )}
       </div>
 
+      <OverrideSelects
+        practice={practice}
+        kindDraft={kindDraft}
+        severityDraft={severityDraft}
+        onKind={setKindDraft}
+        onSeverity={setSeverityDraft}
+      />
+
       <div className="mt-4 pt-4 border-t border-border">
         <div className="text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
           {t("playbook.previewLabel")}
         </div>
         <ObservationCard
           practiceId={practice.id}
-          kind={practice.kind}
+          kind={
+            kindDraft === undefined ? practice.resolvedKind : resolveDraftKind(practice, kindDraft)
+          }
           values={{ totalTokens: draftValue * 1.024, thresholdTokens: draftValue }}
         />
       </div>
@@ -264,8 +377,26 @@ function SessionTokenCeilingCard({ practice }: PracticeCardProps) {
         isValid={isValid}
         isDirty={isDirty}
         savedPulse={savedPulse}
-        onSave={() => save(() => playbookStore.save(practice.id, { enabled, config: draft }))}
-        onReset={() => applyThreshold(field.default)}
+        onSave={() =>
+          save(() =>
+            playbookStore.save(practice.id, {
+              enabled,
+              config: draft,
+              // Only included when the operator actually touched the
+              // selector — an untouched selector must not add a key to the
+              // patch, so a plain numeric-only/enabled-only save keeps
+              // sending exactly `{ enabled, config }`, matching this app's
+              // existing partial-patch convention.
+              ...(kindDraft !== undefined ? { kindOverride: kindDraft } : {}),
+              ...(severityDraft !== undefined ? { severityOverride: severityDraft } : {}),
+            })
+          )
+        }
+        onReset={() => {
+          applyThreshold(field.default);
+          setKindDraft(null);
+          setSeverityDraft(null);
+        }}
       />
     </PracticeCardShell>
   );
@@ -275,13 +406,21 @@ function AccountWeeklyBalanceCard({ practice }: PracticeCardProps) {
   const { t } = useTranslation("coach");
   const [enabled, setEnabled] = useState(practice.enabled);
   const [draft, setDraft] = useState<Record<string, number>>(practice.config);
+  const [kindDraft, setKindDraft] = useState<ObservationKind | null | undefined>(undefined);
+  const [severityDraft, setSeverityDraft] = useState<ObservationSeverity | null | undefined>(
+    undefined
+  );
   const { saving, savedPulse, save } = useSavePulse();
 
   const field = practice.fields[0];
   if (!field) return null;
 
   const draftValue = draft[field.key] ?? field.default;
-  const isDirty = enabled !== practice.enabled || draftValue !== practice.config[field.key];
+  const isDirty =
+    enabled !== practice.enabled ||
+    draftValue !== practice.config[field.key] ||
+    (kindDraft !== undefined && kindDraft !== practice.kindOverride) ||
+    (severityDraft !== undefined && severityDraft !== practice.severityOverride);
   const isValid = Number.isFinite(draftValue) && draftValue >= field.min;
 
   // Illustrative preview pair: a low account sitting at a fixed 40% used,
@@ -326,13 +465,23 @@ function AccountWeeklyBalanceCard({ practice }: PracticeCardProps) {
         )}
       </div>
 
+      <OverrideSelects
+        practice={practice}
+        kindDraft={kindDraft}
+        severityDraft={severityDraft}
+        onKind={setKindDraft}
+        onSeverity={setSeverityDraft}
+      />
+
       <div className="mt-4 pt-4 border-t border-border">
         <div className="text-[10.5px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
           {t("playbook.previewLabel")}
         </div>
         <ObservationCard
           practiceId={practice.id}
-          kind={practice.kind}
+          kind={
+            kindDraft === undefined ? practice.resolvedKind : resolveDraftKind(practice, kindDraft)
+          }
           values={{
             lowLabel: t("practices.accountWeeklyBalance.previewLowLabel"),
             lowPct: previewLowPct,
@@ -348,8 +497,23 @@ function AccountWeeklyBalanceCard({ practice }: PracticeCardProps) {
         isValid={isValid}
         isDirty={isDirty}
         savedPulse={savedPulse}
-        onSave={() => save(() => playbookStore.save(practice.id, { enabled, config: draft }))}
-        onReset={() => setDraft({ [field.key]: field.default })}
+        onSave={() =>
+          save(() =>
+            playbookStore.save(practice.id, {
+              enabled,
+              config: draft,
+              // See SessionTokenCeilingCard's onSave for why these are
+              // conditionally included.
+              ...(kindDraft !== undefined ? { kindOverride: kindDraft } : {}),
+              ...(severityDraft !== undefined ? { severityOverride: severityDraft } : {}),
+            })
+          )
+        }
+        onReset={() => {
+          setDraft({ [field.key]: field.default });
+          setKindDraft(null);
+          setSeverityDraft(null);
+        }}
       />
     </PracticeCardShell>
   );

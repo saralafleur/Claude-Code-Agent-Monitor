@@ -69,7 +69,20 @@ const schemas = {
 
   PlaybookPractice: {
     type: "object",
-    required: ["id", "category", "scope", "kind", "defaultSeverity", "fields", "enabled", "config"],
+    required: [
+      "id",
+      "category",
+      "scope",
+      "kind",
+      "defaultSeverity",
+      "fields",
+      "enabled",
+      "config",
+      "kindOverride",
+      "severityOverride",
+      "resolvedKind",
+      "resolvedSeverity",
+    ],
     description:
       "A catalog practice merged with its current stored config (or the catalog defaults, if never touched). This is the shape every entry in `GET /api/playbook/practices` has, and also the shape `PUT /api/playbook/practices/:id/config` returns for the one practice it updated.",
     properties: {
@@ -93,12 +106,45 @@ const schemas = {
       kind: {
         type: "string",
         enum: ["risk", "info", "good"],
-        description: "Nature of the Observation this practice produces when it fires.",
+        description:
+          "Catalog built-in default kind. Use `resolvedKind` for the effective value after any override.",
         example: "risk",
       },
       defaultSeverity: {
         type: "string",
-        description: "Severity stamped onto Observations this practice creates.",
+        enum: ["info", "warning"],
+        description:
+          "Catalog built-in default severity. Use `resolvedSeverity` for the effective value after any override.",
+        example: "warning",
+      },
+      kindOverride: {
+        type: "string",
+        enum: ["risk", "info", "good"],
+        nullable: true,
+        description:
+          "Stored per-practice override for kind, or `null` if unset. Use `resolvedKind` for the effective value.",
+        example: null,
+      },
+      severityOverride: {
+        type: "string",
+        enum: ["info", "warning"],
+        nullable: true,
+        description:
+          "Stored per-practice override for severity, or `null` if unset. Use `resolvedSeverity` for the effective value.",
+        example: null,
+      },
+      resolvedKind: {
+        type: "string",
+        enum: ["risk", "info", "good"],
+        description:
+          "The effective kind: `kindOverride` if set, otherwise `kind`. What the engine would stamp onto a new Observation right now.",
+        example: "risk",
+      },
+      resolvedSeverity: {
+        type: "string",
+        enum: ["info", "warning"],
+        description:
+          "The effective severity: `severityOverride` if set, otherwise `defaultSeverity`.",
         example: "warning",
       },
       fields: {
@@ -136,7 +182,7 @@ const schemas = {
   PlaybookConfigPatchRequest: {
     type: "object",
     description:
-      "Patch for one practice's `enabled`/`config`. Both fields are optional and independent — an omitted field keeps its current stored value (or catalog default if never configured); `config` itself is also a patch, so only the keys you supply are overwritten, not the whole object.",
+      "Patch for one practice's `enabled`/`config`/`kindOverride`/`severityOverride`. All four fields are optional and independent — an omitted field keeps its current stored value (or catalog default if never configured); `config` itself is also a patch, so only the keys you supply are overwritten, not the whole object; on `kindOverride`/`severityOverride`, an explicit `null` clears that override back to the catalog default (omitting the key leaves it unchanged).",
     properties: {
       enabled: {
         type: "boolean",
@@ -149,6 +195,22 @@ const schemas = {
           "Field values to overwrite, keyed by each field's `key`. Every key must match one of the practice's own `fields[].key`; every value must be a finite number at or above that field's `min`.",
         additionalProperties: { type: "number" },
         example: { thresholdTokens: 150000000 },
+      },
+      kindOverride: {
+        type: "string",
+        enum: ["risk", "info", "good"],
+        nullable: true,
+        description:
+          "Override the practice's kind. `null` clears the override (reverts to the catalog default). Omit to leave unchanged. An unrecognized value returns 400 `INVALID_CONFIG`.",
+        example: "risk",
+      },
+      severityOverride: {
+        type: "string",
+        enum: ["info", "warning"],
+        nullable: true,
+        description:
+          "Override the practice's severity. `null` clears the override. Omit to leave unchanged. An unrecognized value returns 400 `INVALID_CONFIG`.",
+        example: "warning",
       },
     },
   },
@@ -192,12 +254,15 @@ const schemas = {
       kind: {
         type: "string",
         enum: ["risk", "info", "good"],
-        description: "Copied from the practice's own `kind` at detection time.",
+        description:
+          "The resolved kind (the catalog default, or the practice's `kindOverride` if one was set) frozen at detection time. Never re-derived: changing a practice's override later does not relabel existing Observations.",
         example: "risk",
       },
       severity: {
         type: "string",
-        description: "Copied from the practice's `defaultSeverity` at detection time.",
+        enum: ["info", "warning"],
+        description:
+          "The resolved severity (the catalog default, or the practice's `severityOverride` if one was set) frozen at detection time. Never re-derived.",
         example: "warning",
       },
       values_json: {
@@ -277,6 +342,10 @@ const paths = {
                     scope: "session",
                     kind: "risk",
                     defaultSeverity: "warning",
+                    kindOverride: null,
+                    severityOverride: null,
+                    resolvedKind: "risk",
+                    resolvedSeverity: "warning",
                     fields: [
                       {
                         key: "thresholdTokens",
@@ -294,6 +363,10 @@ const paths = {
                     scope: "global",
                     kind: "info",
                     defaultSeverity: "info",
+                    kindOverride: "risk",
+                    severityOverride: null,
+                    resolvedKind: "risk",
+                    resolvedSeverity: "info",
                     fields: [
                       {
                         key: "gapThresholdPct",
@@ -317,9 +390,9 @@ const paths = {
   "/api/playbook/practices/{id}/config": {
     put: {
       tags: ["Playbook"],
-      summary: "Patch one practice's enabled state and/or config",
+      summary: "Patch one practice's enabled state, config, and/or kind/severity overrides",
       description:
-        "Patches `enabled` and/or `config` for one catalog practice and persists it (server-shared — this app has no user accounts, so the change applies to every connected computer). `config` values are validated against that practice's own `fields` schema: unknown field names, non-finite numbers, and values below a field's `min` are all rejected. On success, broadcasts the merged practice over the WebSocket as `playbook_practice_config_updated` so every other connected client picks it up live, and returns that same merged practice. No authentication (local-first).",
+        "Patches `enabled`/`config`/`kindOverride`/`severityOverride` for one catalog practice and persists it (server-shared — this app has no user accounts, so the change applies to every connected computer). `config` values are validated against that practice's own `fields` schema: unknown field names, non-finite numbers, and values below a field's `min` are all rejected. `kindOverride`/`severityOverride` are validated against the pinned enums; `null` clears an override back to the catalog default, an omitted key leaves it unchanged. On success, broadcasts the merged practice over the WebSocket as `playbook_practice_config_updated` so every other connected client picks it up live, and returns that same merged practice. No authentication (local-first).",
       operationId: "updatePlaybookPracticeConfig",
       parameters: [
         {
@@ -336,7 +409,12 @@ const paths = {
         content: {
           "application/json": {
             schema: { $ref: "#/components/schemas/PlaybookConfigPatchRequest" },
-            example: { enabled: true, config: { thresholdTokens: 150000000 } },
+            example: {
+              enabled: true,
+              config: { thresholdTokens: 150000000 },
+              kindOverride: "good",
+              severityOverride: null,
+            },
           },
         },
       },
@@ -352,6 +430,10 @@ const paths = {
                 scope: "session",
                 kind: "risk",
                 defaultSeverity: "warning",
+                kindOverride: "good",
+                severityOverride: null,
+                resolvedKind: "good",
+                resolvedSeverity: "warning",
                 fields: [
                   { key: "thresholdTokens", type: "number", default: 100000000, min: 1000000 },
                 ],

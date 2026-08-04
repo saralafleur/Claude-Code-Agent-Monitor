@@ -2805,18 +2805,48 @@ export interface PlaybookPracticeField {
   min: number;
 }
 
+/** The only `kind` values a Playbook practice (or a per-practice
+ *  `kindOverride`) may take — mirrors server/lib/playbook/practices.js's
+ *  `KIND_VALUES`, the DB `CHECK`, and the `kindLabel` i18n keys. */
+export type ObservationKind = "risk" | "info" | "good";
+/** The only `severity` values — mirrors server/lib/playbook/practices.js's
+ *  `SEVERITY_VALUES`, the DB `CHECK`, and the `severityLabel` i18n keys. */
+export type ObservationSeverity = "info" | "warning";
+
 /** The Coach's Playbook: one practice's catalog definition merged with its
  *  current (server-shared) config - GET /api/playbook/practices's response
  *  shape (one array entry), and the payload of
  *  `playbook_practice_config_updated` WebSocket pushes. See library
  *  knowledge `product/coach/coach-playbook-vocabulary.md` for the full
- *  vocabulary this type implements. */
+ *  vocabulary this type implements.
+ *
+ *  `practice.kind` / `practice.defaultSeverity` are the catalog **built-in**
+ *  defaults — this interface declaration is the one place outside
+ *  `server/lib/playbook/practices.js`'s `resolvePracticeConfig()` allowed to
+ *  be a source of those raw fields (enforced by
+ *  `server/__tests__/playbook-resolver-guard.test.js`'s client-display-path
+ *  assertion). Every *consumer* of "this practice's effective kind/severity"
+ *  — both preview cards in `PlaybookPage.tsx`, `playbookStore.ts`'s
+ *  `resolveDraftKind`/`resolveDraftSeverity` — must read `resolvedKind`/
+ *  `resolvedSeverity` (or a draft resolved through them), never
+ *  `practice.kind`/`practice.defaultSeverity` directly (§9.1
+ *  DERIVED-DUAL-VIEW). */
 export interface PlaybookPractice {
   id: string;
   category: string;
   scope: "session" | "project" | "global";
-  kind: "risk" | "info" | "good";
-  defaultSeverity: string;
+  /** Catalog built-in default kind — unchanged meaning. Use `resolvedKind` for the effective value. */
+  kind: ObservationKind;
+  /** Catalog built-in default severity — unchanged meaning. Use `resolvedSeverity` for the effective value. */
+  defaultSeverity: ObservationSeverity;
+  /** Stored per-practice override, or `null` if unset. `null` means "use the catalog default". */
+  kindOverride: ObservationKind | null;
+  /** Stored per-practice override, or `null` if unset. */
+  severityOverride: ObservationSeverity | null;
+  /** Effective kind: `kindOverride ?? kind`, computed server-side by `resolvePracticeConfig()`. */
+  resolvedKind: ObservationKind;
+  /** Effective severity: `severityOverride ?? defaultSeverity`, computed server-side. */
+  resolvedSeverity: ObservationSeverity;
   fields: PlaybookPracticeField[];
   enabled: boolean;
   /** Current values keyed by each field's `key` (defaults merged with any stored override). */
@@ -2834,8 +2864,12 @@ export interface CoachObservation {
   practice_id: string;
   scope_type: "session" | "project" | "global";
   scope_id: string | null;
-  kind: "risk" | "info" | "good";
-  severity: string;
+  /** The resolved kind (catalog default, or the practice's `kindOverride` if
+   *  set) frozen at detection time. Never re-derived: changing an override
+   *  later does not relabel existing Observations. */
+  kind: ObservationKind;
+  /** The resolved severity, frozen at detection time. Never re-derived. */
+  severity: ObservationSeverity;
   values_json: string;
   status: "open" | "acknowledged" | "dismissed" | "resolved";
   detected_at: string;

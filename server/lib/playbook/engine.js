@@ -80,7 +80,7 @@ function evaluateSession(dbModule, sessionId, enabledPractices) {
   const totalTokens = sumSessionTokens(dbModule, sessionId);
   const ctx = { totalTokens };
 
-  for (const { practice, config } of sessionPractices) {
+  for (const { practice, config, kind, severity } of sessionPractices) {
     const result = practice.detect(ctx, config);
     if (!result) continue;
     const existing = stmts.getOpenCoachObservation.get(
@@ -94,8 +94,8 @@ function evaluateSession(dbModule, sessionId, enabledPractices) {
       practice.id,
       "session",
       sessionId,
-      practice.kind,
-      practice.defaultSeverity,
+      kind,
+      severity,
       JSON.stringify(result.values)
     );
     created.push(stmts.getCoachObservation.get(info.lastInsertRowid));
@@ -133,7 +133,7 @@ function evaluateGlobal(dbModule, enabledPractices) {
 
   const ctx = { accounts: listAccountsWeeklyCtx(dbModule) };
 
-  for (const { practice, config } of globalPractices) {
+  for (const { practice, config, kind, severity } of globalPractices) {
     const result = practice.detect(ctx, config);
     if (!result) continue;
     const existing = stmts.getOpenCoachObservation.get(practice.id, "global", null, null);
@@ -142,8 +142,8 @@ function evaluateGlobal(dbModule, enabledPractices) {
       practice.id,
       "global",
       null,
-      practice.kind,
-      practice.defaultSeverity,
+      kind,
+      severity,
       JSON.stringify(result.values)
     );
     created.push(stmts.getCoachObservation.get(info.lastInsertRowid));
