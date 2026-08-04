@@ -218,6 +218,33 @@ never-real. Defensible, but only with a tripwire asserting the CHECK still exclu
 `'trunk_drift'`, whose failure message is the instruction to re-verify against a real
 Phase-1b row. See `intake/2026-08-02-plan-lifecycle-value-ledger/qa/qa-assessment.md`.
 
+**Build-outcome note (2026-08-03, `intake/2026-08-02-practice-kind-override/`
+— 6th touch, counted: a real third copy shipped into the diff and was caught in
+review, not by the guard).** The planned cure was built and works:
+`resolvePracticeConfig()` is the sole server resolver, `engine.js` ×2 +
+`serializePractice()` + both `PlaybookPage` cards read only resolved values, and
+`server/__tests__/playbook-resolver-guard.test.js`'s three assertions were proven
+red by injecting `const rogue = practice.kind;` into `evaluateSession()` and into
+`SessionTokenCeilingCard`, then reverted. The second-order form was also closed as
+required: `server/__tests__/fixtures/playbook-resolution-cases.json` (13 cases)
+drives **both** `resolvePracticeConfig()` and the client's
+`resolveDraftKind`/`resolveDraftSeverity` — the first time this entry's
+cross-runtime parity obligation has actually been built.
+
+**And this entry's own 2026-08-01 lesson still landed a third time anyway.**
+Adversarial review (B1) found `playbookStore.ts`'s `save()` had hand-rolled a
+**third** copy of the precedence formula inline for its optimistic merge — in the
+same file that exports the two resolvers, one call frame away from them. The
+structural guard could not see it: the guard scans for raw
+`practice.kind`/`practice.defaultSeverity` reads, and a re-implementation of the
+`(draft !== undefined ? draft : override) ?? catalog` *formula* reads neither.
+Fixed by routing `save()` through its own exported helpers. **Generalizable and
+now twice-proven: a rogue-*reader* scan does not catch a rogue *re-derivation*.**
+When the cure for this entry is "one function computes X", the guard has to be
+able to fail on a second computation of X, not only on a second read of X's
+inputs — otherwise the copy that ships is the one written by whoever already had
+the formula in their head, in the resolver's own file.
+
 **Inverse-application warning for this surface (do not apply the criterion above
 by rote):** on the Coach/Playbook, `coach_observations.kind` (frozen at insert)
 and the live resolved kind (catalog + current override) are two legitimate,
@@ -435,6 +462,77 @@ asserting nothing — and both reported them as done:
   guarding nothing, in the build whose DoD was built around not doing that.
   Flagged in the build report, not silently shipped; build them or delete them.
 
+**2026-08-03, `intake/2026-08-02-practice-kind-override/` — NEW SUB-PATTERN:
+PLAN-LEVEL VACUOUS FIXTURE (the vacuity is in the task list, not in the
+implementer).** This entry recurred **twice inside one build**, both times on
+`coach-observations-severity-rebuild.test.js`'s T1c — the test whose only job is
+to prove §9.6's F2 orphan guard:
+
+1. **First form (verifier pass 1):** T1b and T1c called `require("../db")` without
+   setting `DASHBOARD_DB_PATH`. T1b failed loudly. **T1c passed** — its post-boot
+   check re-opened the crafted temp DB directly with `better-sqlite3`, a file
+   `db.js` had never touched, so the assertion was true regardless of whether F2
+   existed. Note the detection failure too: a file-level
+   `grep -c DASHBOARD_DB_PATH` on that file returns **6** and reads as compliant;
+   all six mentions were in *other* `describe` blocks. **The mention has to be
+   scoped to the exact block that calls `require`, so a per-file grep is not a
+   valid sweep for this.**
+2. **Second form (verifier pass 2, after the first was correctly fixed):** T1c was
+   *still* vacuous, now structurally. Its fixture was `buildLegacyDb([], true)` —
+   `withCheck = true`, i.e. the table already carries the CHECK — so
+   `rebuildTableAtomically()`'s `isAlreadyMigrated()` short-circuits and returns
+   **before** ever reaching F2's orphan check. The code under test was
+   unreachable; deleting F2 outright would not have changed the result. **The
+   plan's own mandated red-first procedure would also have passed** ("remove the
+   `!orphanExists` clause → test must fail": removing it has zero observable
+   effect on a fixture that never reaches the clause).
+
+**What makes this new:** both test-authors implemented `build-task-list.md` Task
+6's *literal pseudocode*, including the `buildLegacyDb([], true)` fixture choice.
+Neither took a shortcut; the vacuity was specified. Every prior entry here blames
+the writing of the guard — this one says the **plan can hand you a vacuous guard
+with a red-first procedure attached that also can't fail**, and a faithful
+implementer will build it twice.
+
+**How to comply (additions):**
+- When a plan hands you a literal fixture for a guard, trace the product code's
+  **early-return chain** against that fixture before writing it: does execution
+  actually reach the branch the test names? A fixture is part of the assertion.
+- The verifier's technique here generalizes and is cheap: run the full suite,
+  capture stdout/stderr, and **grep for the guarded branch's own log line**. Zero
+  occurrences across the whole suite = the branch never executed = the guard is
+  vacuous, provable without editing product code.
+- A red-first procedure is itself a claim to check, not an instruction to follow.
+  If the mutation the plan names would be invisible under the fixture the plan
+  names, say so and fix the fixture — that is a plan defect, and reporting it as
+  one is correct.
+- Fixed by inverting the fixture to `buildLegacyDb([{…}], false)` (unmigrated) and
+  adding the load-bearing assertion the original lacked: *the main table still
+  lacks the CHECK after boot* — i.e. the rebuild was genuinely skipped. Verified
+  red by disabling F2 (`if (false && orphans.length > 0)`).
+
+**Candidate new pattern, NOT yet catalogued — TEST-AGAINST-LIVE-DB (recorded with
+an explicit promotion trigger; 2026-08-03,
+`intake/2026-08-02-practice-kind-override/`).** The §9.3 instance above had a
+second, independent consequence that is not about vacuity at all: because T1b/T1c
+never set `DASHBOARD_DB_PATH`, `server/db.js` resolved
+`process.env.DASHBOARD_DB_PATH || path.join(getDataDir(), "dashboard.db")` to the
+**real** `~/.claude/agent-dashboard/dashboard.db` and would have run a live
+`coach_observations` schema rebuild against it on any developer or CI machine
+without an external safety net. It only didn't because the verifier ran every
+invocation under an outer `DASHBOARD_DB_PATH` on principle. The shape:
+`db.js` executes migrations at `require()` time and silently defaults to the
+production path, so *forgetting* an env var is indistinguishable from setting it —
+there is no failure, just a real migration on real data. **The verifier
+recommended a class-level cure — fail loudly if `DASHBOARD_DB_PATH` is unset while
+anything under `server/__tests__/` runs — at pass 1, re-flagged it at pass 2, and
+it was NOT adopted** (only the two tests were fixed). Recorded here so the decline
+is visible: the next test that calls `require("../db")` without the env var will
+again target real data, and no grep will catch it. **Promote to a real entry the
+first time (a) a second test file is found doing this, or (b) it actually fires.**
+Cheapest cure if it comes up again: a global test-runner setup file that asserts
+the variable is set and points somewhere under a temp dir.
+
 ### 9.4 FIX-ROUND-REGRESSION (the fix round is a build round)
 
 A round of blocker fixes on the dispositional/queue surface introduces new
@@ -567,7 +665,9 @@ not evidence about this failure mode.
   loudly and **skip** — never throw. `db.js` runs at `require()` time, so a throw
   bricks boot for every process (server, MCP, desktop, VS Code extension) against
   the one shared `DB_PATH`.
-- Durable cure recommended (2026-08-02, not yet built): one
+- Durable cure recommended 2026-08-02, **BUILT 2026-08-03** (see the
+  build-outcome note below — the helper and the registry now exist; copy the
+  helper, do not hand-roll a seventh site): one
   `rebuildTableAtomically({ table, createSql, copySelect, indexes })` helper so
   atomicity stops being re-decided by hand per site, plus a `REBUILD_CASES`
   registry-completeness meta-test in `db-migration.test.js` scanning
@@ -606,6 +706,33 @@ population came to exist: atomicity is re-decided by hand per site, and the file
 the wrong precedent five times out of six. **PM recommendation (2026-08-02): build the
 `rebuildTableAtomically` helper above NOW and make these two its first call sites,
 whichever build starts first.** What must not happen is two more independent hand-rolls.
+
+**Build-outcome note (2026-08-03, `intake/2026-08-02-practice-kind-override/`,
+commit `3b9769e` — the durable cure is BUILT; this entry's instruction changes
+from "copy `agents`" to "call the helper").** `server/db.js` now exports/uses
+`rebuildTableAtomically({ table, createSql, copySelect, indexes })`, with
+`coach_observations` as its first call site: one `db.exec("BEGIN; CREATE TABLE
+…_new; INSERT INTO …_new SELECT …; DROP TABLE …; ALTER TABLE …_new RENAME TO …;
+COMMIT;")`, `PRAGMA foreign_keys = OFF/ON` issued outside it, indexes recreated
+after. F2's orphan gate (`sqlite_master` for `<table>_old`/`<table>_new` → log and
+`return false`, never throw) and the WATCH-3 pre-flight skip live in the helper,
+so both are inherited by every future site instead of re-decided. D2's
+`REBUILD_CASES` registry-completeness scan is in `db-migration.test.js`; it lit up
+the five pre-existing non-atomic sites on first run and they are **grandfathered
+with dated reasons, not waived** — the scan was not weakened and the five were not
+retrofitted (still their own follow-up, still needing their own backup and crash
+tests). **A third failure mode this entry had not named, added by adversarial
+review as B3:** the helper's `execute()` had no error handling, so a genuine
+mid-transaction failure (`SQLITE_BUSY` from a concurrent lock-holder, a CHECK
+violation on a column the pre-flight scan doesn't inspect) would throw out of
+`require("../db")` and brick boot for the Express server, MCP server, desktop app
+and VS Code extension simultaneously — the exact blast radius this entry's "never
+throw" bullet exists to prevent, reached by a path that bullet didn't cover.
+Cured with `try { execute() } catch { rollback if db.inTransaction; log; return
+false } finally { PRAGMA foreign_keys = ON }`, proven red by removing the
+try/catch and observing an uncaught `SQLITE_CONSTRAINT_CHECK` escape `require()`.
+**Add to this entry's how-to-comply: atomicity is necessary and not sufficient —
+the rebuild must also be unable to throw, because the caller is `require()`.**
 
 **Candidate new pattern, NOT yet catalogued — SHARED-BUDGET-STARVATION (recorded here
 with an explicit promotion trigger so it is not re-argued from scratch).** Found by the
