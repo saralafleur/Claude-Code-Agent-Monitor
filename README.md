@@ -703,7 +703,7 @@ ccam focus done <n>               # declare a plan item complete (file checkbox 
 
 # Portfolio plan lifecycle & value ledger (project_id-keyed, separate from AGENT-PLAN.md above)
 ccam ledger plans --project <id|name>   # list a project's portfolio plans (open + closed)
-ccam ledger pool --project <id|name>    # live unclaimed value pool + identity warnings (--backfill for a deep walk)
+ccam ledger pool --project <id|name>    # live unclaimed value pool + identity warnings (--backfill for a deep walk, or --lookback-days <n> for a bounded window; --lookback-days wins if both given)
 ccam ledger health --project <id|name>  # unclaimed pool size, open plans, days since last closure
 ccam ledger history --project <id|name> # AC-6 whole-life summary: closed generations + their claims
 ccam ledger import --project <id|name>  # import an existing AGENT-PLAN.md as generation 1 (idempotent)

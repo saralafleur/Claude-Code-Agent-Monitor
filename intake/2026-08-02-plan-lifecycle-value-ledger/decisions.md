@@ -222,8 +222,7 @@ sequencing gates.
 
 ### DEC-12 — The slice-4 checkpoint is a gate, not a demo
 
-- **Status:** **PENDING (Sara)** — PM S-3 / PO SIGN-OFF-4. **Auto-pilot cannot
-  waive this.**
+- **Status:** **DECIDED — SIGNAL (2026-08-03, Sara)**
 - **Decision to confirm:** after slices 1–3 (schema + import + claims + close +
   pool + health, reachable via API and `ccam ledger` only), Sara exercises the
   feature on real Coaching Assistant data and answers **"is this pool signal or
@@ -232,6 +231,21 @@ sequencing gates.
   days later) failed at exactly this altitude — an expensive portfolio UI built
   before anyone checked whether the underlying data was worth rendering. That
   question is answerable here *before* the workbench exists.
+- **How answered:** the orchestrator rendered the live 182-unit pool (90-day
+  lookback) plus the two already-claimed generations as a one-off scratch
+  artifact (real commit messages, real intake slugs, real detour labels — no
+  mock content: https://claude.ai/code/artifact/0bc831f0-9e82-4ab6-8004-3fb054fe7146),
+  so the pool could be judged by its actual contents rather than a bare count.
+- **Sara's verdict (verbatim intent):** the data is real signal — "we have
+  visibility, but visibility alone is good but the process by which we then
+  turn that known information into something and funnel it to a plan or
+  multiple plans in order to bucket it and to qualify the value" is the
+  missing piece, not the data itself. She confirmed the drag/claim workflow
+  gap is exactly slice 5, then said "ok, proceed."
+- **Consequence:** slice 5 (the two-pane reconciliation workbench —
+  [[holistic-focus-history]] UI model, confirmed 2026-08-02: left pane =
+  plans, right pane = unclaimed pool, pull right→left to claim, close is a
+  plan-level action) is now unblocked. `team-intake` runs next on that scope.
 
 ### DEC-13 — Clean up the `DND`/`dnd` duplicate project before the live trial
 
@@ -253,9 +267,9 @@ sequencing gates.
   to the same physical directory on disk (expected — case-insensitive
   filesystem, unrelated to this fix), but it is no longer double-registered.
 - **Downstream effect:** this was the last blocker DEC-2 through DEC-13 named
-  ahead of the slice-4 checkpoint. DEC-11 (prior live trial) and DEC-12
-  (confirming the checkpoint is a gate) remain open but don't block starting
-  the checkpoint itself.
+  ahead of the slice-4 checkpoint. DEC-11 (prior live trial) remains open and
+  unrelated. **DEC-12 is now resolved — SIGNAL (2026-08-03)** — see that entry;
+  slice 5 is unblocked.
 
 ### DEC-14 — WATCH: transitional dual plan surface
 
