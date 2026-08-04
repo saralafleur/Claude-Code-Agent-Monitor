@@ -1794,6 +1794,51 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_focus_summary_access_log_accessed_at ON focus_summary_access_log(accessed_at);
 `);
 
+// Background-tick audit trail for server/lib/value-summary-tick.js (the
+// bounded least-recently-swept sweep that drains PROJECT/STAKEHOLDER
+// altitude overflow beyond the request path's 40-unit cap). Two tables:
+//  - value_summary_sweep_state: one row per project, the rotation's own
+//    bookkeeping. `last_swept_at` is the ORDER BY key `listValueSweepTargets`
+//    uses (a real timestamp, never a row id — §9.2). `pending_after_sweep` is
+//    RE-DERIVED every sweep from that sweep's own `queued + unavailable`
+//    counts, never decremented from a prior value and never read from a
+//    stale pool_size — a project whose pool grows between sweeps must show
+//    that growth here (T-C, qa/decisions.md QA-DEC-2 / WATCH-8).
+//  - value_summary_generation_log: one row per sweep attempt, the observable
+//    audit trail (AC-2) an operator can read directly. `source` carries an
+//    unused-in-v1 'request' enum value on purpose (DEC-14): SQLite cannot
+//    widen a CHECK in place, so paying for the value now means a future
+//    request-path log write is additive, not a table rebuild (§9.6
+//    NON-ATOMIC REBUILD). The four counted columns are a strict partition of
+//    `pool_size` (cache_hits + generated + queued + unavailable === pool_size,
+//    never a <= or three-term form — see value-summary-tick.test.js).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS value_summary_sweep_state (
+    project_id TEXT PRIMARY KEY,
+    last_swept_at TEXT,
+    pending_after_sweep INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS value_summary_generation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('tick','request')),
+    outcome TEXT NOT NULL CHECK(outcome IN ('ok','skipped','error')),
+    pool_size INTEGER NOT NULL DEFAULT 0,
+    cache_hits INTEGER NOT NULL DEFAULT 0,
+    generated INTEGER NOT NULL DEFAULT 0,
+    queued INTEGER NOT NULL DEFAULT 0,
+    unavailable INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_value_summary_generation_log_created_at
+    ON value_summary_generation_log(created_at);
+  CREATE INDEX IF NOT EXISTS idx_value_summary_generation_log_project
+    ON value_summary_generation_log(project_id, created_at);
+`);
+
 // Migrate webhook_targets for first-class providers. Earlier installs created
 // the table with a 4-value `type` CHECK (slack/discord/teams/generic) and no
 // `config` column. SQLite can't drop a CHECK in place, so rebuild the table
@@ -3153,6 +3198,43 @@ const stmts = {
        stakeholder_level = excluded.stakeholder_level,
        model = excluded.model,
        created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+  ),
+
+  // Background-tick sweep bookkeeping (see the value_summary_sweep_state /
+  // value_summary_generation_log schema comment) — read/written by
+  // server/lib/value-summary-tick.js only. `listValueSweepTargets` orders by
+  // a real timestamp (never-swept projects first via the portable
+  // `IS NOT NULL` form, then oldest `last_swept_at`, with `p.id` only as a
+  // deterministic tiebreak — §9.2, never the sole ordering key).
+  listValueSweepTargets: db.prepare(
+    `SELECT p.id AS project_id, s.last_swept_at AS last_swept_at
+     FROM projects p
+     JOIN (SELECT DISTINCT project_id FROM project_paths) pp ON pp.project_id = p.id
+     LEFT JOIN value_summary_sweep_state s ON s.project_id = p.id
+     ORDER BY (s.last_swept_at IS NOT NULL) ASC, s.last_swept_at ASC, p.id ASC
+     LIMIT ?`
+  ),
+  upsertValueSweepState: db.prepare(
+    `INSERT INTO value_summary_sweep_state (project_id, last_swept_at, pending_after_sweep)
+     VALUES (?, ?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       last_swept_at = excluded.last_swept_at,
+       pending_after_sweep = excluded.pending_after_sweep`
+  ),
+  // Errored-sweep variant (§9.8 OVERLOADED-ABSENCE): advances rotation
+  // WITHOUT touching pending_after_sweep, so a project that fails every
+  // cycle keeps showing its last known-good count (or 0 only if it has
+  // never completed a sweep at all) instead of a false "fully drained" 0.
+  upsertValueSweepStateKeepPending: db.prepare(
+    `INSERT INTO value_summary_sweep_state (project_id, last_swept_at, pending_after_sweep)
+     VALUES (?, ?, 0)
+     ON CONFLICT(project_id) DO UPDATE SET
+       last_swept_at = excluded.last_swept_at`
+  ),
+  insertValueSummaryGeneration: db.prepare(
+    `INSERT INTO value_summary_generation_log
+       (project_id, source, outcome, pool_size, cache_hits, generated, queued, unavailable, model, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ),
 };
 

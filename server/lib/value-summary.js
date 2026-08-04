@@ -25,17 +25,33 @@
  * already uses for detour classification.
  *
  * Deliberately does NOT call `assembleValuePool` itself — callers (the
- * `/altitudes` route) pass the exact units their own `/pool` fetch already
+ * `/altitudes` route AND `server/lib/value-summary-tick.js`'s background
+ * overflow sweep) pass the exact units their own pool fetch already
  * resolved, so this module never re-derives or duplicates pool assembly
- * (value-ledger.js's DEC-16 tripwire stays intact).
+ * (value-ledger.js's DEC-16 tripwire stays intact). Two production invokers,
+ * ONE lexical writer of the stakeholder-altitude cache table: that write
+ * call appears exactly once, right here inside {@link enrichPoolAltitudes}
+ * (single-writer-guard.test.js enforces this structurally, red-proven by
+ * injection — §9.1 DERIVED-DUAL-VIEW).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
 const { runClaudePromptJson, probeClaudeCli } = require("./focus-inference");
 
-/** Matches focus-summary's session-cap rationale: bounded prompt size, most
- *  recent items win when a batch runs over. Pool batches are small in
- *  practice, so overflow is expected to be rare. */
+/** The only two per-unit states a caller may see in {@link enrichPoolAltitudes}'s
+ *  `states` map (DEC-11) — never hand-typed at any consumer; import this
+ *  export instead. `queued`: a cache miss beyond this round's cap, not yet
+ *  attempted, picked up by a later pass. `unavailable`: a cache miss that WAS
+ *  in scope this round and still produced no text (LLM off, probe failure,
+ *  spawn failure, or unparsable output). */
+const ALTITUDE_STATES = ["queued", "unavailable"];
+
+/** Bounds prompt size, not coverage — the largest measured real pool is 182
+ *  units (parent effort DEC-12, 2026-08-03), so overflow is the normal case,
+ *  not a rare edge. Units beyond this cap are reported explicitly as
+ *  `queued` in {@link enrichPoolAltitudes}'s `states` map (never silently
+ *  dropped), then drained across later calls by
+ *  `server/lib/value-summary-tick.js`'s background sweep. */
 const MAX_UNITS_PER_PROMPT = 40;
 /** Runaway-output guard only — generous enough that a legitimate ~20-word
  *  stakeholder sentence is never chopped mid-word. */
@@ -142,42 +158,77 @@ function parseOutput(stdout, count) {
  * unenriched this round rather than growing the prompt unboundedly, and will
  * resolve on a later call once earlier units are cached).
  *
+ * Per-unit outcome is a strict three-way partition (DEC-11): every unit
+ * submitted lands in `altitudes` (resolved) or `states` (unresolved, with a
+ * `queued`/`unavailable` reason) — never both, never neither.
+ *
  * @param {object} dbModule
  * @param {Array<{unitKey: string, value_source: string, value_ref?: string, label?: string|null, stage?: string|null}>} units
- * @returns {Promise<Record<string, {project: string, stakeholder: string, model: string|null, generated_at: string, cached: boolean}>>}
- *   Map keyed by unitKey. A unit absent from the result means no altitude
- *   could be produced this round (LLM off/unavailable, spawn failure, or
- *   unparsable output) — never an error, mirroring focus-summary.js's
- *   "unavailable" contract.
+ * @returns {Promise<{
+ *   altitudes: Record<string, {project: string, stakeholder: string, model: string|null, generated_at: string, cached: boolean}>,
+ *   states: Record<string, "queued"|"unavailable">
+ * }>}
+ *   `altitudes` is keyed by unitKey, same shape as before this build.
+ *   `states` carries an entry ONLY for units with no text this round:
+ *   `"queued"` for a miss beyond this round's cap (never attempted, will be
+ *   picked up by a later call — including `value-summary-tick.js`'s sweep),
+ *   `"unavailable"` for a miss that WAS in scope this round and still
+ *   produced nothing (LLM off/unavailable, spawn failure, unparsable
+ *   output, or the model omitted that index). When the LLM path is
+ *   unavailable, EVERY miss is `unavailable`, including over-cap ones —
+ *   nothing was attempted, so the honest signal is "outage," not "backlog".
  */
 async function enrichPoolAltitudes(dbModule, units) {
-  const result = {};
-  if (!units || units.length === 0) return result;
+  const altitudes = {};
+  const states = {};
+  if (!units || units.length === 0) return { altitudes, states };
 
   const misses = [];
   for (const unit of units) {
     const cached = readCached(dbModule, unit.unitKey);
     if (cached) {
-      result[unit.unitKey] = cached;
+      altitudes[unit.unitKey] = cached;
     } else {
       misses.push(unit);
     }
   }
 
-  if (misses.length === 0) return result;
-  if (!(await llmAvailable())) return result;
+  if (misses.length === 0) return { altitudes, states };
 
-  const batch = misses.slice(0, MAX_UNITS_PER_PROMPT);
+  // Dedupe by unitKey (S6) before the cap slice: a caller-supplied duplicate
+  // straddling the MAX_UNITS_PER_PROMPT boundary would otherwise land in
+  // BOTH `altitudes` (the in-cap copy, via the LLM batch) and `states` (the
+  // overflow copy, marked "queued") — violating this function's own "never
+  // both" half of the DEC-11 partition. Also saves a wasted prompt slot.
+  const dedupedMisses = [...new Map(misses.map((u) => [u.unitKey, u])).values()];
+
+  if (!(await llmAvailable())) {
+    // Nothing was attempted — every miss (in-cap or not) is unavailable,
+    // never queued (DEC-11: "outage," not "backlog").
+    for (const unit of dedupedMisses) states[unit.unitKey] = "unavailable";
+    return { altitudes, states };
+  }
+
+  const batch = dedupedMisses.slice(0, MAX_UNITS_PER_PROMPT);
+  const overflow = dedupedMisses.slice(MAX_UNITS_PER_PROMPT);
+  for (const unit of overflow) states[unit.unitKey] = "queued";
+
   const model = summaryModel();
   const stdout = await runClaudePromptJson(buildPrompt(batch), { model });
-  if (stdout == null) return result;
+  if (stdout == null) {
+    for (const unit of batch) states[unit.unitKey] = "unavailable";
+    return { altitudes, states };
+  }
   const parsed = parseOutput(stdout, batch.length);
-  if (!parsed) return result;
+  if (!parsed) {
+    for (const unit of batch) states[unit.unitKey] = "unavailable";
+    return { altitudes, states };
+  }
 
   for (const [idx, { project, stakeholder }] of parsed) {
     const unit = batch[idx - 1];
     dbModule.stmts.upsertValueUnitSummary.run(unit.unitKey, project, stakeholder, model);
-    result[unit.unitKey] = {
+    altitudes[unit.unitKey] = {
       project,
       stakeholder,
       model,
@@ -185,7 +236,12 @@ async function enrichPoolAltitudes(dbModule, units) {
       cached: false,
     };
   }
-  return result;
+  // Any in-cap unit the model didn't return an entry for (omitted/garbled
+  // index) was attempted but produced nothing — unavailable, not queued.
+  for (const unit of batch) {
+    if (!altitudes[unit.unitKey]) states[unit.unitKey] = "unavailable";
+  }
+  return { altitudes, states };
 }
 
 module.exports = {
@@ -194,4 +250,5 @@ module.exports = {
   parseOutput,
   summaryModel,
   MAX_UNITS_PER_PROMPT,
+  ALTITUDE_STATES,
 };

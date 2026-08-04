@@ -11,6 +11,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
+const { assertSingleHome } = require("./helpers/single-home");
 
 // Recursively scan a directory for .js files, skipping node_modules, dist, tests
 function scanFiles(dir, pattern) {
@@ -205,5 +206,104 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
       0,
       `__testonly should only be referenced in tests and plan-writeback.js, found in: ${prodFiles.map((f) => path.basename(f)).join(", ")}`
     );
+  });
+
+  // §9.1 DERIVED-DUAL-VIEW (write-sequence form) — value-summary-tick.js is
+  // the SECOND production invoker of enrichPoolAltitudes (route + tick), so
+  // this is the exact "consumer #2 appears" moment the catalog names. The
+  // cure is DEC-10 (extend the return shape, not a second entry point) plus
+  // these mechanical, red-proven-by-injection guards.
+
+  it("upsertValueUnitSummary appears only in db.js and value-summary.js", () => {
+    const files = scanFiles(serverDir, /upsertValueUnitSummary/);
+    const basenames = files.map((f) => path.basename(f)).filter((f) => !f.endsWith(".test.js"));
+    assert.deepEqual(basenames.sort(), ["db.js", "value-summary.js"]);
+  });
+
+  it("upsertValueUnitSummary.run( has exactly one lexical call site, inside enrichPoolAltitudes", () => {
+    const source = fs.readFileSync(path.join(serverDir, "lib/value-summary.js"), "utf8");
+    // Strip comments
+    const stripped = source
+      .split("\n")
+      .map((line) => {
+        const idx = line.indexOf("//");
+        return idx === -1 ? line : line.substring(0, idx);
+      })
+      .join("\n");
+
+    const callMatches = Array.from(stripped.matchAll(/upsertValueUnitSummary\.run\s*\(/g));
+    assert.equal(callMatches.length, 1, "totalCalls === 1 required");
+
+    // Verify it's inside enrichPoolAltitudes body
+    const enrichStart = stripped.indexOf("function enrichPoolAltitudes");
+    assert.ok(enrichStart !== -1, "enrichPoolAltitudes not found");
+    const braceDepth =
+      [...stripped.substring(0, enrichStart).matchAll(/{/g)].length -
+      [...stripped.substring(0, enrichStart).matchAll(/}/g)].length;
+    // Parse from enrichStart to find the closing brace of the function
+    let depth = braceDepth;
+    let i = enrichStart;
+    while (i < stripped.length && depth > braceDepth - 1) {
+      if (stripped[i] === "{") depth++;
+      else if (stripped[i] === "}") depth--;
+      i++;
+    }
+    const enrichEnd = i;
+    const inBodyCall = callMatches[0].index > enrichStart && callMatches[0].index < enrichEnd;
+    assert.ok(
+      inBodyCall,
+      "upsertValueUnitSummary.run( must be lexically inside enrichPoolAltitudes body (§9.1 DERIVED-DUAL-VIEW: one composer, one writer, two invokers)"
+    );
+  });
+
+  it("insertValueSummaryGeneration has exactly one production call site (tick)", () => {
+    const files = scanFiles(serverDir, /insertValueSummaryGeneration/);
+    const basenames = files.map((f) => path.basename(f)).filter((f) => !f.endsWith(".test.js"));
+    assert.deepEqual(basenames.sort(), ["db.js", "value-summary-tick.js"]);
+    // Note: WATCH-6 will deliberately widen this in the fast-follow when
+    // request-path logging lands.
+  });
+
+  it("value-summary.js's exports have an explicit disposition at every consumer", () => {
+    assertSingleHome("../lib/value-summary", {
+      "../routes/project-plans": {
+        shared: ["enrichPoolAltitudes"],
+        absent: [
+          "buildPrompt",
+          "parseOutput",
+          "summaryModel",
+          "MAX_UNITS_PER_PROMPT",
+          "ALTITUDE_STATES",
+        ],
+      },
+      "../lib/value-summary-tick": {
+        shared: ["enrichPoolAltitudes"],
+        absent: [
+          "buildPrompt",
+          "parseOutput",
+          "summaryModel",
+          "MAX_UNITS_PER_PROMPT",
+          "ALTITUDE_STATES",
+        ],
+      },
+    });
+  });
+
+  it("value-ledger.js's exports have an explicit disposition at the tick", () => {
+    assertSingleHome("../lib/value-ledger", {
+      "../lib/value-summary-tick": {
+        shared: ["assembleValuePool"],
+        absent: [
+          "VALUE_SOURCES",
+          "ATTRIBUTION_TIERS",
+          "BACKFILL_LOOKBACK_DAYS",
+          "CONSUMERS",
+          "unitKey",
+          "rowToUnit",
+          "computePlanHealth",
+          "summarizeDeliveredValue",
+        ],
+      },
+    });
   });
 });

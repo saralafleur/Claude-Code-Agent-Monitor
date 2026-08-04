@@ -279,12 +279,16 @@ describe("ledger metrics parity (C2 / T6)", () => {
     );
   });
 
-  it("C2.4: consumer registry marker — CONSUMERS names exactly the route and the CLI (DEC-16)", () => {
+  it("C2.4: consumer registry marker — CONSUMERS names exactly the route, the CLI, and the tick (DEC-16)", () => {
     assert.ok(Array.isArray(valueLedger.CONSUMERS));
     assert.deepEqual(
       valueLedger.CONSUMERS.slice().sort(),
-      ["bin/ccam.js (cmdLedger)", "server/routes/project-plans.js"].sort(),
-      "a third consumer (MCP tools, an AGENT-PLAN.md export, a reconcile page — DEC-16) " +
+      [
+        "bin/ccam.js (cmdLedger)",
+        "server/routes/project-plans.js",
+        "server/lib/value-summary-tick.js",
+      ].sort(),
+      "a fourth consumer (MCP tools, an AGENT-PLAN.md export, a reconcile page — DEC-16) " +
         "must be a deliberate, reviewed addition to this list, never silent"
     );
   });
