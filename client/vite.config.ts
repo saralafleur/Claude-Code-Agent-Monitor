@@ -54,6 +54,11 @@ export default defineConfig({
   },
   server: {
     port: 9200,
+    // LAN hosting: bind all interfaces and allowlist the LAN host used to
+    // reach this dev server, mirroring DASHBOARD_ALLOWED_HOSTS in .env for
+    // the backend. Vite 5+ rejects non-localhost Host headers by default.
+    host: true,
+    allowedHosts: ["10.0.0.168"],
     proxy: {
       "/api": {
         target: `http://127.0.0.1:${DASHBOARD_PORT}`,
