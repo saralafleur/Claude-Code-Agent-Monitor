@@ -71,7 +71,9 @@
     },
     "calendar": {
       "title": "Đếm ngược đến lúc đặt lại hàng tuần",
-      "subtitle": "Còn bao nhiêu ngày nữa đến khi cửa sổ hàng tuần của mỗi tài khoản được đặt lại."
+      "subtitle": "Còn bao nhiêu ngày nữa đến khi cửa sổ hàng tuần của mỗi tài khoản được đặt lại.",
+      "totalRemaining": "Còn {{pct}}%",
+      "totalRemainingHint": "Tổng phần trăm còn lại của tất cả tài khoản cộng lại (100% trừ đi phần trăm đã dùng của mỗi tài khoản)."
     },
     "sessionTimeline": {
       "title": "Thời điểm đặt lại phiên",

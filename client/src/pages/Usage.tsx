@@ -899,6 +899,14 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
     return { account, pct, spanDays, resetWhen, countdown };
   });
 
+  // Sum of each account's own remaining share (100% - its used pct), across
+  // every account with data - e.g. two accounts at 80% used and one at 50%
+  // used remaining is 20 + 20 + 50 = 90%. Not itself capped at 100%: with
+  // more than one account it's a combined figure, not a single window's %.
+  const totalRemainingPct = rows.some((r) => r.pct != null)
+    ? rows.reduce((sum, r) => sum + (r.pct != null ? 100 - r.pct : 0), 0)
+    : null;
+
   const furthestResetDays = Math.max(0, ...rows.map((r) => r.spanDays ?? 0));
   // +1: furthestResetDays is a day *index* (0 = today), so the column that
   // actually shows that reset date is index furthestResetDays - reaching
@@ -918,8 +926,20 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
 
   return (
     <div className="card p-4">
-      <h2 className="text-sm font-semibold text-gray-200">{t("accounts.calendar.title")}</h2>
-      <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.calendar.subtitle")}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-200">{t("accounts.calendar.title")}</h2>
+          <p className="text-xs text-gray-500 mt-0.5 mb-3">{t("accounts.calendar.subtitle")}</p>
+        </div>
+        {totalRemainingPct != null && (
+          <span
+            className="text-sm font-mono font-semibold text-gray-200 flex-shrink-0"
+            title={t("accounts.calendar.totalRemainingHint")}
+          >
+            {t("accounts.calendar.totalRemaining", { pct: totalRemainingPct })}
+          </span>
+        )}
+      </div>
       <div>
         <div className="flex">
           <div style={{ width: RESET_CALENDAR_LABEL_PX }} className="flex-shrink-0" />

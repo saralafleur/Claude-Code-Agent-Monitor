@@ -71,7 +71,9 @@
     },
     "calendar": {
       "title": "Weekly reset countdown",
-      "subtitle": "How many days until each account's weekly window resets."
+      "subtitle": "How many days until each account's weekly window resets.",
+      "totalRemaining": "{{pct}}% remaining",
+      "totalRemainingHint": "Total remaining percentage across all accounts, added together (100% minus each account's used percentage)."
     },
     "sessionTimeline": {
       "title": "Session reset times",
