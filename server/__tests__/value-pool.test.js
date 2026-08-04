@@ -16,6 +16,11 @@ const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
 
+// Isolate from the real dashboard.db — without this, insertProject writes
+// vp-test-* rows straight into whatever DB the host machine has open.
+const TEST_DB = path.join(os.tmpdir(), `value-pool-db-${Date.now()}-${process.pid}.db`);
+process.env.DASHBOARD_DB_PATH = TEST_DB;
+
 const valueLedger = require("../lib/value-ledger");
 const trunkDrift = require("../lib/trunk-drift");
 const cwdIdentity = require("../lib/cwd-identity");
@@ -127,6 +132,18 @@ after(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {
     /* best effort */
+  }
+  try {
+    db.db.close();
+  } catch {
+    /* best effort */
+  }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      fs.rmSync(TEST_DB + suffix);
+    } catch {
+      /* best effort */
+    }
   }
 });
 

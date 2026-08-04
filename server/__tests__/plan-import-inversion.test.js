@@ -12,9 +12,29 @@ const path = require("path");
 const os = require("os");
 const fs = require("fs");
 
+// Isolate from the real dashboard.db — without this, insertProject writes
+// a3-5-project-* rows straight into whatever DB the host machine has open.
+const TEST_DB = path.join(os.tmpdir(), `plan-import-inversion-db-${Date.now()}-${process.pid}.db`);
+process.env.DASHBOARD_DB_PATH = TEST_DB;
+
 // R0 red: modules do not exist
 const planLifecycle = require("../lib/plan-lifecycle");
 const db = require("../db");
+
+after(() => {
+  try {
+    db.db.close();
+  } catch {
+    /* best effort */
+  }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      fs.rmSync(TEST_DB + suffix);
+    } catch {
+      /* best effort */
+    }
+  }
+});
 
 describe("plan import inversion (A3)", () => {
   it("A3.1: import writes generation 1 from DB mirror with canonical cwd, items match, nesting resolves", () => {
