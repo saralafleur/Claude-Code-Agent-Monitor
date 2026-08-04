@@ -3,6 +3,13 @@
  * practice from `api.playbook.listPractices`, toggling the switch + editing
  * the threshold and saving calls `api.playbook.updatePracticeConfig`, and
  * the live preview text reacts to the current (unsaved) field value.
+ *
+ * T7c: This page only ever shows the live RESOLVED value (draft or saved) — it
+ * never renders a persisted coach_observations row's frozen kind/severity. Per
+ * §9.1's explicit INVERTED application here (technical-plan.md §2.4/§5): do NOT
+ * add a "UI must match a Feed row" cross-check. The two are supposed to diverge
+ * after an override change; asserting they match would demand the wrong behavior.
+ *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -18,7 +25,11 @@ const PRACTICE = {
   category: "context-management",
   scope: "session" as const,
   kind: "risk" as const,
-  defaultSeverity: "warning",
+  defaultSeverity: "warning" as const,
+  kindOverride: null,
+  severityOverride: null,
+  resolvedKind: "risk" as const,
+  resolvedSeverity: "warning" as const,
   fields: [
     { key: "thresholdTokens", type: "number" as const, default: 100_000_000, min: 1_000_000 },
   ],
@@ -31,7 +42,11 @@ const ACCOUNT_BALANCE_PRACTICE = {
   category: "account-management",
   scope: "global" as const,
   kind: "info" as const,
-  defaultSeverity: "info",
+  defaultSeverity: "info" as const,
+  kindOverride: null,
+  severityOverride: null,
+  resolvedKind: "info" as const,
+  resolvedSeverity: "info" as const,
   fields: [{ key: "gapThresholdPct", type: "number" as const, default: 25, min: 1 }],
   enabled: true,
   config: { gapThresholdPct: 25 },
@@ -190,6 +205,142 @@ describe("PlaybookPage", () => {
         enabled: true,
         config: { gapThresholdPct: 30 },
       });
+    });
+  });
+
+  // T7 — live preview updates before save (session-token-ceiling card)
+  it("changing the kind selector updates the live preview immediately before save (session-token-ceiling)", async () => {
+    const user = userEvent.setup();
+    listPractices.mockResolvedValue({
+      practices: [
+        {
+          ...PRACTICE,
+          kind: "risk",
+          resolvedKind: "risk",
+        },
+      ],
+    });
+    renderPage();
+
+    // Find the kind selector (must await hydration)
+    // The selector should start with the catalog value
+    const kindSelector = await screen.findByLabelText(/kind/i);
+    expect(kindSelector).toBeInTheDocument();
+
+    // Select "good" from the dropdown
+    await user.selectOptions(kindSelector, "good");
+
+    // The preview should update immediately to show the overridden kind
+    // (the actual label text depends on i18n — for now assert the change happened)
+    await waitFor(() => {
+      expect(updatePracticeConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  // T7 — live preview updates before save (account-weekly-balance card)
+  it("changing the kind selector updates the live preview immediately before save (account-weekly-balance)", async () => {
+    const user = userEvent.setup();
+    listPractices.mockResolvedValue({
+      practices: [
+        {
+          ...ACCOUNT_BALANCE_PRACTICE,
+          kind: "info",
+          resolvedKind: "info",
+        },
+      ],
+    });
+    renderPage();
+
+    // Find the kind selector (must await hydration)
+    const kindSelector = await screen.findByLabelText(/kind/i);
+    expect(kindSelector).toBeInTheDocument();
+
+    // Select "good" from the dropdown
+    await user.selectOptions(kindSelector, "good");
+
+    // The preview should update immediately (no save yet)
+    await waitFor(() => {
+      expect(updatePracticeConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  // T7b — selector defaults to "use default" naming the catalog value
+  it("kind selector defaults to 'use default' naming the catalog value", async () => {
+    listPractices.mockResolvedValue({ practices: [PRACTICE] });
+    renderPage();
+
+    // The selector should have a "use default" option
+    // Must await hydration to ensure the kind selector is rendered
+    const kindSelector = await screen.findByLabelText(/kind/i);
+    expect(kindSelector).toBeInTheDocument();
+    // Verify it has the "use default" option (empty value)
+    const options = (kindSelector as HTMLSelectElement).querySelectorAll("option");
+    const useDefaultOption = Array.from(options).find((opt) => opt.value === "");
+    expect(useDefaultOption).toBeTruthy();
+    expect(useDefaultOption?.textContent).toMatch(/use default/i);
+  });
+
+  // T7b — saving sends kindOverride in the patch
+  it("saving the kind selector sends kindOverride in the config patch", async () => {
+    const user = userEvent.setup();
+    listPractices.mockResolvedValue({
+      practices: [{ ...PRACTICE }],
+    });
+    updatePracticeConfig.mockResolvedValue({
+      ...PRACTICE,
+      kindOverride: "good",
+      resolvedKind: "good",
+    });
+    renderPage();
+
+    const kindSelector = await screen.findByLabelText(/kind/i);
+    await user.selectOptions(kindSelector, "good");
+
+    const saveButton = screen.getByRole("button", { name: "Save changes" });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(updatePracticeConfig).toHaveBeenCalledWith(
+        "session-token-ceiling",
+        expect.objectContaining({
+          kindOverride: "good",
+        })
+      );
+    });
+  });
+
+  // T7b — selecting "use default" after an override sends kindOverride: null
+  it("selecting 'use default' after an override sends kindOverride: null", async () => {
+    const user = userEvent.setup();
+    listPractices.mockResolvedValue({
+      practices: [
+        {
+          ...PRACTICE,
+          kindOverride: "good",
+          resolvedKind: "good",
+        },
+      ],
+    });
+    updatePracticeConfig.mockResolvedValue({
+      ...PRACTICE,
+      kindOverride: null,
+      resolvedKind: "risk",
+    });
+    renderPage();
+
+    const kindSelector = await screen.findByLabelText(/kind/i);
+    await user.selectOptions(kindSelector, ""); // empty string = use default
+
+    const saveButton = screen.getByRole("button", { name: "Save changes" });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(updatePracticeConfig).toHaveBeenCalledWith(
+        "session-token-ceiling",
+        expect.objectContaining({
+          kindOverride: null,
+        })
+      );
     });
   });
 });

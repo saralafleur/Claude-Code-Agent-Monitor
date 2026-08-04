@@ -1,0 +1,106 @@
+[
+  {
+    "name": "no override, no draft: catalog value",
+    "catalogKind": "risk",
+    "kindOverride": null,
+    "draft": "__UNSET__",
+    "expected": "risk",
+    "serverApplicable": true
+  },
+  {
+    "name": "override set, no draft: override applied",
+    "catalogKind": "risk",
+    "kindOverride": "good",
+    "draft": "__UNSET__",
+    "expected": "good",
+    "serverApplicable": true
+  },
+  {
+    "name": "override out-of-enum, no draft: fail-safe to catalog (coerceEnum)",
+    "catalogKind": "risk",
+    "kindOverride": "bogus",
+    "draft": "__UNSET__",
+    "expected": "risk",
+    "serverApplicable": true
+  },
+  {
+    "name": "override set, draft set: draft wins (unsaved draft choice)",
+    "catalogKind": "risk",
+    "kindOverride": "good",
+    "draft": "info",
+    "expected": "info",
+    "serverApplicable": false
+  },
+  {
+    "name": "no override, draft set: draft applies (draft-only override)",
+    "catalogKind": "risk",
+    "kindOverride": null,
+    "draft": "info",
+    "expected": "info",
+    "serverApplicable": false
+  },
+  {
+    "name": "override set, explicit draft-clear: explicit null falls to catalog, NOT override",
+    "catalogKind": "risk",
+    "kindOverride": "good",
+    "draft": null,
+    "expected": "risk",
+    "serverApplicable": false
+  },
+  {
+    "name": "no override, no draft (double check): catalog",
+    "catalogKind": "risk",
+    "kindOverride": null,
+    "draft": "__UNSET__",
+    "expected": "risk",
+    "serverApplicable": true
+  },
+  {
+    "name": "no override, no draft: severity catalog value",
+    "catalogSeverity": "info",
+    "severityOverride": null,
+    "draft": "__UNSET__",
+    "expected": "info",
+    "serverApplicable": true
+  },
+  {
+    "name": "severity override set, no draft: override applied",
+    "catalogSeverity": "info",
+    "severityOverride": "warning",
+    "draft": "__UNSET__",
+    "expected": "warning",
+    "serverApplicable": true
+  },
+  {
+    "name": "severity override out-of-enum, no draft: fail-safe to catalog",
+    "catalogSeverity": "info",
+    "severityOverride": "critical",
+    "draft": "__UNSET__",
+    "expected": "info",
+    "serverApplicable": true
+  },
+  {
+    "name": "severity override set, draft set: draft wins",
+    "catalogSeverity": "info",
+    "severityOverride": "warning",
+    "draft": "info",
+    "expected": "info",
+    "serverApplicable": false
+  },
+  {
+    "name": "severity no override, draft set: draft applies",
+    "catalogSeverity": "info",
+    "severityOverride": null,
+    "draft": "warning",
+    "expected": "warning",
+    "serverApplicable": false
+  },
+  {
+    "name": "severity override set, explicit draft-clear: explicit null falls to catalog",
+    "catalogSeverity": "info",
+    "severityOverride": "warning",
+    "draft": null,
+    "expected": "info",
+    "serverApplicable": false
+  }
+]

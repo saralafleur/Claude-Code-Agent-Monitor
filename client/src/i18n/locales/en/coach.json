@@ -18,6 +18,10 @@
     "info": "Reminder",
     "good": "Reinforcement"
   },
+  "severityLabel": {
+    "info": "Normal",
+    "warning": "Elevated"
+  },
   "statusLabel": {
     "acknowledged": "Acknowledged",
     "dismissed": "Dismissed",
@@ -43,7 +47,10 @@
     "saved": "Saved",
     "resetDefault": "Reset to default",
     "minError": "Must be at least {{min}}",
-    "parseError": "Enter a number, like 500k or 1.2m"
+    "parseError": "Enter a number, like 500k or 1.2m",
+    "kindOverrideLabel": "Kind",
+    "severityOverrideLabel": "Severity",
+    "useDefaultOption": "Use default ({{value}})"
   },
   "practices": {
     "sessionTokenCeiling": {

@@ -418,6 +418,8 @@ import type {
   MonitorLayoutPayload,
   ColorThresholdsConfig,
   PlaybookPractice,
+  ObservationKind,
+  ObservationSeverity,
   CoachObservation,
   WebhookDelivery,
   WebhookProvider,
@@ -2159,15 +2161,26 @@ export const api = {
     listPractices: () => request<{ practices: PlaybookPractice[] }>("/playbook/practices"),
     /**
      * PUT /api/playbook/practices/:id/config — patch a practice's
-     * `enabled`/`config`. Every other connected client picks up the change
-     * live over the `playbook_practice_config_updated` WebSocket push.
+     * `enabled`/`config`/`kindOverride`/`severityOverride`. Every field is
+     * independently optional: an omitted key leaves it unchanged; an
+     * explicit `null` on `kindOverride`/`severityOverride` clears that
+     * override back to the catalog default. Every other connected client
+     * picks up the change live over the `playbook_practice_config_updated`
+     * WebSocket push.
      * @param id The practice id (e.g. `"session-token-ceiling"`).
-     * @param patch `{ enabled?, config? }` — `config` may be a partial patch.
+     * @param patch `{ enabled?, config?, kindOverride?, severityOverride? }`
+     *   — `config` may itself be a partial patch; sending an invalid
+     *   `kindOverride`/`severityOverride` value returns 400 `INVALID_CONFIG`.
      * @returns The full resulting {@link PlaybookPractice}.
      */
     updatePracticeConfig: (
       id: string,
-      patch: { enabled?: boolean; config?: Record<string, number> }
+      patch: {
+        enabled?: boolean;
+        config?: Record<string, number>;
+        kindOverride?: ObservationKind | null;
+        severityOverride?: ObservationSeverity | null;
+      }
     ) =>
       request<PlaybookPractice>(`/playbook/practices/${encodeURIComponent(id)}/config`, {
         method: "PUT",

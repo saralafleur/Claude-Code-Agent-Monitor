@@ -95,11 +95,45 @@ or a bare "Action" as terms for this system.**
 | **Coach engine** | The evaluation runtime — loads enabled practices + their config, runs them (proposed: periodic tick, mirroring `reconciliation.js`'s R1/R2/R3 pattern), dedupes against already-open observations for the same practice+scope so it doesn't refire every cycle, persists new ones, broadcasts over WebSocket. |
 
 ### Additional modeling requirements (explicit, not incidental)
-- Observations carry a `kind` (`opportunity` / `risk` / `reinforcement` /
-  `reminder` / `standard`) **separate from** `severity` (`info` / `warning` /
-  etc.). This is what lets the Coach recognize and praise good behavior, not
-  just flag problems — a deliberate design requirement, since the Coach is
-  meant to reinforce good patterns as well as flag risky ones.
+- Observations carry a `kind` **separate from** `severity`. This is what lets
+  the Coach recognize and praise good behavior, not just flag problems — a
+  deliberate design requirement, since the Coach is meant to reinforce good
+  patterns as well as flag risky ones.
+
+  **Corrected 2026-08-02:** the shipped implementation (`b6d372b`,
+  2026-08-02) uses `kind` values `risk` / `info` / `good` — the five-value
+  set (`opportunity` / `risk` / `reinforcement` / `reminder` / `standard`)
+  this doc originally specified, roughly eight hours earlier, was never
+  built. The code is the source of truth — `coach_observations`'
+  `CHECK(kind IN ('risk','info','good'))` and the `kindLabel` i18n keys in
+  all four locales already encode it. See
+  `intake/2026-08-02-practice-kind-override/decisions.md` DEC-3.
+
+  | `kind` value | Meaning | UI label (English) |
+  |---|---|---|
+  | `risk` | Problem or risk to address | "Warning" |
+  | `info` | Informational or status update | "Reminder" |
+  | `good` | Positive reinforcement | "Reinforcement" |
+
+  **`severity`** did not exist as an enforced enum when this doc was
+  originally written; pinned by the 2026-08-02 build (see
+  `intake/2026-08-02-practice-kind-override/decisions.md` DEC-1) to exactly
+  two values, enforced by `coach_observations`'
+  `CHECK(severity IN ('info','warning'))` and by `SEVERITY_VALUES` in
+  `server/lib/playbook/practices.js`:
+
+  | `severity` value | Meaning | UI label (English) |
+  |---|---|---|
+  | `info` | Standard priority | "Normal" |
+  | `warning` | Elevated priority | "Elevated" |
+
+  Both `kind` and `severity` are per-practice overridable — set from the
+  Playbook config UI, stored in `playbook_practice_config.config`'s
+  top-level `kindOverride`/`severityOverride` keys (not nested inside a
+  practice's numeric `fields`), resolved through
+  `resolvePracticeConfig()` at Observation fire time, and frozen onto the
+  `coach_observations` row: changing an override later never relabels an
+  existing Observation.
 - Deliberate ownership split in the data model: `playbook_*` tables hold the
   knowledge/config (owned by the Playbook — what a session's activity is
   measured against); `coach_*` tables hold what got produced (owned by the

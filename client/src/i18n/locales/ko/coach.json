@@ -18,6 +18,10 @@
     "info": "알림",
     "good": "긍정적 피드백"
   },
+  "severityLabel": {
+    "info": "일반",
+    "warning": "주의"
+  },
   "statusLabel": {
     "acknowledged": "확인함",
     "dismissed": "무시함",
@@ -43,7 +47,10 @@
     "saved": "저장됨",
     "resetDefault": "기본값으로 재설정",
     "minError": "{{min}} 이상이어야 합니다",
-    "parseError": "500k 또는 1.2m처럼 숫자를 입력하세요"
+    "parseError": "500k 또는 1.2m처럼 숫자를 입력하세요",
+    "kindOverrideLabel": "종류",
+    "severityOverrideLabel": "심각도",
+    "useDefaultOption": "기본값 사용 ({{value}})"
   },
   "practices": {
     "sessionTokenCeiling": {

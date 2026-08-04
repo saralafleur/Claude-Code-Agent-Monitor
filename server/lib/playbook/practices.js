@@ -21,6 +21,26 @@
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
+/** The only `kind` values `coach_observations.kind`'s CHECK accepts, and the
+ *  only values a kind override may take. Single source for the DB CHECK
+ *  text, the route validator, the TS union in client/src/lib/types.ts, and
+ *  the client's kindLabel i18n keys. */
+const KIND_VALUES = ["risk", "info", "good"];
+
+/** The only `severity` values, pinned by this build (see intake
+ *  2026-08-02-practice-kind-override, DEC-1). Ordered low -> high. Mirrors
+ *  exactly the two values the catalog has ever written, so
+ *  coach_observations' new CHECK can never reject pre-existing data. */
+const SEVERITY_VALUES = ["info", "warning"];
+
+/** Membership check shared by the resolver (which coerces an invalid stored
+ *  value to null) and the route validator (which rejects an invalid incoming
+ *  value with 400). Deliberately different dispositions, one shared
+ *  vocabulary — see the resolver/route call sites below for why. */
+function coerceEnum(value, allowed) {
+  return typeof value === "string" && allowed.includes(value) ? value : null;
+}
+
 const PRACTICES = [
   {
     id: "session-token-ceiling",
@@ -89,18 +109,41 @@ function defaultConfigFor(practice) {
 }
 
 /**
- * Resolves a practice's effective `{ enabled, config }` from its (possibly
- * absent) `playbook_practice_config` row — the single source of truth for
- * "defaults + stored overrides" both the engine (deciding whether to
- * evaluate a practice) and the route (serving `GET /api/playbook/practices`)
- * read through, so the two can never silently disagree about what's
- * actually configured.
+ * The sole source of truth for "practice defaults + stored overrides" — both
+ * the engine (deciding whether/how to evaluate a practice, and what
+ * kind/severity to freeze onto a fired Observation) and the route (serving
+ * `GET /api/playbook/practices` and validating the config `PUT`) read
+ * through this function, so the two can never silently disagree about what's
+ * actually configured. This is also the ONLY place in the codebase allowed
+ * to read `practice.kind` / `practice.defaultSeverity` raw — see
+ * `server/__tests__/playbook-resolver-guard.test.js`.
+ *
+ * Returns `{ enabled, config, kindOverride, severityOverride, catalogKind,
+ * catalogSeverity, kind, severity }`. The `*Override` fields are the raw
+ * *stored* values (`null` = unset, or an out-of-enum value coerced to
+ * `null`); `catalogKind`/`catalogSeverity` are the practice's built-in
+ * defaults; `kind`/`severity` are the *effective* values — the ones the
+ * engine will stamp onto a new Observation right now.
  * @param {{enabled: number, config: string} | undefined} row
  * @param {typeof PRACTICES[number]} practice
  */
 function resolvePracticeConfig(row, practice) {
   const config = defaultConfigFor(practice);
-  if (!row) return { enabled: true, config };
+  const base = {
+    config,
+    catalogKind: practice.kind,
+    catalogSeverity: practice.defaultSeverity,
+  };
+  if (!row) {
+    return {
+      ...base,
+      enabled: true,
+      kindOverride: null,
+      severityOverride: null,
+      kind: practice.kind,
+      severity: practice.defaultSeverity,
+    };
+  }
   let stored = {};
   try {
     stored = JSON.parse(row.config) || {};
@@ -113,7 +156,25 @@ function resolvePracticeConfig(row, practice) {
       config[field.key] = value;
     }
   }
-  return { enabled: !!row.enabled, config };
+
+  const kindOverride = coerceEnum(stored.kindOverride, KIND_VALUES);
+  const severityOverride = coerceEnum(stored.severityOverride, SEVERITY_VALUES);
+  return {
+    ...base,
+    enabled: !!row.enabled,
+    kindOverride,
+    severityOverride,
+    kind: kindOverride ?? practice.kind,
+    severity: severityOverride ?? practice.defaultSeverity,
+  };
 }
 
-module.exports = { PRACTICES, PRACTICES_BY_ID, defaultConfigFor, resolvePracticeConfig };
+module.exports = {
+  PRACTICES,
+  PRACTICES_BY_ID,
+  defaultConfigFor,
+  resolvePracticeConfig,
+  KIND_VALUES,
+  SEVERITY_VALUES,
+  coerceEnum,
+};

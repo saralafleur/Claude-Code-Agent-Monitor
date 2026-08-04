@@ -711,6 +711,98 @@ describe("Migration: projects.pinned", () => {
   });
 });
 
+// Registry-completeness scan for full TABLE REBUILDS (create-new/rename-old
+// shape, as distinct from a simple ALTER TABLE ... ADD COLUMN above) — D2,
+// intake/2026-08-02-practice-kind-override, §9.6 NON-ATOMIC REBUILD. Scans
+// for both rebuild shapes this file uses:
+//   - rename-first:      ALTER TABLE <table> RENAME TO <table>...
+//   - create-new-first:  CREATE TABLE <table>_new (...)
+// grouped by table name (a table may have been rebuilt more than once across
+// this app's history — plan_items and token_usage both have). Snapshotted
+// 2026-08-02: five pre-existing rebuild call sites (plan_items x2 @ lines
+// ~755/822, token_usage x2 @ lines ~1063/1589, webhook_targets @ ~1439) are
+// non-atomic (separate autocommitted statements, not one BEGIN…COMMIT) and
+// are grandfathered below with a dated reason — retrofitting them is a
+// separate follow-up (its own backup, its own crash tests), not this build.
+// `agents` (@ ~1481) already uses the atomic create-new-then-rename shape
+// but has no dedicated interruption/crash test yet, so it is grandfathered
+// too, pending that follow-up test. `coach_observations` (this build) is the
+// first rebuild with BOTH atomicity (F1) and a full legacy+interruption test
+// pair (server/__tests__/coach-observations-severity-rebuild.test.js) and is
+// registered below with no grandfather reason — do NOT weaken this scan to
+// make a future non-atomic rebuild pass silently.
+const REBUILD_CASES = {
+  coach_observations: { legacy: true, interruption: true },
+  plan_items: {
+    legacy: false,
+    interruption: false,
+    reason:
+      "§9.6 pre-existing rebuild (rename-first, non-atomic separate statements); grandfathered 2026-08-02 per intake/2026-08-02-practice-kind-override D2 — fixed separately, not in this build.",
+  },
+  token_usage: {
+    legacy: false,
+    interruption: false,
+    reason:
+      "§9.6 pre-existing rebuild (rename-first, non-atomic separate statements); grandfathered 2026-08-02 per intake/2026-08-02-practice-kind-override D2 — fixed separately, not in this build.",
+  },
+  webhook_targets: {
+    legacy: false,
+    interruption: false,
+    reason:
+      "§9.6 pre-existing rebuild (rename-first, non-atomic separate statements); grandfathered 2026-08-02 per intake/2026-08-02-practice-kind-override D2 — fixed separately, not in this build.",
+  },
+  agents: {
+    legacy: true,
+    interruption: false,
+    reason:
+      "§9.6 pre-existing rebuild — already atomic (BEGIN…COMMIT, create-new-then-rename), but has no dedicated interruption/crash test yet; grandfathered 2026-08-02 per intake/2026-08-02-practice-kind-override D2.",
+  },
+};
+
+describe("Table-rebuild registry meta-test (D2, §9.6 NON-ATOMIC REBUILD)", () => {
+  it("every full-table rebuild in db.js is registered in REBUILD_CASES, with a legacy+interruption test pair unless grandfathered", () => {
+    const dbPath = path.resolve(__dirname, "../db.js");
+    const dbSource = fs.readFileSync(dbPath, "utf8");
+
+    const renameFirstPattern = /ALTER TABLE (\w+) RENAME TO \1/g;
+    const createNewPattern = /CREATE TABLE (\w+)_new\b/g;
+    const foundTables = new Set();
+
+    let match;
+    while ((match = renameFirstPattern.exec(dbSource)) !== null) {
+      foundTables.add(match[1]);
+    }
+    while ((match = createNewPattern.exec(dbSource)) !== null) {
+      foundTables.add(match[1]);
+    }
+
+    assert(
+      foundTables.size > 0,
+      "sanity check: the scan should find at least one table rebuild in db.js (it always has plan_items etc.) — if this fires, the scan's regex itself is broken"
+    );
+
+    for (const table of foundTables) {
+      assert.ok(
+        REBUILD_CASES[table],
+        `Table rebuild for '${table}' found in db.js but not registered in REBUILD_CASES. ` +
+          `Add an entry — { legacy: true, interruption: true } if it has both test kinds, ` +
+          `or { legacy, interruption, reason } to grandfather it (do not retrofit in the ` +
+          `same change unless that is the change's actual purpose).`
+      );
+    }
+
+    for (const [table, entry] of Object.entries(REBUILD_CASES)) {
+      if (entry.reason) continue; // grandfathered — not held to the full bar
+      assert.ok(
+        entry.legacy && entry.interruption,
+        `'${table}' is registered in REBUILD_CASES without a grandfather reason, so it must ` +
+          `have both a legacy-DB case and an interruption case. Add the missing test(s), or add ` +
+          `a dated 'reason' to grandfather it (per §9.6 — do not silently downgrade the bar).`
+      );
+    }
+  });
+});
+
 describe("Migration meta-test", () => {
   it("every ALTER TABLE … ADD COLUMN in db.js has an upgrade case or is grandfathered", () => {
     const dbPath = path.resolve(__dirname, "../db.js");

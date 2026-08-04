@@ -412,6 +412,10 @@ vi.mock("../../lib/api", async (importOriginal) => {
               scope: "session",
               kind: "risk",
               defaultSeverity: "warning",
+              kindOverride: null,
+              severityOverride: null,
+              resolvedKind: "risk",
+              resolvedSeverity: "warning",
               fields: [
                 { key: "thresholdTokens", type: "number", default: 100_000_000, min: 1_000_000 },
               ],
@@ -426,6 +430,10 @@ vi.mock("../../lib/api", async (importOriginal) => {
           scope: "session",
           kind: "risk",
           defaultSeverity: "warning",
+          kindOverride: null,
+          severityOverride: null,
+          resolvedKind: "risk",
+          resolvedSeverity: "warning",
           fields: [
             { key: "thresholdTokens", type: "number", default: 100_000_000, min: 1_000_000 },
           ],
