@@ -818,6 +818,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_value_claims_unit
     ON value_claims(value_source, value_ref);
 
+  -- Stakeholder-altitude cache for one value-pool unit (server/lib/value-summary.js,
+  -- the synthesis layer above assembleValuePool). Keyed on the unit's own
+  -- unitKey, NOT a content digest like focus_summaries — a unit's ground
+  -- fact (a commit's subject line, an intake slug) is immutable once seen,
+  -- so there is nothing to invalidate: generated once, served forever.
+  CREATE TABLE IF NOT EXISTS value_unit_summaries (
+    unit_key TEXT PRIMARY KEY,
+    project_level TEXT NOT NULL,
+    stakeholder_level TEXT NOT NULL,
+    model TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
   -- Layer 6: reconciliation's output queue — shaped like alert_events but
   -- deliberately separate (different audience: Sara reviewing portfolio
   -- health, not a fired alert rule; different trust boundary: some rows are
@@ -3127,6 +3140,19 @@ const stmts = {
   lastClosureForProject: db.prepare(
     `SELECT * FROM project_plans WHERE project_id = ? AND status = 'closed'
      ORDER BY closed_at DESC, id DESC LIMIT 1`
+  ),
+
+  // Stakeholder-altitude cache (see the value_unit_summaries schema comment)
+  // - read/written by server/lib/value-summary.js only.
+  getValueUnitSummary: db.prepare("SELECT * FROM value_unit_summaries WHERE unit_key = ?"),
+  upsertValueUnitSummary: db.prepare(
+    `INSERT INTO value_unit_summaries (unit_key, project_level, stakeholder_level, model)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(unit_key) DO UPDATE SET
+       project_level = excluded.project_level,
+       stakeholder_level = excluded.stakeholder_level,
+       model = excluded.model,
+       created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`
   ),
 };
 

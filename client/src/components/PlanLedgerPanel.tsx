@@ -7,10 +7,15 @@
  * plus a collapsible "History" section for closed generations rendered
  * strictly read-only (no edit/claim/unclaim affordances — closed plans and
  * their claims are immutable). Right pane: the live, unclaimed value pool,
- * each unit showing its `value_source` and an attribution-tier badge
- * (mechanical/correlational/judgment) with a simple "Claim into…" gesture
- * (a `<select>` of open items plus a Claim button — no drag-and-drop in this
- * pass). A small health strip above both panes renders `unclaimedPoolSize`,
+ * each unit shown at THREE altitudes at once (Sara's 2026-08-04 request) —
+ * GROUND (the raw `value_source`/label/attribution-tier badge, exactly as
+ * before), PROJECT (a short relational phrase), and STAKEHOLDER (one plain
+ * sentence) — the latter two synthesized and cached server-side by
+ * `server/lib/value-summary.js` via `api.projectPlans.altitudes`, the same
+ * leveling mechanism Focus's own window summary already uses, one altitude
+ * higher. A simple "Claim into…" gesture follows (a `<select>` of open items
+ * plus a Claim button — no drag-and-drop in this pass). A small health strip
+ * above both panes renders `unclaimedPoolSize`,
  * `lastClosureAt`/`daysSinceLastClosure`, and `openPlanCount` from
  * `api.projectPlans.health()` VERBATIM — this is the PROJECT-CONTEXT.md
  * §9.1 DERIVED-DUAL-VIEW guard applied here: this component never derives
@@ -18,15 +23,183 @@
  * gave `unclaimedPoolSize`). Every visible string routes through
  * `useTranslation("projectDetail")` under the `planLedger.*` keys — no new
  * i18n namespace, mirroring how {@link ProjectDetail} itself is localized.
+ *
+ * The header also carries an info button (`ValuePoolInfoModal`) that opens a
+ * plain-language explainer of the pool/claim/close model in-place — fully
+ * self-contained app UI built from this same `planLedger.info.*` i18n
+ * namespace and the app's own card/badge classes, not a link out to any
+ * externally hosted page.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Info, X } from "lucide-react";
 import { api } from "../lib/api";
 import type { PlanHealth, ProjectPlanItem, ProjectPlanWithItems, ValueUnit } from "../lib/types";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
+
+const TIER_BADGE_CLASS: Record<"mechanical" | "correlational" | "judgment", string> = {
+  mechanical: "bg-sky-500/10 border-sky-500/30 text-sky-400",
+  correlational: "bg-amber-500/10 border-amber-500/30 text-amber-400",
+  judgment: "bg-violet-500/10 border-violet-500/30 text-violet-400",
+};
+
+const INFO_FEED_KEYS = ["initiatives", "trunk", "detours", "sessionLinked"] as const;
+const INFO_FEED_TIER: Record<
+  (typeof INFO_FEED_KEYS)[number],
+  "mechanical" | "correlational" | "judgment"
+> = {
+  initiatives: "mechanical",
+  trunk: "mechanical",
+  detours: "judgment",
+  sessionLinked: "correlational",
+};
+const INFO_HEALTH_KEYS = ["unclaimedPoolSize", "openPlanCount", "lastClosure"] as const;
+
+/** Plain-language "what is this panel" explainer, opened from the header's
+ *  info button. Self-contained: no iframe/redirect to any externally
+ *  published page — every string routes through `planLedger.info.*` and
+ *  every visual comes from the app's own card/badge classes, so it renders
+ *  correctly in both themes and every locale this panel already supports.
+ *  Follows the same backdrop/Escape/click-out dismissal convention as
+ *  {@link ConfirmModal} and `ProjectDetail.tsx`'s own `RepoScanModal`. */
+function ValuePoolInfoModal({
+  open,
+  onClose,
+  t,
+}: {
+  open: boolean;
+  onClose: () => void;
+  t: TFunc;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("planLedger.info.title")}
+    >
+      <div
+        className="relative w-full max-w-xl max-h-[85vh] rounded-xl border border-border bg-surface-1 shadow-xl shadow-black/40 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 p-5 pb-3 flex-shrink-0">
+          <div className="w-9 h-9 rounded-lg bg-accent-muted flex items-center justify-center flex-shrink-0">
+            <Info className="w-4.5 h-4.5 text-accent" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold text-gray-100">{t("planLedger.info.title")}</h3>
+            <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+              {t("planLedger.info.subtitle")}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-300 p-1 -mt-1 -mr-1"
+            aria-label={t("repos.scanModal.close")}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-5 pb-5 overflow-y-auto space-y-5">
+          <p className="text-xs text-gray-300 leading-relaxed border-l-2 border-accent/50 pl-3">
+            {t("planLedger.info.principle")}
+          </p>
+
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-gray-300">
+              {t("planLedger.info.feedsTitle")}
+            </h4>
+            <div className="space-y-1.5">
+              {INFO_FEED_KEYS.map((key) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-2/60 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-gray-200">
+                      {t(`planLedger.info.feeds.${key}.name`)}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">
+                      {t(`planLedger.info.feeds.${key}.desc`)}
+                    </div>
+                  </div>
+                  <span className={`badge flex-shrink-0 ${TIER_BADGE_CLASS[INFO_FEED_TIER[key]]}`}>
+                    {t(`planLedger.attribution.${INFO_FEED_TIER[key]}`)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500 pt-1">
+              {(["mechanical", "correlational", "judgment"] as const).map((tier) => (
+                <span key={tier}>
+                  <strong className="text-gray-300 font-medium">
+                    {t(`planLedger.attribution.${tier}`)}
+                  </strong>{" "}
+                  — {t(`planLedger.info.tierKey.${tier}`)}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <h4 className="text-xs font-semibold text-gray-300">
+              {t("planLedger.info.claimTitle")}
+            </h4>
+            <p className="text-[11px] text-gray-400">{t("planLedger.info.claimDesc")}</p>
+            <p className="text-[11px] text-amber-400/90">{t("planLedger.info.claimNote")}</p>
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-gray-300">
+              {t("planLedger.info.healthTitle")}
+            </h4>
+            <p className="text-[11px] text-gray-500">{t("planLedger.info.healthDesc")}</p>
+            <dl className="grid grid-cols-3 gap-2">
+              {INFO_HEALTH_KEYS.map((key) => (
+                <div
+                  key={key}
+                  className="rounded-lg border border-border bg-surface-2/60 px-2.5 py-2"
+                >
+                  <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                    {t(`planLedger.health.${key}`)}
+                  </dt>
+                  <dd className="text-[11px] text-gray-400 mt-1 leading-snug">
+                    {t(`planLedger.info.healthDescs.${key}`)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-gray-300 leading-relaxed pt-1">
+              {t("planLedger.info.closing")}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 p-5 pt-3 flex-shrink-0 border-t border-border">
+          <button onClick={onClose} className="btn-ghost border border-border text-xs">
+            {t("repos.scanModal.close")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** One open plan item, tree-shaped from its flat `parent_item_id` links. */
 type ItemNode = ProjectPlanItem & { children: ItemNode[] };
@@ -132,19 +305,60 @@ function PlanSection({
   );
 }
 
-/** One row in the right-pane value pool: the raw `value_source` (a plain
- *  data value, not an i18n key — the same convention as e.g. commit shas
- *  elsewhere in the app), an attribution-tier badge, and — only when at
- *  least one open item exists to claim into — a target-item picker plus a
- *  Claim button. */
+/** One unit's PROJECT/STAKEHOLDER synthesis: `undefined` while {@link
+ *  api.projectPlans.altitudes} hasn't resolved for this unit yet, `null`
+ *  once resolved without an entry for it (LLM off/unavailable this round —
+ *  see value-summary.js's "unavailable" contract), or the resolved text. */
+type Altitude = { project: string; stakeholder: string } | null | undefined;
+
+/** Renders one altitude line's content: the resolved text, or a muted
+ *  "generating…"/"unavailable" placeholder — never blank, so the row's
+ *  three-line shape never jumps as altitudes resolve. Reads `field` off the
+ *  whole `altitude` object itself (not a pre-extracted value) — optional
+ *  chaining on a `null` altitude collapses to `undefined` at the field
+ *  level, which would make "resolved but unavailable" indistinguishable
+ *  from "not yet resolved". */
+function AltitudeText({
+  altitude,
+  field,
+  t,
+}: {
+  altitude: Altitude;
+  field: "project" | "stakeholder";
+  t: TFunc;
+}) {
+  if (altitude === undefined) {
+    return (
+      <span className="italic text-gray-600">{t("planLedger.pool.altitudes.generating")}</span>
+    );
+  }
+  if (altitude === null) {
+    return (
+      <span className="italic text-gray-600">{t("planLedger.pool.altitudes.unavailable")}</span>
+    );
+  }
+  return <>{altitude[field]}</>;
+}
+
+/** One value-pool unit at all three altitudes at once (Sara's 2026-08-04
+ *  request): GROUND (the raw fact, exactly as before — source type, label,
+ *  attribution-tier badge), PROJECT (a short relational phrase), and
+ *  STAKEHOLDER (one plain sentence), joined by a small vertical "rail" whose
+ *  dots grow from Ground to Stakeholder — the altitude that should read as
+ *  most prominent gets the most visual weight. Project/Stakeholder text
+ *  comes from `altitude`, resolved by the parent's batched {@link
+ *  api.projectPlans.altitudes} call; see {@link Altitude} for its
+ *  undefined/null/resolved states. */
 function ValueUnitRow({
   unit,
+  altitude,
   openItems,
   busy,
   onClaim,
   t,
 }: {
   unit: ValueUnit;
+  altitude: Altitude;
   openItems: Array<{ id: number; text: string }>;
   busy: boolean;
   onClaim: (unit: ValueUnit, itemId: number) => void;
@@ -154,19 +368,51 @@ function ValueUnitRow({
   return (
     <div
       data-test="pool-unit"
-      className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-1/60 px-3 py-2 mb-2"
+      className="rounded-lg border border-border bg-surface-1/60 px-3 py-2.5 mb-2"
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-mono text-gray-300 truncate">{unit.source}</span>
-          <span className={`badge attribution-${unit.attribution}`}>
-            {t(`planLedger.attribution.${unit.attribution}`)}
-          </span>
+      <div className="flex gap-3">
+        <div className="flex flex-col items-center w-3 flex-shrink-0 pt-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-surface-5 border border-border-light flex-shrink-0" />
+          <span className="w-px flex-1 bg-border-light my-0.5" />
+          <span className="w-2 h-2 rounded-full bg-surface-5 border border-border-light flex-shrink-0" />
+          <span className="w-px flex-1 bg-border-light my-0.5" />
+          <span className="w-2.5 h-2.5 rounded-full bg-accent ring-[3px] ring-accent-muted flex-shrink-0" />
         </div>
-        {unit.label && <div className="text-[11px] text-gray-500 truncate">{unit.label}</div>}
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex items-baseline gap-2">
+            <span className="w-16 flex-shrink-0 text-[9px] font-mono uppercase tracking-wide text-gray-600">
+              {t("planLedger.pool.levels.ground")}
+            </span>
+            <div className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-mono text-gray-300">{unit.source}</span>
+              {unit.label && (
+                <span className="text-[11px] font-mono text-gray-500 truncate">{unit.label}</span>
+              )}
+              <span className={`badge flex-shrink-0 ${TIER_BADGE_CLASS[unit.attribution]}`}>
+                {t(`planLedger.attribution.${unit.attribution}`)}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="w-16 flex-shrink-0 text-[9px] font-mono uppercase tracking-wide text-gray-600">
+              {t("planLedger.pool.levels.project")}
+            </span>
+            <div className="min-w-0 flex-1 text-[12px] text-gray-400">
+              <AltitudeText altitude={altitude} field="project" t={t} />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="w-16 flex-shrink-0 text-[9px] font-mono uppercase tracking-wide text-accent-hover">
+              {t("planLedger.pool.levels.stakeholder")}
+            </span>
+            <div className="min-w-0 flex-1 text-[13px] font-medium text-gray-100">
+              <AltitudeText altitude={altitude} field="stakeholder" t={t} />
+            </div>
+          </div>
+        </div>
       </div>
       {openItems.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-border pl-6">
           <select
             aria-label={t("planLedger.pool.claimTarget")}
             value={targetItemId ?? ""}
@@ -234,7 +480,13 @@ function HealthStrip({ health, t }: { health: PlanHealth; t: TFunc }) {
 /** Two-pane plan lifecycle + value ledger workbench for one project. Loads
  *  {@link api.projectPlans.list}/`pool`/`health` together on mount and after
  *  every claim/close, so every pane always reflects one consistent
- *  snapshot rather than three independently-stale fetches. */
+ *  snapshot rather than three independently-stale fetches. PROJECT/
+ *  STAKEHOLDER altitudes are a separate, non-blocking fetch ({@link
+ *  api.projectPlans.altitudes}) kicked off once the pool's units are known —
+ *  deliberately NOT folded into the `load()` Promise.all above, so a cold
+ *  cache's LLM latency (server/lib/value-summary.js) never delays the rest
+ *  of the panel, same separation Focus's own window-summary block already
+ *  uses relative to its main report fetch. */
 export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   const { t } = useTranslation("projectDetail");
   const [plans, setPlans] = useState<ProjectPlanWithItems[]>([]);
@@ -244,6 +496,13 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   const [claimingUnitId, setClaimingUnitId] = useState<string | null>(null);
   const [closingPlanId, setClosingPlanId] = useState<number | null>(null);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [altitudes, setAltitudes] = useState<Record<string, Altitude>>({});
+  // Tracks every unit id ever requested, independent of `altitudes` state
+  // timing — the effect below reads this instead of `altitudes` itself so
+  // it never needs `altitudes` in its own dependency array (no feedback
+  // loop between "state I set" and "state that re-triggers me").
+  const requestedAltitudesRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -265,6 +524,38 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const missing = units.filter((u) => !requestedAltitudesRef.current.has(u.id));
+    if (missing.length === 0) return;
+    for (const u of missing) requestedAltitudesRef.current.add(u.id);
+
+    let cancelled = false;
+    api.projectPlans
+      .altitudes(projectId, missing)
+      .then((res) => {
+        if (cancelled) return;
+        setAltitudes((prev) => {
+          const next = { ...prev };
+          for (const u of missing) {
+            const a = res.altitudes[u.id];
+            next[u.id] = a ? { project: a.project, stakeholder: a.stakeholder } : null;
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAltitudes((prev) => {
+          const next = { ...prev };
+          for (const u of missing) next[u.id] = null;
+          return next;
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [units, projectId]);
 
   const handleClaim = useCallback(
     async (unit: ValueUnit, itemId: number) => {
@@ -306,7 +597,18 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
     <section className="card" data-test="plan-ledger-panel">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
         <h2 className="text-sm font-semibold text-gray-200">{t("planLedger.title")}</h2>
+        <button
+          type="button"
+          onClick={() => setInfoOpen(true)}
+          title={t("planLedger.info.buttonLabel")}
+          aria-label={t("planLedger.info.buttonLabel")}
+          className="text-gray-500 hover:text-accent p-1 rounded-md flex-shrink-0"
+        >
+          <Info className="w-4 h-4" />
+        </button>
       </div>
+
+      <ValuePoolInfoModal open={infoOpen} onClose={() => setInfoOpen(false)} t={t} />
 
       {error && (
         <div className="mx-4 mt-3 badge bg-red-500/10 border-red-500/30 text-red-400">{error}</div>
@@ -370,6 +672,7 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
               <ValueUnitRow
                 key={unit.id}
                 unit={unit}
+                altitude={altitudes[unit.id]}
                 openItems={openItems}
                 busy={claimingUnitId === unit.id}
                 onClaim={handleClaim}

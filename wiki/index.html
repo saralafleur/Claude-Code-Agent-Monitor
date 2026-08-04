@@ -2400,6 +2400,13 @@ npm run mcp:start:repl         # interactive CLI with tab completion</code></pre
                   </td>
                 </tr>
                 <tr>
+                  <td><code>DASHBOARD_VALUE_SUMMARY_MODEL</code></td>
+                  <td>falls back to <code>DASHBOARD_FOCUS_SUMMARY_MODEL</code>, then <code>DASHBOARD_FOCUS_INFER_MODEL</code>, then <code>haiku</code></td>
+                  <td>
+                    Model for the Project Detail page's Value Pool 'altitude synthesis' (<code>POST /api/project-plans/altitudes</code>) — the Project/Stakeholder plain-language levels shown alongside each pool unit's raw ground fact, same leveling mechanism as the Focus window summary above, one altitude higher.
+                  </td>
+                </tr>
+                <tr>
                   <td><code>DASHBOARD_FOCUS_INFER_TIMEOUT_MS</code></td>
                   <td><code>30000</code></td>
                   <td>
@@ -7317,7 +7324,7 @@ npm run install-hooks</code></pre>
     <!-- Body-content translations (zh/vi) — must load before script.js so the
          i18n engine sees window.__WIKI_CONTENT_I18N. Both are deferred, so they
          run in document order. -->
-    <script src="i18n-content.js?v=93" defer></script>
+    <script src="i18n-content.js?v=94" defer></script>
     <script src="script.js?v=34" defer></script>
     <script>
       (function () {

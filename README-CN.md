@@ -640,6 +640,7 @@ flowchart LR
 | `DASHBOARD_FOCUS_INFER_MODE` | `llm` | 焦点推断分类器：`llm`（以 headless `claude -p` 运行，使用你现有的 CLI 认证，在一个保守的关键词启发式先行判断之后介入）、`heuristic`（仅关键词重叠——从不判定绕行，只认可清晰的条目匹配）或 `off` |
 | `DASHBOARD_FOCUS_INFER_MODEL` | `haiku` | 传给焦点推断 `claude -p --model` 进程的模型 |
 | `DASHBOARD_FOCUS_SUMMARY_MODEL` | 回退到 `DASHBOARD_FOCUS_INFER_MODEL`，再回退到 `haiku` | 用于 Focus 页面"What happened in this window"摘要（`GET /api/focus-report/summary`）的模型——一个专用的覆盖项，使面向利益相关者的要点可以使用更强的模型（例如 `sonnet`），而运行频繁得多的逐会话分类器仍保持廉价的默认值 |
+| `DASHBOARD_VALUE_SUMMARY_MODEL` | 回退到 `DASHBOARD_FOCUS_SUMMARY_MODEL`，再到 `DASHBOARD_FOCUS_INFER_MODEL`，最后到 `haiku` | 用于项目详情页价值池"高度合成"（`POST /api/project-plans/altitudes`）的模型——在每个价值池单元的原始事实旁展示的"项目"与"利益相关者"级别的通俗语言表述，与上面 Focus 窗口摘要相同的分层机制，只是再抬高一个高度 |
 | `DASHBOARD_FOCUS_INFER_TIMEOUT_MS` | `30000`（30 秒） | 单次焦点推断 `claude -p` 进程的强杀计时器（毫秒）（先 SIGTERM，再 SIGKILL） |
 | `DASHBOARD_REMOTE_SYNC_MS` | `60000` | 通过 `rsync` 拉取远程数据源的间隔（毫秒）。设为 `0` 可禁用远程源轮询 |
 | `DASHBOARD_REMOTE_ACTIVE_WINDOW_MS` | `600000`（10 分钟） | 一个**远程数据源**会话实时状态的新鲜度窗口。每次同步时，镜像 Transcript 在此窗口内被修改过的远程会话会被视为仍在运行（`active`）；一旦镜像停止推进的时间超过此窗口，会话就被核对为 `completed`。远程会话不接收实时 Hook，因此本项取代了对它们跳过的本地存活性/过期扫描。链路较慢或空闲回合很长时可调大 |

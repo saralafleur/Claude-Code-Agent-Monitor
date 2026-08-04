@@ -145,7 +145,16 @@
       "empty": "Hiện không có đơn vị nào chưa được ghi nhận.",
       "claim": "Ghi nhận",
       "claiming": "Đang ghi nhận…",
-      "claimTarget": "Ghi nhận vào"
+      "claimTarget": "Ghi nhận vào",
+      "levels": {
+        "ground": "Thực tế",
+        "project": "Dự án",
+        "stakeholder": "Cấp lãnh đạo"
+      },
+      "altitudes": {
+        "generating": "Đang tạo…",
+        "unavailable": "Chưa có sẵn"
+      }
     },
     "health": {
       "unclaimedPoolSize": "Đơn vị chưa ghi nhận",
@@ -159,6 +168,47 @@
       "mechanical": "Cơ học",
       "correlational": "Tương quan",
       "judgment": "Phán đoán"
+    },
+    "info": {
+      "buttonLabel": "Giới thiệu về kho giá trị",
+      "title": "Kho giá trị",
+      "subtitle": "Công việc thật sự vẫn liên tục diễn ra — commit được đẩy lên, các việc phát sinh được xử lý — thường nhanh hơn việc cập nhật kế hoạch. Kho là nơi công việc đó chờ được ghi nhận vào một mục cụ thể.",
+      "principle": "Không gì được tính là đã hoàn thành cho đến khi nó được ghi nhận vào một kế hoạch và kế hoạch đó được đóng lại. Bất cứ điều gì thực sự xảy ra ngoài vòng đó sẽ nằm trong kho.",
+      "feedsTitle": "Những gì đưa vào kho",
+      "feeds": {
+        "initiatives": {
+          "name": "Sáng kiến đã hoàn tất & đã merge",
+          "desc": "Một nỗ lực tiếp nhận đã hoàn tất và bản merge của nó đã được đưa vào."
+        },
+        "trunk": {
+          "name": "Commit trên nhánh chính",
+          "desc": "Mã nguồn được đưa thẳng vào, không thuộc sáng kiến nào đang theo dõi."
+        },
+        "detours": {
+          "name": "Việc phát sinh (detour)",
+          "desc": "Công việc ngoài kế hoạch đã được xem xét và quyết định giữ lại."
+        },
+        "sessionLinked": {
+          "name": "Commit liên kết với phiên làm việc",
+          "desc": "Một commit trên nhánh chính xảy ra trong một phiên làm việc có thời gian thực."
+        }
+      },
+      "tierKey": {
+        "mechanical": "một sự kiện có thật",
+        "correlational": "một sự kiện có thật kèm mối liên hệ khả dĩ",
+        "judgment": "đã có người quyết định việc này được tính"
+      },
+      "claimTitle": "Một đơn vị rời khỏi kho như thế nào",
+      "claimDesc": "Chọn một mục trong kế hoạch đang mở, bấm Ghi nhận. Chỉ vậy thôi.",
+      "claimNote": "Việc ghi nhận chỉ diễn ra một chiều. Khi một đơn vị đã được ghi nhận, nó sẽ không bao giờ xuất hiện lại trong kho — kể cả khi cùng một commit được quét lại sau này.",
+      "healthTitle": "Vì sao đáng để theo dõi",
+      "healthDesc": "Ba con số phía trên được lấy trực tiếp từ máy chủ, không bao giờ tự tính lại trong bảng này.",
+      "healthDescs": {
+        "unclaimedPoolSize": "Công việc đã hoàn thành nhưng chưa được ghi nhận vào kế hoạch nào.",
+        "openPlanCount": "Các kế hoạch vẫn đang tiếp nhận ghi nhận, chưa đóng.",
+        "lastClosure": "Đã bao lâu kể từ lần một kế hoạch thực sự được đóng."
+      },
+      "closing": "Phép thử thực sự không phải là công việc đã xong hay chưa — mà là nó đã được đóng lại hay chưa. Kho giá trị nhỏ dần nghĩa là đội đang hoàn tất công việc, chứ không chỉ tích tụ thêm."
     }
   }
 }

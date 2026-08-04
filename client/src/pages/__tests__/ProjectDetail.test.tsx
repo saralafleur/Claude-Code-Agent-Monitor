@@ -144,6 +144,7 @@ const projectPlansPoolMock = vi.fn();
 const projectPlansHealthMock = vi.fn();
 const projectPlansClaimMock = vi.fn();
 const projectPlansCloseMock = vi.fn();
+const projectPlansAltitudesMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -166,6 +167,7 @@ vi.mock("../../lib/api", () => ({
       health: (...args: unknown[]) => projectPlansHealthMock(...args),
       claim: (...args: unknown[]) => projectPlansClaimMock(...args),
       close: (...args: unknown[]) => projectPlansCloseMock(...args),
+      altitudes: (...args: unknown[]) => projectPlansAltitudesMock(...args),
     },
     sessions: {
       list: (...args: unknown[]) => sessionsListMock(...args),
@@ -226,6 +228,7 @@ describe("ProjectDetail page", () => {
     });
     projectPlansClaimMock.mockResolvedValue({ claim: {} });
     projectPlansCloseMock.mockResolvedValue({ plan: {} });
+    projectPlansAltitudesMock.mockResolvedValue({ altitudes: {} });
   });
 
   it("shows a not-found state for an unknown project id", async () => {

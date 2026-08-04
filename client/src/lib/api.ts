@@ -2660,6 +2660,7 @@ export const api = {
           attribution: ValueUnit["attribution"];
           label?: string | null;
           seen_at?: string | null;
+          stage?: string | null;
         }>;
         identityWarnings: ValuePool["identityWarnings"];
       }>(`/project-plans/pool?${qs.toString()}`).then((raw) => ({
@@ -2672,11 +2673,49 @@ export const api = {
             attribution: u.attribution,
             label: u.label ?? null,
             discoveredAt: u.seen_at ?? null,
+            stage: u.stage ?? null,
           })
         ),
         identityWarnings: raw.identityWarnings,
       }));
     },
+    /**
+     * POST /api/project-plans/altitudes — stakeholder-altitude synthesis for
+     * a batch of {@link ValueUnit}s already fetched from {@link
+     * api.projectPlans.pool} (server/lib/value-summary.js, the layer above
+     * the pool itself). Never re-fetches or recomputes the pool — callers
+     * pass the exact units they already hold. A unit absent from the
+     * returned map means no altitude could be produced this round (LLM
+     * off/unavailable) — never an error.
+     * @param projectId The project id.
+     * @param units     The {@link ValueUnit}s to synthesize altitudes for.
+     * @returns `{ altitudes }` keyed by each unit's `id` (server `unitKey`).
+     */
+    altitudes: (projectId: string, units: ValueUnit[]) =>
+      request<{
+        altitudes: Record<
+          string,
+          {
+            project: string;
+            stakeholder: string;
+            model: string | null;
+            generated_at: string;
+            cached: boolean;
+          }
+        >;
+      }>("/project-plans/altitudes", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          units: units.map((u) => ({
+            unit_key: u.id,
+            value_source: u.source,
+            value_ref: u.sourceRef,
+            label: u.label ?? null,
+            stage: u.stage ?? null,
+          })),
+        }),
+      }),
     /**
      * GET /api/project-plans/health?project_id= — `computePlanHealth`'s
      * exact shape, verbatim. Render every field as-is; never re-derive

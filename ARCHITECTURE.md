@@ -1088,6 +1088,14 @@ erDiagram
         TEXT access_day "UTC calendar day, reference only - queries use accessed_at range"
         TEXT accessed_at "ISO 8601 stamp of the resolution"
     }
+
+    value_unit_summaries {
+        TEXT unit_key PK "Same (value_source, value_ref, source_cwd) identity value-ledger.js uses"
+        TEXT project_level "Short phrase naming what this unit is part of"
+        TEXT stakeholder_level "One plain, jargon-free sentence"
+        TEXT model "LLM model that produced it, e.g. haiku"
+        TEXT created_at "ISO 8601 stamp of the synthesis - generated once, served forever"
+    }
 ```
 
 `sessions` carries **no** `project_id` column — project membership is derived at query time by joining `sessions.cwd` against `project_paths.cwd`, so a session created (or imported) before its folder was ever mapped retroactively belongs to that project the instant the mapping is added, with no backfill needed. `plans` follows the same convention: it is keyed by `cwd` (no `project_id`), so a project's plans aggregate through the `project_paths` join exactly like its sessions. Focus **history** is deliberately not a table — every focus change also writes a `Focus` row to the existing `events` table, which the timeline already renders; `session_focus` holds only the *current* declaration per session.
@@ -2156,9 +2164,30 @@ is the CLI surface — every derived number it prints comes from the API
 response verbatim, never recomputed client-side (proven by
 `server/__tests__/ledger-metrics-parity.test.js`, which drives one seeded DB
 through both the real route and a real spawned `ccam` process and asserts
-identical values). The optional `<PlanLedgerPanel>` UI component is gated
-behind a manual checkpoint (Sara judging the live pool "signal, not noise"
-on real data) and has not shipped yet.
+identical values). The `<PlanLedgerPanel>` UI component (`client/src/components/PlanLedgerPanel.tsx`)
+has shipped: it renders as its own card on `ProjectDetail`, a two-pane
+workbench (open plans + nested items with a close action on the left, the
+live value pool with a claim gesture on the right) plus a health strip and an
+in-app info modal explaining the pool/claim/close model.
+
+**Altitude synthesis** (`server/lib/value-summary.js`, `POST /altitudes`)
+is the layer above the pool: every unit's GROUND fact (`value_source`/label/
+attribution tier, exactly what `/pool` already returns) gets two more
+altitudes on request — a short PROJECT phrase naming what it's part of, and
+a plain-language STAKEHOLDER sentence a non-technical reader could act on —
+the same leveling mechanism `focus-summary.js` already uses for Focus window
+summaries (§ above), applied one altitude higher. Callers pass the exact
+units their own `/pool` fetch already resolved; this route never re-derives
+pool assembly. Unlike `focus_summaries`, caching in `value_unit_summaries` is
+keyed on the unit's own identity with no digest gating — a value unit's
+ground fact is immutable once seen, so it is generated once and served
+forever. Every not-yet-cached unit in one request batches into a single
+`claude -p` spawn (never one call per unit), so sibling units can inform each
+other's PROJECT phrasing. `PlanLedgerPanel` fetches altitudes as a separate,
+non-blocking request once the pool's units are known — a cold cache's LLM
+latency never delays the rest of the panel — and shows a "Generating…"
+placeholder per row until it resolves, or "Not available" if the LLM path is
+off/unavailable.
 
 ---
 

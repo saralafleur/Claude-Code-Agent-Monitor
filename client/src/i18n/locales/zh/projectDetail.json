@@ -145,7 +145,16 @@
       "empty": "目前没有未认领的项目。",
       "claim": "认领",
       "claiming": "认领中…",
-      "claimTarget": "认领至"
+      "claimTarget": "认领至",
+      "levels": {
+        "ground": "事实层",
+        "project": "项目层",
+        "stakeholder": "汇报层"
+      },
+      "altitudes": {
+        "generating": "生成中…",
+        "unavailable": "暂不可用"
+      }
     },
     "health": {
       "unclaimedPoolSize": "未认领单元",
@@ -159,6 +168,47 @@
       "mechanical": "机械",
       "correlational": "相关",
       "judgment": "判断"
+    },
+    "info": {
+      "buttonLabel": "关于价值池",
+      "title": "价值池",
+      "subtitle": "真实的工作一直在发生——提交代码、处理临时事项——往往比更新计划更快。价值池就是这些工作在被归入某个事项之前暂存的地方。",
+      "principle": "任何工作都不算已交付，除非它被认领进某个计划、并且该计划被结束。凡是在这个流程之外发生的真实工作，都会留在价值池中。",
+      "feedsTitle": "什么会进入价值池",
+      "feeds": {
+        "initiatives": {
+          "name": "已完成的启动项与合并",
+          "desc": "一项接收工作已完成，其合并已经落地。"
+        },
+        "trunk": {
+          "name": "主干提交",
+          "desc": "直接提交到主干、未归属于任何已跟踪启动项的代码。"
+        },
+        "detours": {
+          "name": "临时事项（Detour）",
+          "desc": "已经过审查并决定保留的计划外工作。"
+        },
+        "sessionLinked": {
+          "name": "与会话关联的提交",
+          "desc": "发生在真实、有时间戳的工作会话期间的主干提交。"
+        }
+      },
+      "tierKey": {
+        "mechanical": "一个客观事实",
+        "correlational": "一个事实加上一个可能的关联",
+        "judgment": "已经有人判断这项工作应被计入"
+      },
+      "claimTitle": "一个单元如何离开价值池",
+      "claimDesc": "选择一个进行中计划的事项，点击认领即可，就这么简单。",
+      "claimNote": "认领只能单向进行。一个单元一旦被认领，就不会再出现在价值池中——即便同一条提交之后被重新扫描到。",
+      "healthTitle": "为什么值得关注",
+      "healthDesc": "上方的三个数字直接来自服务器，本面板从不重新计算它们。",
+      "healthDescs": {
+        "unclaimedPoolSize": "已交付但尚未归入任何计划的工作。",
+        "openPlanCount": "仍在接收认领、尚未结束的计划数量。",
+        "lastClosure": "距离上一次真正结束一个计划已经过去多久。"
+      },
+      "closing": "真正的检验标准不是工作是否完成，而是它是否被结束。价值池不断缩小，说明团队在真正完成事情，而不只是不断堆积。"
     }
   }
 }

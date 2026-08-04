@@ -1075,6 +1075,32 @@ Managed through `/api/decision-queue/*` and `ccam decisions`; see [docs/API.md](
 
 ---
 
+### value_unit_summaries
+
+Cached **PROJECT/STAKEHOLDER altitude synthesis** for one value-pool unit (`POST /api/project-plans/altitudes`, `server/lib/value-summary.js`) — the layer above the pool itself (`value-ledger.js`'s `assembleValuePool`). Every unit already carries its GROUND fact (`value_source`/label/attribution, not stored here); this table holds the two derived altitudes on top: a short PROJECT phrase and a plain-language STAKEHOLDER sentence, synthesized by a batched LLM call. Keyed on the unit's own identity (`unit_key`, the same `(value_source, value_ref, source_cwd)` composite `value-ledger.js` uses for pool dedup/claim-ratchet — see `unitKey()`), **not** a content digest like `focus_summaries` — a value unit's ground fact is immutable once seen (a commit's subject line, an intake slug, never change), so there is nothing to invalidate: generated once, served forever. No FK — describes a unit's identity, not a session/project row.
+
+```sql
+CREATE TABLE value_unit_summaries (
+    unit_key TEXT PRIMARY KEY,
+    project_level TEXT NOT NULL,
+    stakeholder_level TEXT NOT NULL,
+    model TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `unit_key` | TEXT | NO | Primary key; the same `unitKey(value_source, value_ref, source_cwd)` identity `value-ledger.js` computes for this unit |
+| `project_level` | TEXT | NO | Short phrase (<15 words) naming what this unit is part of, or how it relates to sibling units in the batch it was synthesized with |
+| `stakeholder_level` | TEXT | NO | One plain, jargon-free sentence (<20 words) a non-technical reader could act on |
+| `model` | TEXT | YES | The `claude -p` model that produced it (`DASHBOARD_VALUE_SUMMARY_MODEL`, falling back to `DASHBOARD_FOCUS_SUMMARY_MODEL`, then `DASHBOARD_FOCUS_INFER_MODEL`, then `haiku`) |
+| `created_at` | TEXT | NO | ISO 8601 stamp of the synthesis (cache write time) |
+
+---
+
 ### focus_summaries
 
 Cached stakeholder-readable **window summaries** for `GET /api/focus-report/summary` (`server/lib/focus-summary.js`): 2–4 plain-language bullets synthesized by a one-shot LLM call from a report window's per-session focus segments. `cache_key` identifies the full scope+window request (project/session/unassigned/sources + from/to); `input_digest` hashes the summary-relevant report data, so a cached row is served only while the underlying data is unchanged — a finished day is generated exactly once and served forever, while a still-running day regenerates whenever new activity lands in the window. Generated on request, not by a background service; no FK — a summary describes a window, not one session.

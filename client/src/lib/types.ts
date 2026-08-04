@@ -2302,6 +2302,19 @@ export interface ValueUnit {
   /** Mirrors the server unit's `seen_at` (commit/initiative timestamp),
    *  when present — the unit's "discovered" moment. */
   discoveredAt?: string | null;
+  /** Mirrors the server unit's `stage` (intake initiative stage), when
+   *  present — carried through for {@link api.projectPlans.altitudes}'s
+   *  prompt context, not otherwise rendered. */
+  stage?: string | null;
+  /** PROJECT-altitude synthesis (server/lib/value-summary.js) — a short
+   *  phrase naming what this unit is part of. `undefined` until {@link
+   *  api.projectPlans.altitudes} has been asked; `null` if that request
+   *  came back without an entry for this unit (LLM off/unavailable). */
+  projectSummary?: string | null;
+  /** STAKEHOLDER-altitude synthesis — one plain sentence a non-technical
+   *  reader could act on. Same availability contract as {@link
+   *  ValueUnit.projectSummary}. */
+  stakeholderSummary?: string | null;
 }
 
 /** One case-variant/unmapped-cwd/worktree-fold warning surfaced by

@@ -147,6 +147,7 @@ const FILE_DISPOSITIONS = {
   "server/lib/usage-captures-db.js": "scanned",
   "server/lib/usage-fetch-oauth.js": "scanned",
   "server/lib/value-ledger.js": "scanned",
+  "server/lib/value-summary.js": "scanned",
   "server/lib/webhook-providers.js": "scanned",
   "server/lib/webhooks.js": "scanned",
   "server/lib/workflow-ingest.js": "scanned",

@@ -9,7 +9,10 @@
  * numbers render verbatim from server (mocked health.unclaimedPoolSize=37 while
  * pool array length=5 → shows 37, proving no client-side re-derivation §9.1);
  * lastClosureAt:null renders without NaN/Invalid Date; closed generation hides
- * item/claim/unclaim affordances; no raw projectDetail.* key leaks into DOM.
+ * item/claim/unclaim affordances; no raw projectDetail.* key leaks into DOM;
+ * PROJECT/STAKEHOLDER altitudes show a "generating" placeholder before
+ * api.projectPlans.altitudes resolves, then the resolved text, called exactly
+ * once per unit batch (never re-requested on an unrelated re-render).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -23,6 +26,7 @@ const mockListMock = vi.fn();
 const mockPoolMock = vi.fn();
 const mockHealthMock = vi.fn();
 const mockRefreshMock = vi.fn();
+const mockAltitudesMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -33,6 +37,7 @@ vi.mock("../../lib/api", () => ({
       claim: (...args: unknown[]) => mockClaimMock(...args),
       close: (...args: unknown[]) => mockCloseMock(...args),
       refresh: (...args: unknown[]) => mockRefreshMock(...args),
+      altitudes: (...args: unknown[]) => mockAltitudesMock(...args),
     },
   },
 }));
@@ -123,6 +128,9 @@ function makeHealth(overrides: any = {}) {
 describe("PlanLedgerPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no altitude for any unit (LLM off/unavailable) — tests that
+    // care about the resolved/generating states override this explicitly.
+    mockAltitudesMock.mockResolvedValue({ altitudes: {} });
   });
 
   it("renders 2 open plans with their nested items in the left pane", async () => {
@@ -357,5 +365,86 @@ describe("PlanLedgerPanel", () => {
     // No i18n key patterns like projectDetail.xxx should leak
     expect(containerText).not.toMatch(/projectDetail\.[a-zA-Z]/);
     expect(containerText).not.toMatch(/planLedger\.[a-zA-Z]/);
+  });
+
+  it("shows a generating placeholder for Project/Stakeholder before altitudes resolve, then the resolved text", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    let resolveAltitudes: (v: unknown) => void = () => {};
+    mockAltitudesMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveAltitudes = resolve;
+      })
+    );
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="pool-unit"]')).toBeTruthy();
+    });
+    expect(screen.getAllByText(/Generating/i).length).toBeGreaterThan(0);
+
+    resolveAltitudes({
+      altitudes: {
+        [unit.id]: {
+          project: "Part of the tracker.",
+          stakeholder: "Shipped the tracker.",
+          model: "haiku",
+          generated_at: "2026-08-04T00:00:00.000Z",
+          cached: false,
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Part of the tracker.")).toBeInTheDocument();
+      expect(screen.getByText("Shipped the tracker.")).toBeInTheDocument();
+    });
+  });
+
+  it("shows an unavailable placeholder when a unit is missing from the altitudes response", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockAltitudesMock.mockResolvedValue({ altitudes: {} });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Not available/i).length).toBe(2); // Project + Stakeholder rows
+    });
+  });
+
+  it("requests altitudes exactly once for a stable unit set (no re-request on an unrelated re-render)", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {
+        [unit.id]: { project: "P", stakeholder: "S", model: null, generated_at: "", cached: true },
+      },
+    });
+
+    const { rerender } = render(<PlanLedgerPanel projectId="proj-1" />);
+    await waitFor(() => expect(mockAltitudesMock).toHaveBeenCalledTimes(1));
+    expect(mockAltitudesMock).toHaveBeenCalledWith("proj-1", [unit]);
+
+    rerender(<PlanLedgerPanel projectId="proj-1" />);
+    await waitFor(() => expect(screen.getByText("P")).toBeInTheDocument());
+    expect(mockAltitudesMock).toHaveBeenCalledTimes(1);
   });
 });

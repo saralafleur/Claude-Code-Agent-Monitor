@@ -638,6 +638,7 @@ flowchart LR
 | `DASHBOARD_FOCUS_INFER_MODE` | `llm` | 포커스 추론 분류기: `llm`(보수적인 키워드 휴리스틱이 먼저 판단한 뒤, 기존 CLI 인증을 사용해 headless `claude -p` 실행), `heuristic`(키워드 중첩만 — 우회 작업을 절대 판정하지 않고 명확한 항목 일치만 인정) 또는 `off` |
 | `DASHBOARD_FOCUS_INFER_MODEL` | `haiku` | 포커스 추론의 `claude -p --model` 실행에 전달되는 모델 |
 | `DASHBOARD_FOCUS_SUMMARY_MODEL` | `DASHBOARD_FOCUS_INFER_MODEL`, 그다음 `haiku`로 폴백 | Focus 페이지의 "What happened in this window" 요약(`GET /api/focus-report/summary`)에 사용되는 모델 — 이해관계자용 요점이 더 강한 모델(예: `sonnet`)을 사용할 수 있게 하는 전용 재정의로, 훨씬 더 자주 실행되는 세션별 분류기는 저렴한 기본값을 유지합니다 |
+| `DASHBOARD_VALUE_SUMMARY_MODEL` | `DASHBOARD_FOCUS_SUMMARY_MODEL`, 그다음 `DASHBOARD_FOCUS_INFER_MODEL`, 그다음 `haiku`로 폴백 | Project Detail 페이지 Value Pool의 "고도" 합성(`POST /api/project-plans/altitudes`)에 사용되는 모델 — 각 풀 유닛의 원시 사실 옆에 표시되는 Project/Stakeholder 평이한 언어 수준으로, 위의 Focus 창 요약과 동일한 레벨링 메커니즘을 한 단계 더 높여 적용한 것입니다 |
 | `DASHBOARD_FOCUS_INFER_TIMEOUT_MS` | `30000` (30초) | 포커스 추론의 단일 `claude -p` 실행에 대한 강제 종료 타이머(ms)(SIGTERM 후 SIGKILL) |
 | `DASHBOARD_REMOTE_SYNC_MS` | `60000` | 원격 소스를 `rsync`로 가져오는 간격(ms). `0`으로 설정하면 원격 소스 폴링이 비활성화됩니다 |
 | `DASHBOARD_REMOTE_ACTIVE_WINDOW_MS` | `600000` (10분) | **원격 데이터 소스** 세션의 실시간 상태에 대한 신선도 윈도우. 각 동기화 시, 미러링된 트랜스크립트가 이 윈도우 내에 수정된 원격 세션은 여전히 실행 중(`active`)으로 취급되고, 미러가 이보다 오래 진행을 멈추면 세션은 `completed`로 조정됩니다. 원격 세션은 실시간 Hook을 받지 않으므로 이것이 로컬 활성 상태/오래됨 스윕(이들을 건너뜀)을 대체합니다. 느린 링크나 매우 긴 유휴 턴에는 값을 높이십시오 |

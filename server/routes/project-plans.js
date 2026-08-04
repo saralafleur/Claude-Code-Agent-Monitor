@@ -20,6 +20,7 @@ const dbModule = require("../db");
 const { broadcast } = require("../websocket");
 const planLifecycle = require("../lib/plan-lifecycle");
 const valueLedger = require("../lib/value-ledger");
+const valueSummary = require("../lib/value-summary");
 const cwdIdentity = require("../lib/cwd-identity");
 
 const { VALUE_SOURCES, ATTRIBUTION_TIERS } = valueLedger;
@@ -120,6 +121,37 @@ router.get("/history", (req, res) => {
       .json({ error: { code: "INVALID_INPUT", message: "project_id is required" } });
   }
   res.json(valueLedger.summarizeDeliveredValue(dbModule, { id: projectId }));
+});
+
+// POST /api/project-plans/altitudes {project_id, units:[{unit_key, value_source,
+// value_ref?, label?, stage?}]} - stakeholder-altitude synthesis for a
+// client-held batch of pool units (server/lib/value-summary.js, the layer
+// above /pool). Never recomputes the pool itself — callers pass the exact
+// units their own /pool fetch already resolved (DEC-16: pool assembly stays
+// value-ledger.js's alone). Always 200, even when the LLM path is
+// off/unavailable — affected units simply come back missing from
+// `altitudes`, never as an error (value-summary.js's "unavailable" contract).
+router.post("/altitudes", async (req, res) => {
+  const { project_id: projectId, units } = req.body || {};
+  if (!projectId || !Array.isArray(units)) {
+    return res
+      .status(400)
+      .json({ error: { code: "INVALID_INPUT", message: "project_id and units[] are required" } });
+  }
+  const clean = [];
+  for (const u of units) {
+    if (!u || typeof u.unit_key !== "string" || !u.unit_key) continue;
+    if (!VALUE_SOURCES.includes(u.value_source)) continue;
+    clean.push({
+      unitKey: u.unit_key,
+      value_source: u.value_source,
+      value_ref: u.value_ref != null ? String(u.value_ref) : "",
+      label: typeof u.label === "string" ? u.label : null,
+      stage: typeof u.stage === "string" ? u.stage : null,
+    });
+  }
+  const altitudes = await valueSummary.enrichPoolAltitudes(dbModule, clean);
+  res.json({ altitudes });
 });
 
 // POST /api/project-plans/import {project_id, cwd} - DEC-P2 generation-1

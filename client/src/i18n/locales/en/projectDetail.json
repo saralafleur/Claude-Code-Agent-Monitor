@@ -145,7 +145,16 @@
       "empty": "Nothing unclaimed right now.",
       "claim": "Claim",
       "claiming": "Claiming…",
-      "claimTarget": "Claim into"
+      "claimTarget": "Claim into",
+      "levels": {
+        "ground": "Ground",
+        "project": "Project",
+        "stakeholder": "Stakeholder"
+      },
+      "altitudes": {
+        "generating": "Generating…",
+        "unavailable": "Not available"
+      }
     },
     "health": {
       "unclaimedPoolSize": "Unclaimed units",
@@ -159,6 +168,47 @@
       "mechanical": "Mechanical",
       "correlational": "Correlational",
       "judgment": "Judgment"
+    },
+    "info": {
+      "buttonLabel": "About the value pool",
+      "title": "The Value Pool",
+      "subtitle": "Real work keeps happening — commits land, detours get resolved — often faster than anyone updates the plan. The pool is where that work waits until it's credited to something.",
+      "principle": "Nothing counts as delivered until it's claimed into a plan and that plan closes. Anything real that happened outside that loop sits in the pool.",
+      "feedsTitle": "What lands in the pool",
+      "feeds": {
+        "initiatives": {
+          "name": "Finished initiatives & merges",
+          "desc": "An intake effort wrapped up and its merge landed."
+        },
+        "trunk": {
+          "name": "Trunk commits",
+          "desc": "Code landed directly, outside any tracked initiative."
+        },
+        "detours": {
+          "name": "Detours",
+          "desc": "Off-plan work someone already reviewed and chose to keep."
+        },
+        "sessionLinked": {
+          "name": "Session-linked commits",
+          "desc": "A trunk commit that happened during a real, timestamped work session."
+        }
+      },
+      "tierKey": {
+        "mechanical": "a plain fact",
+        "correlational": "a fact plus a likely link",
+        "judgment": "someone already decided this counts"
+      },
+      "claimTitle": "How a unit leaves the pool",
+      "claimDesc": "Pick an open plan item, hit Claim. That's the whole gesture.",
+      "claimNote": "Claiming only runs one way. Once a unit is claimed, it never reappears in the pool — even if the same commit gets rescanned later.",
+      "healthTitle": "Why it's worth watching",
+      "healthDesc": "The three numbers above are read straight from the server, never recalculated in this panel.",
+      "healthDescs": {
+        "unclaimedPoolSize": "Delivered work not yet credited to any plan.",
+        "openPlanCount": "Plans still collecting claims, not yet closed.",
+        "lastClosure": "How long since a plan last actually closed."
+      },
+      "closing": "The real test isn't whether work got done — it's whether it got closed. A shrinking pool means the team is finishing things, not just accumulating them."
     }
   }
 }

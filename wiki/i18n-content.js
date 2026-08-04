@@ -35,6 +35,10 @@ window.__WIKI_CONTENT_I18N = {
       "回退到 <code>DASHBOARD_FOCUS_INFER_MODEL</code>，再到 <code>haiku</code>",
     "Model for the Focus page's 'What happened in this window' summary (<code>GET /api/focus-report/summary</code>) — dedicated override so the summary can use a stronger model (e.g. <code>sonnet</code>) while the per-session classifier stays cheap.":
       "Focus 页面“What happened in this window”摘要（<code>GET /api/focus-report/summary</code>）所用的模型——专用覆盖项，让摘要可以使用更强的模型（如 <code>sonnet</code>），而逐会话分类器保持廉价。",
+    "falls back to <code>DASHBOARD_FOCUS_SUMMARY_MODEL</code>, then <code>DASHBOARD_FOCUS_INFER_MODEL</code>, then <code>haiku</code>":
+      "回退到 <code>DASHBOARD_FOCUS_SUMMARY_MODEL</code>，再到 <code>DASHBOARD_FOCUS_INFER_MODEL</code>，最后到 <code>haiku</code>",
+    "Model for the Project Detail page's Value Pool 'altitude synthesis' (<code>POST /api/project-plans/altitudes</code>) — the Project/Stakeholder plain-language levels shown alongside each pool unit's raw ground fact, same leveling mechanism as the Focus window summary above, one altitude higher.":
+      "项目详情页 Value Pool“高度合成”（<code>POST /api/project-plans/altitudes</code>）所用的模型——在每个价值池单元的原始事实旁展示的 Project/Stakeholder 通俗语言级别，与上方 Focus 窗口摘要相同的分层机制，只是再抬高一个高度。",
     "Kill timer for a single focus-inference <code>claude -p</code> spawn (SIGTERM, then SIGKILL)":
       "单次焦点推断 <code>claude -p</code> 进程的终止计时器（先 SIGTERM，后 SIGKILL）",
     "<code>ccam focus …</code> run in the session's Bash tool":
@@ -1419,6 +1423,10 @@ window.__WIKI_CONTENT_I18N = {
       "lui về <code>DASHBOARD_FOCUS_INFER_MODEL</code>, rồi <code>haiku</code>",
     "Model for the Focus page's 'What happened in this window' summary (<code>GET /api/focus-report/summary</code>) — dedicated override so the summary can use a stronger model (e.g. <code>sonnet</code>) while the per-session classifier stays cheap.":
       "Model cho bản tóm tắt 'What happened in this window' của trang Focus (<code>GET /api/focus-report/summary</code>) — tùy chỉnh ghi đè chuyên dụng để bản tóm tắt có thể dùng model mạnh hơn (ví dụ <code>sonnet</code>) trong khi bộ phân loại theo phiên vẫn rẻ.",
+    "falls back to <code>DASHBOARD_FOCUS_SUMMARY_MODEL</code>, then <code>DASHBOARD_FOCUS_INFER_MODEL</code>, then <code>haiku</code>":
+      "lui về <code>DASHBOARD_FOCUS_SUMMARY_MODEL</code>, rồi <code>DASHBOARD_FOCUS_INFER_MODEL</code>, rồi <code>haiku</code>",
+    "Model for the Project Detail page's Value Pool 'altitude synthesis' (<code>POST /api/project-plans/altitudes</code>) — the Project/Stakeholder plain-language levels shown alongside each pool unit's raw ground fact, same leveling mechanism as the Focus window summary above, one altitude higher.":
+      "Model cho phần 'tổng hợp cấp độ' của Value Pool trên trang Project Detail (<code>POST /api/project-plans/altitudes</code>) — các cấp độ Project/Stakeholder bằng ngôn ngữ đơn giản hiển thị cạnh sự kiện gốc của mỗi đơn vị trong pool, cùng cơ chế phân cấp như bản tóm tắt cửa sổ Focus ở trên, chỉ ở một tầm cao hơn.",
     "Kill timer for a single focus-inference <code>claude -p</code> spawn (SIGTERM, then SIGKILL)":
       "Bộ đếm giờ kết thúc cho một lần chạy <code>claude -p</code> của suy luận focus (SIGTERM, rồi SIGKILL)",
     "<code>ccam focus …</code> run in the session's Bash tool":

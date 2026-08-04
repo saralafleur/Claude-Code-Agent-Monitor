@@ -4706,6 +4706,23 @@ components:
           nullable: true
         openPlanCount:
           type: integer
+    ValueUnitAltitude:
+      type: object
+      description: PROJECT/STAKEHOLDER altitude synthesis for one value-pool unit (server/lib/value-summary.js) — the layer above the pool's own GROUND fact.
+      properties:
+        project:
+          type: string
+          description: Short phrase naming what this unit is part of.
+        stakeholder:
+          type: string
+          description: One plain, jargon-free sentence a non-technical reader could act on.
+        model:
+          type: string
+          nullable: true
+        generated_at:
+          type: string
+        cached:
+          type: boolean
     LedgerHistory:
       type: object
       description: 'AC-6 whole-life summary: closed generations and their claims, no archaeology.'
@@ -11536,6 +11553,68 @@ paths:
                 $ref: '#/components/schemas/LedgerHistory'
         '400':
           description: project_id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/project-plans/altitudes:
+    post:
+      tags:
+        - Portfolio Plans
+      operationId: getValuePoolAltitudes
+      summary: PROJECT/STAKEHOLDER altitude synthesis for a client-held batch of /pool units (never re-derives the pool itself)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - project_id
+                - units
+              properties:
+                project_id:
+                  type: string
+                units:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - unit_key
+                      - value_source
+                    properties:
+                      unit_key:
+                        type: string
+                      value_source:
+                        type: string
+                        enum:
+                          - trunk_commit
+                          - merge_commit
+                          - intake_initiative
+                          - detour
+                          - focus_segment
+                      value_ref:
+                        type: string
+                      label:
+                        type: string
+                        nullable: true
+                      stage:
+                        type: string
+                        nullable: true
+      responses:
+        '200':
+          description: Altitudes keyed by unit_key. A unit absent from the map means no altitude could be produced this round (LLM off/unavailable) — never an error.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  altitudes:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/ValueUnitAltitude'
+        '400':
+          description: project_id or units[] missing
           content:
             application/json:
               schema:
