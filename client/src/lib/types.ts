@@ -2775,14 +2775,15 @@ export interface ColorThresholds {
   redAt: number;
 }
 
-/** The Usage page's global color thresholds: GET/PUT /api/color-thresholds's
+/** The Usage page's global Configuration: GET/PUT /api/color-thresholds's
  *  response shape, and the payload of `color_thresholds_updated` WebSocket
- *  pushes. Four independent scopes - the session (5h) window and the weekly
- *  window are separate quotas, each with its own bands, and the Consumption
- *  Rate card's runway-risk percentage (how much of a window's remaining
- *  time a predicted burn-rate trend would eat before that window resets)
- *  gets its own pair of bands too, since a burn-rate risk isn't the same
- *  quantity as a raw percentage-used. */
+ *  pushes. Four independent color-band scopes - the session (5h) window and
+ *  the weekly window are separate quotas, each with its own bands, and the
+ *  Consumption Rate card's runway-risk percentage (how much of a window's
+ *  remaining time a predicted burn-rate trend would eat before that window
+ *  resets) gets its own pair of bands too, since a burn-rate risk isn't the
+ *  same quantity as a raw percentage-used - plus one standalone scalar,
+ *  `rotationSwitchPct`, that isn't a three-band scope at all. */
 export interface ColorThresholdsConfig {
   /** Bands for anything driven by `latest_session_window_pct`. */
   session: ColorThresholds;
@@ -2792,6 +2793,11 @@ export interface ColorThresholdsConfig {
   sessionRate: ColorThresholds;
   /** Bands for the Consumption Rate card's weekly-window runway risk. */
   weeklyRate: ColorThresholds;
+  /** The weekly-window percentage at which the Rotation Plan hands off to
+   *  the next account, leaving that much headroom unspent on the outgoing
+   *  one instead of riding it to a literal 100% (see `computeRotationPlan`
+   *  in Usage.tsx). A plain 0-100 percentage, not a three-band scope. */
+  rotationSwitchPct: number;
 }
 
 /** One user-adjustable numeric field on a {@link PlaybookPractice} (e.g. the

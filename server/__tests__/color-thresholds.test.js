@@ -1,8 +1,9 @@
 /**
- * @file Tests for the global Usage-page color thresholds: the
+ * @file Tests for the global Usage-page Configuration: the
  * /api/color-thresholds route's GET/PUT CRUD across its four independent
- * scopes (session, weekly, sessionRate, weeklyRate), partial-patch
- * behavior, and input validation.
+ * color-band scopes (session, weekly, sessionRate, weeklyRate) plus the
+ * standalone rotationSwitchPct scalar, partial-patch behavior, and input
+ * validation.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -64,6 +65,7 @@ const DEFAULTS = {
   weekly: { yellowAt: 50, orangeAt: 80, redAt: 100 },
   sessionRate: { yellowAt: 0.5, orangeAt: 1.0, redAt: 1.5 },
   weeklyRate: { yellowAt: 0.5, orangeAt: 1.0, redAt: 1.5 },
+  rotationSwitchPct: 80,
 };
 
 before(async () => {
@@ -91,7 +93,7 @@ beforeEach(async () => {
 });
 
 describe("GET /api/color-thresholds", () => {
-  it("returns the default bands for all four scopes on a fresh DB", async () => {
+  it("returns the default bands for all four scopes plus rotationSwitchPct on a fresh DB", async () => {
     const res = await get("/api/color-thresholds");
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, DEFAULTS);
@@ -99,12 +101,13 @@ describe("GET /api/color-thresholds", () => {
 });
 
 describe("PUT /api/color-thresholds", () => {
-  it("persists a full set of thresholds for all four scopes and a follow-up GET reflects it", async () => {
+  it("persists a full set of thresholds for all four scopes plus rotationSwitchPct and a follow-up GET reflects it", async () => {
     const thresholds = {
       session: { yellowAt: 30, orangeAt: 60, redAt: 90 },
       weekly: { yellowAt: 40, orangeAt: 70, redAt: 95 },
       sessionRate: { yellowAt: 35, orangeAt: 65, redAt: 92 },
       weeklyRate: { yellowAt: 45, orangeAt: 75, redAt: 98 },
+      rotationSwitchPct: 65,
     };
     const putRes = await put("/api/color-thresholds", thresholds);
     assert.equal(putRes.status, 200);
@@ -112,6 +115,19 @@ describe("PUT /api/color-thresholds", () => {
 
     const getRes = await get("/api/color-thresholds");
     assert.deepEqual(getRes.body, thresholds);
+  });
+
+  it("patches rotationSwitchPct independently, leaving every color scope untouched", async () => {
+    const res = await put("/api/color-thresholds", { rotationSwitchPct: 70 });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.rotationSwitchPct, 70);
+    assert.deepEqual(res.body.session, DEFAULTS.session);
+    assert.deepEqual(res.body.weekly, DEFAULTS.weekly);
+    assert.deepEqual(res.body.sessionRate, DEFAULTS.sessionRate);
+    assert.deepEqual(res.body.weeklyRate, DEFAULTS.weeklyRate);
+
+    const getRes = await get("/api/color-thresholds");
+    assert.equal(getRes.body.rotationSwitchPct, 70);
   });
 
   it("patches only the given scope, leaving the others untouched", async () => {
@@ -165,6 +181,9 @@ describe("PUT /api/color-thresholds", () => {
       "weeklyRate.yellowAt equal to weeklyRate.orangeAt",
       { weeklyRate: { yellowAt: 80, orangeAt: 80 } },
     ],
+    ["rotationSwitchPct not a number", { rotationSwitchPct: "80" }],
+    ["rotationSwitchPct at 0 (below the min)", { rotationSwitchPct: 0 }],
+    ["rotationSwitchPct at 100 (above the max)", { rotationSwitchPct: 100 }],
   ];
   for (const [name, body] of rejects) {
     it(`rejects ${name} with a 400 + structured error`, async () => {

@@ -55,6 +55,10 @@
     "loadFailed": "계정을 불러오지 못했습니다.",
     "captured": "{{when}} 캡처됨",
     "emptyHistory": "이 계정의 캡처가 아직 없습니다",
+    "healthSummary": {
+      "status": "{{connected}}/{{total}} 연결됨",
+      "hint": "연결된 계정(마지막 캡처 성공) 수와 확인이 필요한 계정(로그인 필요, 오류, 또는 캡처된 적 없음) 수입니다."
+    },
     "status": {
       "idle": "아직 캡처되지 않음",
       "ok": "정상",
@@ -107,18 +111,22 @@
       "resets": "{{label}} 리셋"
     },
     "colorThresholds": {
-      "title": "색상 임계값",
-      "subtitle": "이 페이지 전체에 적용되는 초록 → 노랑 → 주황 → 빨강 사용량 색상 전환 지점을 설정합니다.",
+      "title": "설정",
+      "subtitle": "이 페이지 전체에 적용되는 초록 → 노랑 → 주황 → 빨강 사용량 색상 전환 지점과 로테이션 계획의 계정 전환 임계값을 설정합니다.",
       "scope": {
         "session": "세션 윈도우 (5시간)",
         "weekly": "주간 윈도우",
         "sessionRate": "세션 소비 속도",
-        "weeklyRate": "주간 소비 속도"
+        "weeklyRate": "주간 소비 속도",
+        "rotation": "로테이션 계획"
       },
       "rateScopeDescription": "백분율이 아닌 지속 가능한 속도의 배수로 측정됩니다 — 1.0은 리셋 시점에 정확히 100%에 도달할 만큼의 속도로 소비 중임을 의미합니다. 일반적으로 0.5에서 1.5 사이로 설정합니다.",
       "yellowLabel": "노랑 시작 지점",
       "orangeLabel": "주황 시작 지점",
       "redLabel": "빨강 시작 지점",
+      "rotationSwitchLabel": "계정 전환 시점",
+      "rotationSwitchDescription": "로테이션 계획이 다음 계정으로 넘어가는 주간 윈도우 비율입니다 — 이 값만큼 여유를 남겨두고, 현재 계정을 100%까지 소진하지 않습니다.",
+      "rotationSwitchSummary": "{{switchPct}}%에서 전환됩니다 — 주간 윈도우의 {{reservePct}}%가 여유분으로 남습니다.",
       "save": "저장",
       "saving": "저장 중…",
       "saveFailed": "임계값 저장에 실패했습니다.",

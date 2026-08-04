@@ -390,12 +390,14 @@ const UPGRADE_CASES = [
     };
     const assertWritable = (db) => {
       const { stmts } = require("../db");
-      // updateColorThresholds now takes 12 positional params (session,
-      // weekly, sessionRate, weeklyRate x 3 fields each — see the
-      // session_rate/weekly_rate split case below); only the first is
-      // exercised here, the rest COALESCE through untouched.
+      // updateColorThresholds now takes 13 positional params (session,
+      // weekly, sessionRate, weeklyRate x 3 fields each, plus the trailing
+      // rotationSwitchPct scalar — see the session_rate/weekly_rate and
+      // rotation_switch_pct cases below); only the first is exercised here,
+      // the rest COALESCE through untouched.
       stmts.updateColorThresholds.run(
         60,
+        null,
         null,
         null,
         null,
@@ -487,6 +489,7 @@ const UPGRADE_CASES = [
         null,
         null,
         null,
+        null,
         null
       );
       const row = db
@@ -513,6 +516,85 @@ const UPGRADE_CASES = [
       assertLegacyRow,
       assertWritable,
     }));
+  })(),
+  // rotation_switch_pct (the Rotation Plan's account-handoff threshold) —
+  // another pure new column on an already-split, already-rate-columned
+  // color_thresholds table, same "takes its own DEFAULT, nothing to
+  // backfill from" pattern as the session_rate/weekly_rate case above.
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS color_thresholds (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        session_yellow_at REAL NOT NULL DEFAULT 50,
+        session_orange_at REAL NOT NULL DEFAULT 80,
+        session_red_at REAL NOT NULL DEFAULT 100,
+        weekly_yellow_at REAL NOT NULL DEFAULT 50,
+        weekly_orange_at REAL NOT NULL DEFAULT 80,
+        weekly_red_at REAL NOT NULL DEFAULT 100,
+        session_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
+        session_rate_orange_at REAL NOT NULL DEFAULT 1.0,
+        session_rate_red_at REAL NOT NULL DEFAULT 1.5,
+        weekly_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
+        weekly_rate_orange_at REAL NOT NULL DEFAULT 1.0,
+        weekly_rate_red_at REAL NOT NULL DEFAULT 1.5,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      )
+    `;
+    const seed = (legacyDb) => {
+      legacyDb
+        .prepare(
+          `INSERT OR REPLACE INTO color_thresholds
+             (id, session_yellow_at, session_orange_at, session_red_at,
+              weekly_yellow_at, weekly_orange_at, weekly_red_at,
+              session_rate_yellow_at, session_rate_orange_at, session_rate_red_at,
+              weekly_rate_yellow_at, weekly_rate_orange_at, weekly_rate_red_at)
+           VALUES (1, 40, 70, 90, 45, 75, 95, 0.4, 0.9, 1.4, 0.45, 0.95, 1.45)`
+        )
+        .run();
+    };
+    const assertLegacyRow = (db) => {
+      const row = db.prepare("SELECT * FROM color_thresholds WHERE id = 1").get();
+      assert.ok(row, "color_thresholds row should exist after migration");
+      // Pre-existing scopes are untouched by this migration.
+      assert.equal(row.session_yellow_at, 40);
+      assert.equal(row.weekly_rate_red_at, 1.45);
+      // The new scalar takes its own seeded default, not a backfill.
+      assert.equal(row.rotation_switch_pct, 80, "rotation_switch_pct should default to 80");
+    };
+    const assertWritable = (db) => {
+      const { stmts } = require("../db");
+      stmts.updateColorThresholds.run(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        70
+      );
+      const row = db.prepare("SELECT rotation_switch_pct FROM color_thresholds WHERE id = 1").get();
+      assert.equal(
+        row.rotation_switch_pct,
+        70,
+        "rotation_switch_pct should be settable on a migrated row"
+      );
+    };
+    return [
+      {
+        table: "color_thresholds",
+        column: "rotation_switch_pct",
+        legacySql,
+        seed,
+        assertLegacyRow,
+        assertWritable,
+      },
+    ];
   })(),
 ];
 
@@ -915,6 +997,89 @@ describe("Migration: color_thresholds session_rate/weekly_rate columns", () => {
       .all()
       .filter((c) => c.name === "session_rate_yellow_at").length;
     assert.equal(count2, 1, "should still have exactly one session_rate_yellow_at column");
+    db2.close();
+  });
+});
+
+describe("Migration: color_thresholds rotation_switch_pct column", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "color_thresholds" && uc.column === "rotation_switch_pct"
+  );
+
+  before(() => {
+    tempDbPath = path.join(
+      os.tmpdir(),
+      `db-migration-color-thresholds-rotation-test-${Date.now()}.db`
+    );
+
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+
+    // Run the pre-rotation_switch_pct schema (already split and rate-columned).
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("adds rotation_switch_pct via ALTER TABLE, defaulted (not backfilled)", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(color_thresholds)").all();
+    assert.ok(
+      tableInfo.some((col) => col.name === "rotation_switch_pct"),
+      "rotation_switch_pct column should exist after migration"
+    );
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate the column", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(color_thresholds)")
+      .all()
+      .filter((c) => c.name === "rotation_switch_pct").length;
+    assert.equal(count1, 1, "should have exactly one rotation_switch_pct column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(color_thresholds)")
+      .all()
+      .filter((c) => c.name === "rotation_switch_pct").length;
+    assert.equal(count2, 1, "should still have exactly one rotation_switch_pct column");
     db2.close();
   });
 });

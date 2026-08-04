@@ -1,15 +1,17 @@
 /**
  * @file colorThresholds.ts
- * @description Server-backed store for the Usage page's global green/
- * yellow/orange/red color thresholds - shared across every computer
- * connected to this dashboard (this app has no user accounts, so there is
- * exactly one setting for everyone). Four independent scopes: `session` and
- * `weekly` (raw %-used, the session (5h) window and the weekly window are
- * separate quotas that shouldn't have to share one ramp) plus `sessionRate`
- * and `weeklyRate` (the Consumption Rate card's pace-ratio - a raw
- * multiplier of sustainable pace, e.g. `1.5` for "1.5x sustainable pace,"
- * not a 0-100 percentage like the other two scopes - so it gets its own
- * pair of bands on its own scale).
+ * @description Server-backed store for the Usage page's global
+ * Configuration - shared across every computer connected to this dashboard
+ * (this app has no user accounts, so there is exactly one setting for
+ * everyone). Four independent green/yellow/orange/red color-band scopes:
+ * `session` and `weekly` (raw %-used, the session (5h) window and the
+ * weekly window are separate quotas that shouldn't have to share one ramp)
+ * plus `sessionRate` and `weeklyRate` (the Consumption Rate card's
+ * pace-ratio - a raw multiplier of sustainable pace, e.g. `1.5` for "1.5x
+ * sustainable pace," not a 0-100 percentage like the other two scopes - so
+ * it gets its own pair of bands on its own scale). Plus one standalone
+ * scalar, `rotationSwitchPct`: the Rotation Plan's account-handoff
+ * threshold.
  * Hydrated from
  * GET /api/color-thresholds on first subscribe and kept live via
  * `color_thresholds_updated` WebSocket pushes - mirrors monitorGroups.ts's
@@ -49,11 +51,17 @@ export const DEFAULT_RATE_COLOR_THRESHOLDS: ColorThresholds = {
   redAt: 1.5,
 };
 
+/** Matches the server's own seed row (server/db.js) for the Rotation Plan's
+ *  account-handoff threshold - used until the first real hydrate resolves,
+ *  and as the fallback if the server is unreachable. */
+export const DEFAULT_ROTATION_SWITCH_PCT = 80;
+
 export const DEFAULT_COLOR_THRESHOLDS_CONFIG: ColorThresholdsConfig = {
   session: DEFAULT_COLOR_THRESHOLDS,
   weekly: DEFAULT_COLOR_THRESHOLDS,
   sessionRate: DEFAULT_RATE_COLOR_THRESHOLDS,
   weeklyRate: DEFAULT_RATE_COLOR_THRESHOLDS,
+  rotationSwitchPct: DEFAULT_ROTATION_SWITCH_PCT,
 };
 
 function isValidScope(value: unknown): value is ColorThresholds {
@@ -103,7 +111,8 @@ eventBus.subscribe((msg: WSMessage) => {
       !isValidScope(data.session) ||
       !isValidScope(data.weekly) ||
       !isValidScope(data.sessionRate) ||
-      !isValidScope(data.weeklyRate)
+      !isValidScope(data.weeklyRate) ||
+      typeof data.rotationSwitchPct !== "number"
     )
       return;
     setSnapshot(data);
@@ -165,12 +174,14 @@ export const colorThresholdsStore = {
     weekly?: Partial<ColorThresholds>;
     sessionRate?: Partial<ColorThresholds>;
     weeklyRate?: Partial<ColorThresholds>;
+    rotationSwitchPct?: number;
   }): Promise<ColorThresholdsConfig> {
     const optimistic: ColorThresholdsConfig = {
       session: { ...snapshot.session, ...patch.session },
       weekly: { ...snapshot.weekly, ...patch.weekly },
       sessionRate: { ...snapshot.sessionRate, ...patch.sessionRate },
       weeklyRate: { ...snapshot.weeklyRate, ...patch.weeklyRate },
+      rotationSwitchPct: patch.rotationSwitchPct ?? snapshot.rotationSwitchPct,
     };
     setSnapshot(optimistic);
     return api.colorThresholds.update(patch).then((result) => {

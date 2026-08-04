@@ -2142,23 +2142,29 @@ export const api = {
 
   colorThresholds: {
     /**
-     * GET /api/color-thresholds — the Usage page's global green/yellow/
-     * orange/red color bands for both the session and weekly scopes,
-     * shared across every computer connected to this dashboard.
+     * GET /api/color-thresholds — the Usage page's global Configuration:
+     * green/yellow/orange/red color bands across all four scopes plus the
+     * Rotation Plan's `rotationSwitchPct`, shared across every computer
+     * connected to this dashboard.
      * @returns {@link ColorThresholdsConfig}.
      */
     get: () => request<ColorThresholdsConfig>("/color-thresholds"),
     /**
-     * PUT /api/color-thresholds — patch either/both scopes, and within a
-     * scope any subset of its three fields. Every other connected client
-     * picks up the change live over the `color_thresholds_updated`
-     * WebSocket push, not just on next load.
-     * @param data A partial patch, e.g. `{ session: { redAt: 95 } }`.
+     * PUT /api/color-thresholds — patch any subset of the four color-band
+     * scopes (and within a scope any subset of its three fields) plus/or
+     * `rotationSwitchPct`. Every other connected client picks up the
+     * change live over the `color_thresholds_updated` WebSocket push, not
+     * just on next load.
+     * @param data A partial patch, e.g. `{ session: { redAt: 95 } }` or
+     *   `{ rotationSwitchPct: 85 }`.
      * @returns The full resulting {@link ColorThresholdsConfig}.
      */
     update: (data: {
       session?: Partial<ColorThresholdsConfig["session"]>;
       weekly?: Partial<ColorThresholdsConfig["weekly"]>;
+      sessionRate?: Partial<ColorThresholdsConfig["sessionRate"]>;
+      weeklyRate?: Partial<ColorThresholdsConfig["weeklyRate"]>;
+      rotationSwitchPct?: number;
     }) =>
       request<ColorThresholdsConfig>("/color-thresholds", {
         method: "PUT",

@@ -55,6 +55,10 @@
     "loadFailed": "Failed to load accounts.",
     "captured": "Captured {{when}}",
     "emptyHistory": "No captures yet for this account",
+    "healthSummary": {
+      "status": "{{connected}}/{{total}} connected",
+      "hint": "How many of your accounts are connected (last capture succeeded) vs. need attention (needs login, errored, or never captured)."
+    },
     "status": {
       "idle": "Not captured yet",
       "ok": "OK",
@@ -107,18 +111,22 @@
       "resets": "{{label}} resets"
     },
     "colorThresholds": {
-      "title": "Color thresholds",
-      "subtitle": "Configure where the green → yellow → orange → red usage colors switch over, applied across this page.",
+      "title": "Configuration",
+      "subtitle": "Configure where the green → yellow → orange → red usage colors switch over, applied across this page, plus the Rotation Plan's account-handoff threshold.",
       "scope": {
         "session": "Session window (5h)",
         "weekly": "Weekly window",
         "sessionRate": "Session consumption rate",
-        "weeklyRate": "Weekly consumption rate"
+        "weeklyRate": "Weekly consumption rate",
+        "rotation": "Rotation plan"
       },
       "rateScopeDescription": "Measured as a multiple of sustainable pace, not a percentage — 1.0 means burning exactly fast enough to hit 100% right at reset. Typically set between 0.5 and 1.5.",
       "yellowLabel": "Yellow starts at",
       "orangeLabel": "Orange starts at",
       "redLabel": "Red starts at",
+      "rotationSwitchLabel": "Switch accounts at",
+      "rotationSwitchDescription": "Percentage of the weekly window at which the Rotation Plan hands off to the next account — leaving this much headroom unspent on the outgoing one instead of running it to 100%.",
+      "rotationSwitchSummary": "Hands off at {{switchPct}}% — leaving {{reservePct}}% of the weekly window in reserve.",
       "save": "Save",
       "saving": "Saving…",
       "saveFailed": "Failed to save thresholds.",

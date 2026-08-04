@@ -1435,6 +1435,7 @@ db.exec(`
     weekly_rate_yellow_at REAL NOT NULL DEFAULT 0.5,
     weekly_rate_orange_at REAL NOT NULL DEFAULT 1.0,
     weekly_rate_red_at REAL NOT NULL DEFAULT 1.5,
+    rotation_switch_pct REAL NOT NULL DEFAULT 80,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   );
 `);
@@ -1458,6 +1459,19 @@ if (!colorThresholdsRateColumns.some((col) => col.name === "session_rate_yellow_
     ALTER TABLE color_thresholds ADD COLUMN weekly_rate_yellow_at REAL NOT NULL DEFAULT 0.5;
     ALTER TABLE color_thresholds ADD COLUMN weekly_rate_orange_at REAL NOT NULL DEFAULT 1.0;
     ALTER TABLE color_thresholds ADD COLUMN weekly_rate_red_at REAL NOT NULL DEFAULT 1.5;
+  `);
+}
+
+// Migrate: rotation_switch_pct (the Rotation Plan's account-handoff
+// threshold - the Usage.tsx projection switches to the next account once
+// the active one crosses this percentage, leaving that buffer unspent
+// rather than riding it to a literal 100%) was added after this table's
+// first release. Same additive, default-seeded backfill as the rate
+// columns above - a purely new column, not a reshaped existing scope.
+const colorThresholdsRotationColumns = db.prepare("PRAGMA table_info(color_thresholds)").all();
+if (!colorThresholdsRotationColumns.some((col) => col.name === "rotation_switch_pct")) {
+  db.exec(`
+    ALTER TABLE color_thresholds ADD COLUMN rotation_switch_pct REAL NOT NULL DEFAULT 80;
   `);
 }
 
@@ -2171,9 +2185,10 @@ const stmts = {
      WHERE id = 1`
   ),
 
-  // ── Color thresholds (global Usage-page green/yellow/orange/red bands,
-  //    independently configurable for session, weekly, session-rate, and
-  //    weekly-rate) ──────────────────────────────────────────────────────
+  // ── Color thresholds (global Usage-page configuration: green/yellow/
+  //    orange/red bands independently configurable for session, weekly,
+  //    session-rate, and weekly-rate, plus the Rotation Plan's
+  //    rotation_switch_pct handoff threshold) ─────────────────────────────
   getColorThresholds: db.prepare("SELECT * FROM color_thresholds WHERE id = 1"),
   updateColorThresholds: db.prepare(
     `UPDATE color_thresholds SET
@@ -2189,6 +2204,7 @@ const stmts = {
        weekly_rate_yellow_at = COALESCE(?, weekly_rate_yellow_at),
        weekly_rate_orange_at = COALESCE(?, weekly_rate_orange_at),
        weekly_rate_red_at = COALESCE(?, weekly_rate_red_at),
+       rotation_switch_pct = COALESCE(?, rotation_switch_pct),
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = 1`
   ),

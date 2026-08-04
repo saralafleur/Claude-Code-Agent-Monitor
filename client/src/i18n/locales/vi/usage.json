@@ -55,6 +55,10 @@
     "loadFailed": "Không thể tải danh sách tài khoản.",
     "captured": "Đã ghi lại {{when}}",
     "emptyHistory": "Chưa có lần ghi lại nào cho tài khoản này",
+    "healthSummary": {
+      "status": "{{connected}}/{{total}} đã kết nối",
+      "hint": "Có bao nhiêu tài khoản đang kết nối (lần ghi lại gần nhất thành công) so với cần chú ý (cần đăng nhập, bị lỗi, hoặc chưa từng ghi lại)."
+    },
     "status": {
       "idle": "Chưa ghi lại",
       "ok": "OK",
@@ -107,18 +111,22 @@
       "resets": "{{label}} đặt lại"
     },
     "colorThresholds": {
-      "title": "Ngưỡng màu sắc",
-      "subtitle": "Cấu hình điểm chuyển màu xanh lá → vàng → cam → đỏ, áp dụng cho toàn bộ trang này.",
+      "title": "Cấu hình",
+      "subtitle": "Cấu hình điểm chuyển màu xanh lá → vàng → cam → đỏ áp dụng cho toàn bộ trang này, cùng với ngưỡng chuyển tài khoản của Kế hoạch xoay vòng.",
       "scope": {
         "session": "Cửa sổ phiên (5 giờ)",
         "weekly": "Cửa sổ tuần",
         "sessionRate": "Tốc độ tiêu thụ phiên",
-        "weeklyRate": "Tốc độ tiêu thụ hàng tuần"
+        "weeklyRate": "Tốc độ tiêu thụ hàng tuần",
+        "rotation": "Kế hoạch xoay vòng"
       },
       "rateScopeDescription": "Được đo bằng bội số của tốc độ bền vững, không phải phần trăm — 1.0 nghĩa là đang tiêu thụ đúng bằng tốc độ để chạm 100% ngay lúc đặt lại. Thường đặt trong khoảng 0.5 đến 1.5.",
       "yellowLabel": "Vàng bắt đầu ở",
       "orangeLabel": "Cam bắt đầu ở",
       "redLabel": "Đỏ bắt đầu ở",
+      "rotationSwitchLabel": "Chuyển tài khoản ở mức",
+      "rotationSwitchDescription": "Phần trăm của cửa sổ tuần mà tại đó Kế hoạch xoay vòng chuyển sang tài khoản tiếp theo — để lại khoảng dự phòng này thay vì dùng tài khoản hiện tại đến 100%.",
+      "rotationSwitchSummary": "Chuyển ở mức {{switchPct}}% — để lại {{reservePct}}% cửa sổ tuần làm dự phòng.",
       "save": "Lưu",
       "saving": "Đang lưu…",
       "saveFailed": "Lưu ngưỡng thất bại.",

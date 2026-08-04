@@ -278,33 +278,49 @@ interface RotationPlanSegment {
   label: string;
   startAt: number;
   endAt: number;
-  /** `"exhausted"` - this account is projected to hit 100% of its weekly
-   *  window here, before its own reset, so the plan hands off to the next
-   *  account. `"horizon"` - this account is sustainable (its trend would
-   *  reset before crossing 100%, or there's no rate data at all) and the
-   *  segment simply ends at the projection horizon. */
+  /** `"exhausted"` - this account is projected to reach the configured
+   *  switch threshold (`switchThresholdPct`, not literal 100%) here, before
+   *  its own reset, so the plan hands off to the next account while a
+   *  safety buffer of real capacity is still unspent. `"horizon"` - this
+   *  account is sustainable (its trend would reset before crossing the
+   *  threshold, or there's no rate data at all) and the segment simply ends
+   *  at the projection horizon. */
   reason: "exhausted" | "horizon";
 }
 
 /**
  * Projects which account to be on, and until when, over the coming
- * `horizonMs` - a greedy simulation, not a guarantee. At each step it picks
- * whichever not-yet-capped account has the most weekly runway if it became
- * the active one (using `activeBurnRateProxy` as the assumed active pace),
- * runs it until it would either cross 100% or the horizon ends, then
- * advances every account's simulated state - the active one climbs at the
- * proxy pace, every other account drifts at its own (idle) observed rate,
- * and any account whose weekly reset falls inside the elapsed window snaps
- * back to 0% with its next reset pushed out another 7 days - before picking
- * the next segment. Starts from whichever account `is_active` reports,
- * falling back to the best-runway pick when that account is already capped
+ * `horizonMs` - a greedy simulation, not a guarantee. `switchThresholdPct`
+ * (the Configuration card's `rotationSwitchPct`, default 80) is how much of
+ * the weekly window, in percentage points, the plan deliberately leaves
+ * unspent on the active account before handing off to the next one, instead
+ * of riding it to a literal 100%. Two reasons: (1) the burn-rate projection
+ * is an estimate, not a guarantee - a proactive handoff tolerates the plan
+ * being somewhat wrong without landing on a mid-task hard stop with zero
+ * warning; (2) it keeps a small reserve of real capacity on the outgoing
+ * account in case the incoming one turns out to have less headroom than
+ * projected (e.g. unplanned use, or its own reset is further out than
+ * expected) - so exhausting one account never means there is truly nowhere
+ * left to rotate to.
+ *
+ * At each step this picks whichever not-yet-capped account has the most
+ * weekly runway if it became the active one (using `activeBurnRateProxy` as
+ * the assumed active pace), runs it until it would either cross
+ * `switchThresholdPct` or the horizon ends, then advances every account's
+ * simulated state - the active one climbs at the proxy pace, every other
+ * account drifts at its own (idle) observed rate, and any account whose
+ * weekly reset falls inside the elapsed window snaps back to 0% with its
+ * next reset pushed out another 7 days - before picking the next segment.
+ * Starts from whichever account `is_active` reports, falling back to the
+ * best-runway pick when that account is already past the switch threshold
  * or unset. Returns `[]` when no account is usable (enabled + `status:
- * "ok"` + has weekly data) or none has a positive weekly rate yet to build a
- * proxy pace from.
+ * "ok"` + has weekly data) or none has a positive weekly rate yet to build
+ * a proxy pace from.
  */
 function computeRotationPlan(
   accounts: Account[],
   now: number,
+  switchThresholdPct: number,
   horizonMs: number = 9 * 24 * 3_600_000
 ): RotationPlanSegment[] {
   const usable = accounts.filter(
@@ -332,8 +348,8 @@ function computeRotationPlan(
     let best: (typeof state)[number] | null = null;
     let bestRunway = -Infinity;
     for (const s of state) {
-      if (s.pct >= 100) continue;
-      const runway = (100 - s.pct) / pace;
+      if (s.pct >= switchThresholdPct) continue;
+      const runway = (switchThresholdPct - s.pct) / pace;
       if (runway > bestRunway) {
         bestRunway = runway;
         best = s;
@@ -344,7 +360,8 @@ function computeRotationPlan(
 
   const activeAccount = accounts.find((account) => account.is_active);
   const activeFromFlag = activeAccount && state.find((s) => s.id === activeAccount.id);
-  let active = activeFromFlag && activeFromFlag.pct < 100 ? activeFromFlag : pickNext();
+  let active =
+    activeFromFlag && activeFromFlag.pct < switchThresholdPct ? activeFromFlag : pickNext();
 
   const segments: RotationPlanSegment[] = [];
   const horizonEnd = now + horizonMs;
@@ -352,7 +369,7 @@ function computeRotationPlan(
   let t = now;
 
   while (active && t < horizonEnd && segments.length < maxSegments) {
-    const remaining = 100 - active.pct;
+    const remaining = switchThresholdPct - active.pct;
     const exhaustAt = t + (remaining / pace) * 3_600_000;
     const willExhaustFirst = exhaustAt <= active.resetAt && exhaustAt < horizonEnd;
     const endAt = willExhaustFirst ? exhaustAt : horizonEnd;
@@ -370,7 +387,7 @@ function computeRotationPlan(
       s.pct =
         s.id === active.id
           ? willExhaustFirst
-            ? 100
+            ? switchThresholdPct
             : s.pct + (pace * elapsedMs) / 3_600_000
           : Math.min(100, Math.max(0, s.pct + (s.idleRatePerHour * elapsedMs) / 3_600_000));
       while (s.resetAt <= endAt) {
@@ -664,6 +681,13 @@ function AccountsPanel({
   // cards below it, and most sessions only need to glance at account status.
   const [collapsed, setCollapsed] = useState(true);
 
+  // Connected == last capture succeeded ("ok"); idle/needs_login/error all
+  // read as "not connected" here - collapsed, this is the only signal of
+  // account health still visible without expanding the row-by-row list.
+  const connectedCount = accounts.filter((a) => a.status === "ok").length;
+  const allConnected = accounts.length > 0 && connectedCount === accounts.length;
+  const noneConnected = connectedCount === 0;
+
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
     if (!newLabel.trim() || !newConfigDir.trim()) return;
@@ -751,6 +775,30 @@ function AccountsPanel({
           )}
           <Users className="w-4 h-4 text-gray-400" />
           <h2 className="text-sm font-semibold text-gray-200">{t("accounts.title")}</h2>
+          {collapsed && accounts.length > 0 && (
+            <span
+              title={t("accounts.healthSummary.hint")}
+              className={`badge ${
+                allConnected
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                  : noneConnected
+                    ? "bg-red-500/10 border-red-500/30 text-red-400"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+              }`}
+            >
+              {allConnected ? (
+                <CheckCircle2 className="w-3 h-3" />
+              ) : noneConnected ? (
+                <XCircle className="w-3 h-3" />
+              ) : (
+                <AlertTriangle className="w-3 h-3" />
+              )}
+              {t("accounts.healthSummary.status", {
+                connected: connectedCount,
+                total: accounts.length,
+              })}
+            </span>
+          )}
         </button>
         <div className="flex items-center gap-2">
           <button
@@ -1259,10 +1307,11 @@ function rotationCalendarDays(startMs: number, endMs: number): Date[] {
  */
 function RotationPlanCard({ accounts }: { accounts: Account[] }) {
   const { t } = useTranslation("usage");
+  const { rotationSwitchPct } = useColorThresholds();
   if (accounts.length === 0) return null;
 
   const now = Date.now();
-  const plan = computeRotationPlan(accounts, now);
+  const plan = computeRotationPlan(accounts, now, rotationSwitchPct);
 
   const accountColor = new Map<string, string>(
     accounts.map((account, i) => [account.id, accountTimelineColor(i)])
@@ -1742,6 +1791,19 @@ function scopeIsValid(s: ColorThresholds): boolean {
   return s.yellowAt < s.orangeAt && s.orangeAt < s.redAt;
 }
 
+// Mirrors the server's own bounds (server/routes/color-thresholds.js) - kept
+// narrower than the color-band scopes' 0-1000 range since 0 or 100 would
+// defeat rotationSwitchPct's purpose (switch immediately, or never leave
+// any headroom).
+const ROTATION_SWITCH_PCT_MIN = 1;
+const ROTATION_SWITCH_PCT_MAX = 99;
+
+function rotationSwitchPctIsValid(value: number): boolean {
+  return (
+    Number.isFinite(value) && value >= ROTATION_SWITCH_PCT_MIN && value <= ROTATION_SWITCH_PCT_MAX
+  );
+}
+
 function scopesEqual(a: ColorThresholds, b: ColorThresholds): boolean {
   return a.yellowAt === b.yellowAt && a.orangeAt === b.orangeAt && a.redAt === b.redAt;
 }
@@ -1832,18 +1894,20 @@ const COLOR_THRESHOLD_SCOPES = ["session", "weekly", "sessionRate", "weeklyRate"
 type ColorThresholdScope = (typeof COLOR_THRESHOLD_SCOPES)[number];
 
 /**
- * Global settings card for the green/yellow/orange/red bands every
+ * Global Configuration card: the green/yellow/orange/red bands every
  * percentage-driven color on this page (`colorBand` and its callers above)
- * reads from - editable here, persisted server-side via
+ * reads from, plus the Rotation Plan's account-handoff threshold
+ * (`rotationSwitchPct`) - editable here, persisted server-side via
  * client/src/lib/colorThresholds.ts, and shared live across every connected
- * client. Four independent scopes (see `COLOR_THRESHOLD_SCOPES` -
+ * client. Four independent color-band scopes (see `COLOR_THRESHOLD_SCOPES` -
  * they're separate quantities, not one shared ramp - see
- * `ColorThresholdsConfig`). Edits are staged in local `draft` state so a
- * mid-edit keystroke doesn't trigger a save on every render; only "Save"
- * (once every scope is valid) actually persists. Collapsed by default (same
- * chevron-toggle idiom as `RawTextSection`/`HistoryRow` below) - a
- * rarely-touched config card, so it shouldn't compete for space with the
- * account data every visit actually comes here to read.
+ * `ColorThresholdsConfig`) plus the standalone rotation-switch scalar. Edits
+ * are staged in local `draft` state so a mid-edit keystroke doesn't trigger
+ * a save on every render; only "Save" (once every field is valid) actually
+ * persists. Collapsed by default (same chevron-toggle idiom as
+ * `RawTextSection`/`HistoryRow` below) - a rarely-touched config card, so it
+ * shouldn't compete for space with the account data every visit actually
+ * comes here to read.
  */
 function ColorThresholdsCard() {
   const { t } = useTranslation("usage");
@@ -1863,16 +1927,23 @@ function ColorThresholdsCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thresholds]);
 
-  const isValid = COLOR_THRESHOLD_SCOPES.every((scope) => scopeIsValid(draft[scope]));
-  const isDirty = COLOR_THRESHOLD_SCOPES.some(
-    (scope) => !scopesEqual(draft[scope], thresholds[scope])
-  );
+  const isValid =
+    COLOR_THRESHOLD_SCOPES.every((scope) => scopeIsValid(draft[scope])) &&
+    rotationSwitchPctIsValid(draft.rotationSwitchPct);
+  const isDirty =
+    COLOR_THRESHOLD_SCOPES.some((scope) => !scopesEqual(draft[scope], thresholds[scope])) ||
+    draft.rotationSwitchPct !== thresholds.rotationSwitchPct;
 
   const handleScopeChange =
     (scope: ColorThresholdScope) => (field: keyof ColorThresholds, next: number) => {
       setDraft((d) => ({ ...d, [scope]: { ...d[scope], [field]: next } }));
       setError(null);
     };
+
+  const handleRotationSwitchChange = (next: number) => {
+    setDraft((d) => ({ ...d, rotationSwitchPct: next }));
+    setError(null);
+  };
 
   const handleSave = async () => {
     if (!isValid) {
@@ -1920,23 +1991,80 @@ function ColorThresholdsCard() {
             {t("accounts.colorThresholds.subtitle")}
           </p>
 
-          <div className="space-y-4">
-            {COLOR_THRESHOLD_SCOPES.map((scope) => {
-              const isRateScope = scope === "sessionRate" || scope === "weeklyRate";
-              return (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+              {COLOR_THRESHOLD_SCOPES.slice(0, 2).map((scope) => (
                 <ColorThresholdsScopeFields
                   key={scope}
                   scopeLabel={t(`accounts.colorThresholds.scope.${scope}`)}
-                  description={
-                    isRateScope ? t("accounts.colorThresholds.rateScopeDescription") : undefined
-                  }
                   value={draft[scope]}
                   onChange={handleScopeChange(scope)}
-                  step={isRateScope ? 0.1 : 1}
-                  previewMax={isRateScope ? 2 : 100}
                 />
-              );
-            })}
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 pt-6 border-t border-border/60">
+              {COLOR_THRESHOLD_SCOPES.slice(2).map((scope) => (
+                <ColorThresholdsScopeFields
+                  key={scope}
+                  scopeLabel={t(`accounts.colorThresholds.scope.${scope}`)}
+                  description={t("accounts.colorThresholds.rateScopeDescription")}
+                  value={draft[scope]}
+                  onChange={handleScopeChange(scope)}
+                  step={0.1}
+                  previewMax={2}
+                />
+              ))}
+            </div>
+
+            <div className="pt-6 border-t border-border/60">
+              <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <ArrowRightLeft className="w-3.5 h-3.5 text-accent" />
+                {t("accounts.colorThresholds.scope.rotation")}
+              </h3>
+              <p className="text-[11px] text-gray-500 mb-3 max-w-xl">
+                {t("accounts.colorThresholds.rotationSwitchDescription")}
+              </p>
+              <div className="flex items-center gap-4 max-w-md">
+                <input
+                  type="range"
+                  min={ROTATION_SWITCH_PCT_MIN}
+                  max={ROTATION_SWITCH_PCT_MAX}
+                  step={1}
+                  value={draft.rotationSwitchPct}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    const next = Number(e.target.value);
+                    if (Number.isFinite(next)) handleRotationSwitchChange(next);
+                  }}
+                  className="flex-1 accent-accent"
+                  aria-label={t("accounts.colorThresholds.rotationSwitchLabel")}
+                />
+                <div className="relative flex-shrink-0 w-20">
+                  <input
+                    type="number"
+                    min={ROTATION_SWITCH_PCT_MIN}
+                    max={ROTATION_SWITCH_PCT_MAX}
+                    step={1}
+                    value={draft.rotationSwitchPct}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                      const next = Number(e.target.value);
+                      if (Number.isFinite(next)) handleRotationSwitchChange(next);
+                    }}
+                    aria-label={t("accounts.colorThresholds.rotationSwitchLabel")}
+                    className="input w-full pr-6 font-mono"
+                  />
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500">
+                    %
+                  </span>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2 font-mono">
+                {t("accounts.colorThresholds.rotationSwitchSummary", {
+                  switchPct: draft.rotationSwitchPct,
+                  reservePct: Math.max(0, 100 - draft.rotationSwitchPct),
+                })}
+              </p>
+            </div>
           </div>
 
           {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
@@ -2308,7 +2436,6 @@ export function Usage() {
     <div className="space-y-6">
       {accounts.length > 0 && (
         <>
-          <RotationPlanCard accounts={accounts} />
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
             <div className="space-y-4">
               <SessionResetTimeline accounts={accounts} />
@@ -2319,6 +2446,7 @@ export function Usage() {
               <ConsumptionRateCard accounts={accounts} />
             </div>
           </div>
+          <RotationPlanCard accounts={accounts} />
         </>
       )}
 

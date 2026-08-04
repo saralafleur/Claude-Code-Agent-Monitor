@@ -55,6 +55,10 @@
     "loadFailed": "加载账户失败。",
     "captured": "捕获于 {{when}}",
     "emptyHistory": "该账户尚无捕获记录",
+    "healthSummary": {
+      "status": "{{connected}}/{{total}} 已连接",
+      "hint": "有多少账户处于已连接状态（最近一次捕获成功），有多少需要处理（需要登录、出错，或从未捕获）。"
+    },
     "status": {
       "idle": "尚未捕获",
       "ok": "正常",
@@ -107,18 +111,22 @@
       "resets": "{{label}} 重置"
     },
     "colorThresholds": {
-      "title": "颜色阈值",
-      "subtitle": "配置绿色 → 黄色 → 橙色 → 红色使用量颜色的切换点，适用于本页面全局。",
+      "title": "配置",
+      "subtitle": "配置绿色 → 黄色 → 橙色 → 红色使用量颜色的切换点，以及轮换计划的账户切换阈值，适用于本页面全局。",
       "scope": {
         "session": "会话窗口（5小时）",
         "weekly": "周窗口",
         "sessionRate": "会话消耗速率",
-        "weeklyRate": "每周消耗速率"
+        "weeklyRate": "每周消耗速率",
+        "rotation": "轮换计划"
       },
       "rateScopeDescription": "以可持续速率的倍数衡量，而非百分比 —— 1.0 表示消耗速度恰好会在窗口重置时刚好达到 100%。通常设置在 0.5 到 1.5 之间。",
       "yellowLabel": "黄色起始于",
       "orangeLabel": "橙色起始于",
       "redLabel": "红色起始于",
+      "rotationSwitchLabel": "切换账户于",
+      "rotationSwitchDescription": "轮换计划切换到下一个账户时对应的周窗口百分比 —— 会在当前账户上保留这部分余量，而不是将其用到 100%。",
+      "rotationSwitchSummary": "将在 {{switchPct}}% 时切换 —— 保留周窗口 {{reservePct}}% 作为余量。",
       "save": "保存",
       "saving": "保存中…",
       "saveFailed": "保存阈值失败。",
