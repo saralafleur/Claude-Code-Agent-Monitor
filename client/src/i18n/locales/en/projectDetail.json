@@ -121,5 +121,44 @@
     "budgetExceeded": "Not checked yet — repo limit reached for this page load",
     "gitError": "Couldn't check this repo (git error)",
     "notARepo": "Not a git repository"
+  },
+  "planLedger": {
+    "title": "Plan Lifecycle & Value Ledger",
+    "openPlans": {
+      "title": "Open Plans",
+      "empty": "No open plans yet.",
+      "close": "Close",
+      "closing": "Closing…",
+      "closeNotePlaceholder": "Closure note (optional)"
+    },
+    "closedPlans": {
+      "title": "History",
+      "empty": "No closed generations yet.",
+      "collapse": "Collapse",
+      "expand": "Expand"
+    },
+    "items": {
+      "empty": "No items yet."
+    },
+    "pool": {
+      "title": "Value Pool",
+      "empty": "Nothing unclaimed right now.",
+      "claim": "Claim",
+      "claiming": "Claiming…",
+      "claimTarget": "Claim into"
+    },
+    "health": {
+      "unclaimedPoolSize": "Unclaimed units",
+      "openPlanCount": "Open plans",
+      "lastClosure": "Last closure",
+      "noClosures": "No closures yet",
+      "daysAgo_one": "{{count}} day ago",
+      "daysAgo_other": "{{count}} days ago"
+    },
+    "attribution": {
+      "mechanical": "Mechanical",
+      "correlational": "Correlational",
+      "judgment": "Judgment"
+    }
   }
 }

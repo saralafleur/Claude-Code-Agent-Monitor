@@ -409,6 +409,15 @@ import type {
   UnassignedProjectBucket,
   Plan,
   PlanItem,
+  ProjectPlan,
+  ProjectPlanItem,
+  ProjectPlanWithItems,
+  ProjectPlanHistory,
+  ProjectPlanOrigin,
+  ValueClaim,
+  ValuePool,
+  ValueUnit,
+  PlanHealth,
   DecisionQueueItem,
   DecisionQueueKind,
   DetourDisposition,
@@ -2588,6 +2597,233 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+  },
+
+  // ───────────────────────── Portfolio-layer Project Plans API ─────────────────
+  /** The portfolio-layer plan lifecycle + value ledger — deliberately a
+   *  SEPARATE namespace from {@link api.plans} above (DEC-14, the two plan
+   *  surfaces never blend). Maps to `server/routes/project-plans.js` +
+   *  `server/lib/value-ledger.js`. {@link api.projectPlans.pool} is the one
+   *  place a raw server value unit (`value_source`/`value_ref`/`source_cwd`/
+   *  `unitKey`) is reshaped into the client's {@link ValueUnit} — a 1:1
+   *  field rename, never a recomputed number. Every other method here is a
+   *  thin, verbatim pass-through of its route's response (§9.1
+   *  DERIVED-DUAL-VIEW — `health()` in particular must never be
+   *  re-summarized from `list()`/`pool()` by a caller). */
+  projectPlans: {
+    /**
+     * GET /api/project-plans?project_id= — every plan (open+closed) for a
+     * project, nested items with per-item claims.
+     * @param projectId The project id.
+     * @returns `{ plans }` — {@link ProjectPlanWithItems}[].
+     */
+    list: (projectId: string) =>
+      request<{ plans: ProjectPlanWithItems[] }>(
+        `/project-plans?project_id=${encodeURIComponent(projectId)}`
+      ),
+    /**
+     * GET /api/project-plans/pool?project_id=&backfill=&lookbackDays= — the
+     * live, assembled value pool, reshaped into {@link ValueUnit}s.
+     * @param projectId The project id.
+     * @param opts      Optional `backfill` (deep lookback) / `lookbackDays`.
+     * @returns `{ units, identityWarnings }` — {@link ValuePool}.
+     */
+    pool: (projectId: string, opts?: { backfill?: boolean; lookbackDays?: number }) => {
+      const qs = new URLSearchParams({ project_id: projectId });
+      if (opts?.backfill) qs.set("backfill", "1");
+      if (opts?.lookbackDays !== undefined) qs.set("lookbackDays", String(opts.lookbackDays));
+      return request<{
+        units: Array<{
+          unitKey: string;
+          value_source: ValueUnit["source"];
+          value_ref: string;
+          source_cwd?: string;
+          attribution: ValueUnit["attribution"];
+          label?: string | null;
+          seen_at?: string | null;
+        }>;
+        identityWarnings: ValuePool["identityWarnings"];
+      }>(`/project-plans/pool?${qs.toString()}`).then((raw) => ({
+        units: raw.units.map(
+          (u): ValueUnit => ({
+            id: u.unitKey,
+            source: u.value_source,
+            sourceRef: u.value_ref,
+            sourceCwd: u.source_cwd,
+            attribution: u.attribution,
+            label: u.label ?? null,
+            discoveredAt: u.seen_at ?? null,
+          })
+        ),
+        identityWarnings: raw.identityWarnings,
+      }));
+    },
+    /**
+     * GET /api/project-plans/health?project_id= — `computePlanHealth`'s
+     * exact shape, verbatim. Render every field as-is; never re-derive
+     * `unclaimedPoolSize` from a locally-held pool array's length (§9.1).
+     * @param projectId The project id.
+     * @returns {@link PlanHealth}.
+     */
+    health: (projectId: string) =>
+      request<PlanHealth>(`/project-plans/health?project_id=${encodeURIComponent(projectId)}`),
+    /**
+     * GET /api/project-plans/history?project_id= — AC-6 whole-life summary:
+     * closed generations + their claims, no `closed_at` on any claim.
+     * @param projectId The project id.
+     * @returns {@link ProjectPlanHistory}.
+     */
+    history: (projectId: string) =>
+      request<ProjectPlanHistory>(
+        `/project-plans/history?project_id=${encodeURIComponent(projectId)}`
+      ),
+    /**
+     * POST /api/project-plans/import — DEC-P2 generation-1 import from an
+     * already-ingested AGENT-PLAN.md. Idempotent on `(project_id,
+     * imported_content_hash)`, never on `cwd`.
+     * @param projectId The project id.
+     * @param cwd       Working directory whose AGENT-PLAN.md to import.
+     * @returns `{ plan, items, created }`.
+     */
+    import: (projectId: string, cwd: string) =>
+      request<{ plan: ProjectPlan; items: ProjectPlanItem[]; created: boolean }>(
+        "/project-plans/import",
+        { method: "POST", body: JSON.stringify({ project_id: projectId, cwd }) }
+      ),
+    /**
+     * POST /api/project-plans — create a plan (incl. a retroactive bundle).
+     * @param data `project_id`, `title`, optional `succeeds_plan_id`/`origin`.
+     * @returns `{ plan }`.
+     */
+    create: (data: {
+      project_id: string;
+      title: string;
+      succeeds_plan_id?: number;
+      origin?: ProjectPlanOrigin;
+    }) =>
+      request<{ plan: ProjectPlan }>("/project-plans", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    /**
+     * GET /api/project-plans/:id — read one plan with its items+claims.
+     * @param planId The plan id.
+     * @returns {@link ProjectPlanWithItems}.
+     */
+    get: (planId: number) => request<ProjectPlanWithItems>(`/project-plans/${planId}`),
+    /**
+     * PATCH /api/project-plans/:id — rename an open plan. `status` can
+     * never be set here — closing has exactly one door ({@link
+     * api.projectPlans.close}, DEC-P6).
+     * @param planId The plan id.
+     * @param data   `{ title }`.
+     * @returns `{ plan }`.
+     */
+    update: (planId: number, data: { title: string }) =>
+      request<{ plan: ProjectPlan }>(`/project-plans/${planId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    /**
+     * POST /api/project-plans/:id/close — the only door to `closed`.
+     * @param _projectId Unused by the route (kept for call-site symmetry
+     *                    with this namespace's other methods).
+     * @param planId     The plan id.
+     * @param data       `{ closure_note? }`.
+     * @returns `{ plan }`.
+     */
+    close: (_projectId: string, planId: number, data: { closure_note?: string } = {}) =>
+      request<{ plan: ProjectPlan }>(`/project-plans/${planId}/close`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    /**
+     * POST /api/project-plans/:id/items — add an item to an open plan.
+     * @param planId The plan id.
+     * @param data   Item fields (`text` required).
+     * @returns `{ item }`.
+     */
+    addItem: (
+      planId: number,
+      data: {
+        text: string;
+        acceptance?: string;
+        detail?: string;
+        parent_item_id?: number;
+        position?: number;
+      }
+    ) =>
+      request<{ item: ProjectPlanItem }>(`/project-plans/${planId}/items`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    /**
+     * PATCH /api/project-plans/items/:itemId — update an open plan's item.
+     * @param itemId The item id.
+     * @param data   Partial item fields.
+     * @returns `{ item }`.
+     */
+    updateItem: (
+      itemId: number,
+      data: Partial<{
+        text: string;
+        acceptance: string | null;
+        detail: string | null;
+        checked: boolean;
+        position: number;
+        parent_item_id: number | null;
+      }>
+    ) =>
+      request<{ item: ProjectPlanItem }>(`/project-plans/items/${itemId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    /**
+     * DELETE /api/project-plans/items/:itemId — remove an open plan's item.
+     * @param itemId The item id.
+     * @returns `{ ok: true }`.
+     */
+    deleteItem: (itemId: number) =>
+      request<{ ok: true }>(`/project-plans/items/${itemId}`, { method: "DELETE" }),
+    /**
+     * POST /api/project-plans/:id/claims — claim a {@link ValueUnit} into an
+     * item. `planId` isn't part of this method's own signature (the caller
+     * only ever knows the target item), so this resolves the owning plan by
+     * reading the project's own plan list first — no new server route.
+     * @param projectId The project id.
+     * @param itemId    The plan item to claim the unit into.
+     * @param unit      The {@link ValueUnit} being claimed (passed through
+     *                  verbatim into the claim's snapshot fields).
+     * @returns `{ claim }`.
+     */
+    claim: async (projectId: string, itemId: number, unit: ValueUnit) => {
+      const { plans } = await request<{ plans: ProjectPlanWithItems[] }>(
+        `/project-plans?project_id=${encodeURIComponent(projectId)}`
+      );
+      const owner = plans.find((p) => p.items.some((it) => it.id === itemId));
+      if (!owner) throw new Error(`no plan found for item ${itemId}`);
+      return request<{ claim: ValueClaim }>(`/project-plans/${owner.plan.id}/claims`, {
+        method: "POST",
+        body: JSON.stringify({
+          item_id: itemId,
+          value_source: unit.source,
+          value_ref: unit.sourceRef,
+          source_cwd: unit.sourceCwd || "",
+          attribution: unit.attribution,
+          label_snapshot: unit.label ?? null,
+          seen_at_snapshot: unit.discoveredAt ?? null,
+        }),
+      });
+    },
+    /**
+     * DELETE /api/project-plans/claims/:claimId — explicit human unclaim.
+     * Rejected once the owning plan is closed (claims of a closed plan are
+     * immutable).
+     * @param claimId The claim id.
+     * @returns `{ ok: true }`.
+     */
+    deleteClaim: (claimId: number) =>
+      request<{ ok: true }>(`/project-plans/claims/${claimId}`, { method: "DELETE" }),
   },
 
   // ───────────────────────────── Decision Queue API ────────────────────────────

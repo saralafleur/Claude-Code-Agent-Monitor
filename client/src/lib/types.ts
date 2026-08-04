@@ -2185,6 +2185,170 @@ export interface Plan {
   items: PlanItem[];
 }
 
+// ───── Portfolio-layer plan lifecycle + value ledger (project-plans) ─────
+// A deliberately SEPARATE namespace from the legacy per-cwd Plan/PlanItem
+// AGENT-PLAN.md mirror above (DEC-14) — this is the portfolio-layer
+// "generation" model from `server/routes/project-plans.js` +
+// `server/lib/value-ledger.js`. The two plan surfaces never blend in one
+// response; keep these types and that section's types apart.
+
+/** `status` vocabulary for a {@link ProjectPlan} (`project_plans.status`
+ *  CHECK). Closing is the ONLY door to `"closed"` — never set via PATCH. */
+export type ProjectPlanStatus = "open" | "closed";
+
+/** `origin` vocabulary for a {@link ProjectPlan} (`project_plans.origin`
+ *  CHECK). */
+export type ProjectPlanOrigin = "manual" | "import" | "retroactive_bundle";
+
+/** One generation of a project's portfolio-layer plan, from
+ *  `server/routes/project-plans.js` (`project_plans` table). Closing is a
+ *  single stamp on this row (`closed_at`/`closure_note`/`status`) — a
+ *  claim's closed-ness is always derived by joining to this row, never a
+ *  flag copied onto the claim (PROJECT-CONTEXT.md §9.1 DERIVED-DUAL-VIEW). */
+export interface ProjectPlan {
+  id: number;
+  project_id: string;
+  title: string;
+  status: ProjectPlanStatus;
+  succeeds_plan_id: number | null;
+  origin: ProjectPlanOrigin;
+  opened_at: string;
+  closed_at: string | null;
+  closure_note: string | null;
+  imported_from_cwd?: string | null;
+  imported_content_hash?: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Derived generation ordinal — `plan-lifecycle.js`'s single home for it.
+   *  Never recompute this client-side by walking `succeeds_plan_id`. */
+  ordinal: number;
+}
+
+/** One checkbox item of a {@link ProjectPlan}, from `project_plan_items`,
+ *  as nested on plan read responses (each item carries its own claims). */
+export interface ProjectPlanItem {
+  id: number;
+  plan_id: number;
+  parent_item_id: number | null;
+  text: string;
+  acceptance: string | null;
+  detail: string | null;
+  checked: number;
+  position: number;
+  target_date?: string | null;
+  imported_item_id?: string | null;
+  imported_from_cwd?: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Claims made against this item, nested on plan/item read responses. */
+  claims: ValueClaim[];
+}
+
+/** `value_source` vocabulary (`value_claims.value_source` CHECK) — mirrors
+ *  `server/lib/value-ledger.js`'s exported `VALUE_SOURCES` verbatim. */
+export type ValueSource =
+  | "trunk_commit"
+  | "merge_commit"
+  | "intake_initiative"
+  | "detour"
+  | "focus_segment";
+
+/** `attribution` tier vocabulary (`value_claims.attribution` CHECK) —
+ *  mirrors `ATTRIBUTION_TIERS`. "mechanical" = fact of record (a commit or
+ *  initiative exists); "correlational" = a suggested link (e.g. a commit
+ *  bracketed by a session's time window); "judgment" = a human call (e.g. a
+ *  detour disposition). */
+export type AttributionTier = "mechanical" | "correlational" | "judgment";
+
+/** The only persisted judgment in this feature — a claim linking one value
+ *  unit to one plan item. No `closed_at`/`closed` field exists here on
+ *  purpose: a claim's closed-ness is a JOIN to its {@link ProjectPlan}'s
+ *  `status`, never copied onto the row (§9.1). */
+export interface ValueClaim {
+  id: number;
+  project_id: string;
+  plan_id: number;
+  item_id: number;
+  value_source: ValueSource;
+  value_ref: string;
+  source_cwd: string;
+  label_snapshot: string | null;
+  seen_at_snapshot: string | null;
+  stage_snapshot: string | null;
+  attribution: AttributionTier;
+  claimed_by: "human" | "llm";
+  claimed_at: string;
+  created_at?: string;
+}
+
+/** One live, unclaimed value unit as normalized for the client by
+ *  {@link api.projectPlans.pool} from `assembleValuePool`'s server-side
+ *  unit shape (`value_source`/`value_ref`/`source_cwd`/`unitKey`) — a 1:1
+ *  field rename, never a recomputed value (§9.1 only forbids re-deriving
+ *  numbers/verdicts, not reshaping keys for the client). */
+export interface ValueUnit {
+  /** The server's `unitKey` — stable identity for this unit. */
+  id: string;
+  /** Mirrors the server unit's `value_source`. */
+  source: ValueSource;
+  /** Mirrors the server unit's `value_ref`. */
+  sourceRef: string;
+  /** Mirrors the server unit's `source_cwd`, when present. */
+  sourceCwd?: string;
+  /** Mirrors the server unit's `attribution` tier. */
+  attribution: AttributionTier;
+  /** Optional human-facing label (server unit's `label`), when present. */
+  label?: string | null;
+  /** Mirrors the server unit's `seen_at` (commit/initiative timestamp),
+   *  when present — the unit's "discovered" moment. */
+  discoveredAt?: string | null;
+}
+
+/** One case-variant/unmapped-cwd/worktree-fold warning surfaced by
+ *  `assembleValuePool` — read-only diagnostics, never auto-corrected
+ *  client-side (CWD-IDENTITY-FANOUT). */
+export interface ValueIdentityWarning {
+  kind: "case_variant_duplicate" | "no_git_repo" | "repo_root_unmapped";
+  cwds: string[];
+}
+
+/** `GET /api/project-plans/pool` response, as normalized by
+ *  {@link api.projectPlans.pool}. */
+export interface ValuePool {
+  units: ValueUnit[];
+  identityWarnings: ValueIdentityWarning[];
+}
+
+/** `GET /api/project-plans/health` response — the T6 parity target shape.
+ *  Every field here MUST be rendered verbatim by any consumer, never
+ *  re-derived from a locally-held `pool`/`plans` array (§9.1
+ *  DERIVED-DUAL-VIEW — this is exactly what {@link PlanLedgerPanel}'s
+ *  health display guards). */
+export interface PlanHealth {
+  unclaimedPoolSize: number;
+  lastClosureAt: string | null;
+  daysSinceLastClosure: number | null;
+  openPlanCount: number;
+}
+
+/** One `{plan, items}` entry as returned by `GET /api/project-plans` and
+ *  `GET /api/project-plans/:id`. */
+export interface ProjectPlanWithItems {
+  plan: ProjectPlan;
+  items: ProjectPlanItem[];
+}
+
+/** `GET /api/project-plans/history` response — AC-6's whole-life answer:
+ *  closed generations and their claims, no archaeology needed. */
+export interface ProjectPlanHistory {
+  generations: Array<{
+    plan: ProjectPlan;
+    ordinal: number;
+    items: ProjectPlanItem[];
+    claims: ValueClaim[];
+  }>;
+}
+
 /** The complete set of statuses `server/lib/pace.js`'s `paceStatus()` can
  *  return (layer 5). Mirrored here for the layer-7 Project Manager page -
  *  every value is always server-computed, never re-derived client-side

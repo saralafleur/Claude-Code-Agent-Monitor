@@ -12,8 +12,14 @@
  * `Promise.all(...)` pattern rather than a combined endpoint, since each
  * already has its own single-responsibility server-side owner.
  *
- * Renders four sections: the project's AGENT-PLAN.md plan(s) (via the
- * existing `PlanPanel`/`PlanModal` — no new plan UI); a single Repos card
+ * Renders five sections: the project's AGENT-PLAN.md plan(s) (via the
+ * existing `PlanPanel`/`PlanModal` — no new plan UI); the portfolio-layer
+ * plan lifecycle + value ledger workbench (`PlanLedgerPanel` — a deliberately
+ * SEPARATE system from the AGENT-PLAN.md plan(s) above, DEC-14: open plans
+ * with their nested items and a close action, a collapsible closed-generation
+ * history, and the live unclaimed value pool with a claim gesture, all
+ * backed by `api.projectPlans`/`server/routes/project-plans.js`); a single
+ * Repos card
  * (matching the app's standard `.card` shell, same as e.g. Usage.tsx's
  * Accounts card) showing which of the project's mapped folders are git repos
  * with their live worktrees (each mapped repo/folder has its own Remove
@@ -120,6 +126,7 @@ import { CardSkeleton } from "../components/Skeleton";
 import { Checkbox } from "../components/Checkbox";
 import { PlanPanel } from "../components/PlanPanel";
 import { PlanModal, type PlanModalEntry } from "../components/PlanModal";
+import { PlanLedgerPanel } from "../components/PlanLedgerPanel";
 import { useFocusMap } from "../lib/focusStore";
 import { pathTail, timeAgo } from "../lib/format";
 import type {
@@ -1281,6 +1288,8 @@ export function ProjectDetail() {
           </div>
         )}
       </section>
+
+      {id && <PlanLedgerPanel projectId={id} />}
 
       <section className="card">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
