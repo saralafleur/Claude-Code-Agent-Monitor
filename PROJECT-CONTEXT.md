@@ -253,6 +253,53 @@ and the live resolved kind (catalog + current override) are two legitimate,
 **not** "the two values match." Never add a trigger, computed column, or backfill
 to re-sync historical Observations.
 
+**QA-pass note (2026-08-04, `team-qa` strategist, `intake/2026-08-04-value-summary-tick/`
+— count unchanged at 6, nothing built yet). This entry's "per-shape spec has no
+home" diagnosis has now reproduced one layer up, inside the QA pipeline's own
+documents — 3rd time on record.** That build creates the second production invoker
+of `enrichPoolAltitudes` (route + new tick) while requiring one lexical
+`upsertValueUnitSummary.run(` call site — i.e. this entry's write-sequence form,
+arriving at the exact "consumer #2 appears" moment its history says the pattern
+bites. The plan handles that well (DEC-10 extends the return shape rather than
+adding a parallel entry point; the guard extends `single-writer-guard.test.js` and
+*consumes* `assertSingleHome` rather than re-deriving scope, per §9.7). Confirmed
+live 2026-08-04: `upsertValueUnitSummary` exists in exactly two production files
+(`db.js:3148`, `value-summary.js:179`) and `enrichPoolAltitudes` has exactly one
+caller (`routes/project-plans.js:153`) — the invariant holds today and **nothing
+proves it**; this build writes its first guard.
+
+**The recurrence is in the planning documents, not the code.** Of the five traps
+that intake's `risk.md` named, three (A: cross-invoker two-writer race, C:
+convergence math with no pool-growth term, E: client can't distinguish an old
+server from a malformed `states` value) appear in **neither** `unit-tests.md` nor
+`e2e-tests.md` — and for A and C, `risk.md` §6's own "disclosed-and-declined
+trip-wire" said that declining the test requires a dated `decisions.md` row
+instead, **which also didn't happen**. That is verbatim the 2026-08-02 note above
+(`unitKey` cross-seam agreement, "adopted by neither test architect, and its own
+stated fallback of 'then it becomes a WATCH row' also didn't happen"), and the
+same mechanism as the 2026-08-01 §9.2 note ("enumerated by hand in prose and
+re-typed by hand into a test table"). **The systemic cause is this entry's own,
+one level up:** each trap that landed in nobody's file is one that fits no single
+module's spec — A is cross-invoker, C is multi-tick-with-changing-input, E is
+cross-runtime. `risk.md` enumerates in prose, the two test docs each claim what
+fits their layer, and nothing mechanically compares the two sets.
+
+**Durable cure recommended (cheap, and this entry already proved the mechanism
+works — "name the file, and the spec gets written," T6/`ledger-metrics-parity.test.js`,
+2026-08-02):** give every `risk.md` trap a stable id; require each test document to
+cite the ids it covers; diff the two sets before the QA pass closes, and require
+every uncovered id to end in exactly one of two states — a named file + case id, or
+a dated `decisions.md` WATCH/OPEN row. This is §9.4's acceptance criterion
+("'should-fix' is a triage label, not a disposition") applied to risk analyses
+rather than fix rounds. Also found in that plan, and worth carrying as a live
+instance of §9.3's PLAN-LEVEL VACUOUS FIXTURE: `unit-tests.md` §7d specifies the
+audit-log partition assertion as `generated + queued + unavailable === pool_size`,
+which is **arithmetically false whenever `cache_hits > 0`** and fails on the plan's
+own Case 4 tick 2 (5 + 0 + 0 ≠ 45); `e2e-tests.md` Case 2 has the correct four-term
+form. A guard that goes red for a legitimate reason on day one gets weakened, not
+fixed. See `intake/2026-08-04-value-summary-tick/qa/qa-assessment.md` (verdict:
+GAPPED).
+
 **Known bounded exception:** `client/src/lib/windowedTotals.ts` —
 client-side re-slice of the same 10-minute `chunks` grid the Calendar's idle
 stripes already render from (not a re-derivation from raw events), bounding
@@ -510,6 +557,79 @@ implementer will build it twice.
   adding the load-bearing assertion the original lacked: *the main table still
   lacks the CHECK after boot* — i.e. the rebuild was genuinely skipped. Verified
   red by disabling F2 (`if (false && orphans.length > 0)`).
+
+**2026-08-04, `intake/2026-08-04-value-summary-tick/` — HIGHEST RECORDED DENSITY:
+EIGHT §9.3-family events in one effort's own QA+build pipeline, and the suite
+caught none of them.** The 2026-08-02 trunk-drift note said five vacuous guards
+in a single change set was "not a run of bad luck, it is the **default output
+shape** of guard-writing on this project." This build, run entirely under the
+standing rule with all three MANDATORY obligations named in its own brief and
+task list, produced eight. The count is the finding; the enumeration is what
+makes it usable:
+
+1. *(team-qa, pre-code)* the audit-log partition specified in the three-term
+   form (`generated + queued + unavailable === pool_size`), arithmetically false
+   whenever `cache_hits > 0` — a guard that goes red for a legitimate reason on
+   day one gets weakened, not fixed. Corrected to four terms before build.
+2. *(team-qa, pre-code)* QA-DEC-2's T-C fixture at 45→48 units, under which the
+   correct (re-derived), the decremented and the stale-`pool_size`
+   implementations all read `0`. PLAN-LEVEL VACUOUS FIXTURE, caught in
+   reconciliation and corrected to 85→88 (correct = 8, both wrong forms = 5).
+3. *(verifier pass 1)* both "environment wiring" tests shipped with **zero
+   assertions** — no `setTimeout` spy at all — despite the test plan's own text
+   warning verbatim that without a positive control "the two negative
+   assertions pass vacuously."
+4. *(verifier pass 1)* the MANDATORY DEC-16 structural scan **did not exist at
+   all**, while `build-task-list.md`'s own catalog-obligations section showed it
+   `✓` with "build report must include red outputs."
+5. *(adversarial review, after TWO verifier passes had counted it inside
+   "17/17 green")* B1 — the MANDATORY AC-1 flow proof shipped as an
+   **empty-body `it()`**. Its comment contained the word *"assertion"*, which
+   defeats a naive `grep assert` body sweep.
+6. *(same review)* S4 — a test titled "old-server backward-compat (missing
+   states key)" whose body drove the ordinary happy path, with *"we verify that
+   states is present in the 1-unit case above"* standing in for the assertion.
+7. *(verifier pass 3)* the shipped S6 test **never constructed a duplicate key
+   at all** — its own comments claimed "39 unique + 1 duplicate appearing
+   twice"; a programmatic count of the fixture returned 1. Proven vacuous the
+   only way that works: revert the product fix, re-run the **actual shipped
+   test file**, watch it stay green.
+8. *(orchestrator fix round)* **NEW SUB-PATTERN — VACUOUS-REPAIR.** The first
+   repair of that same S6 test was *itself* vacuous. The fixture was corrected
+   to double the key, but `spawnResolvingFirst(39)` left the in-batch copy
+   unresolved, so "never in both" still passed regardless of the fix (a JS
+   object cannot hold one key twice either way). Reaching the real property
+   required *both* `[...unique39, dup, dup]` **and** `spawnResolvingFirst(40)`.
+   Generalizable: **the person fixing a vacuous guard reasons about the fixture
+   the same way its author did, and inherits the same blind spot.** A repair of
+   a §9.3 finding is a new guard and needs its own red proof — the verifier's
+   own precise, correct-looking one-line recommendation was not sufficient.
+
+**What this build adds to how-to-comply:**
+- **Every verification/review pass in this build found something the previous
+  pass's self-report had missed or mis-claimed** — pass 1 found 6 items the
+  implementer's log didn't disclose (incl. two extra fixture bugs behind a
+  "single root cause" claim, and 2 `tsc` errors framed as "pre-existing" that
+  `git diff` showed were net-new); pass 2 cleared them; the *review* then found
+  2 blockers both prior passes had counted as green; pass 3 found #7; the fix
+  for #7 was #8. **The number of independent passes is load-bearing. One
+  verifier is not a gate.**
+- **The only technique that reliably worked:** revert the product fix and run
+  the *real, shipped test file* — not a scratch probe, not a read, not a grep.
+  Scratch probes proved the *product* fix real (useful) while the *shipped
+  test* covering it was vacuous (#7); those are different claims and must be
+  checked separately. State them separately in reports, too: this build's
+  fix-log claimed "Product fix S6 works… PASS" — true of the product, false as
+  a coverage claim.
+- **Sweep gaps confirmed again:** `assert.ok(true` / `|| true` both returned 0
+  across every one of the eight. Zero-assertion bodies (#3), empty bodies whose
+  comments contain "assert" (#5), and fixtures that don't construct what they
+  say (#2, #7, #8) are invisible to text sweeps by construction.
+- Prose can trip the guard it describes: this build's own `@file` comments
+  contained the literal string `upsertValueUnitSummary.run(` and the
+  single-writer scan (which does not strip `/** */`) counted them as call
+  sites. That is the guard working — but write invariants *about* a lexical
+  scan without repeating its match text.
 
 **Candidate new pattern, NOT yet catalogued — TEST-AGAINST-LIVE-DB (recorded with
 an explicit promotion trigger; 2026-08-03,
@@ -927,6 +1047,201 @@ documents that exact failure mode (bulk-ingested Workflow-tool events land at wh
 id is next) and re-sorts correctly. Recorded as **DEC-20** in that effort's `decisions.md`,
 out of scope to fix there, still open. The hand-typed scan had been green over that defect
 the whole time.
+
+### 9.8 OVERLOADED-ABSENCE (distinguishable outcomes collapsed into one absent value)
+
+**PROMOTED from candidate to a numbered entry 2026-08-04** by `team-qa`
+`qa-strategist` during `intake/2026-08-04-value-summary-tick/`. Originally recorded
+the same day by the PM with an explicit promotion trigger (see "Trigger, and why it
+fired" below). Adjacent to §9.1 but **deliberately not filed under it** — see the
+discrimination test below.
+
+**The shape:** a module written to the (correct, house-standard) rule *"never throws,
+never blocks — return null/empty on any unavailability"* encodes several genuinely
+distinguishable outcomes — **not-yet-attempted**, **over-budget-this-round**, and
+**permanently-failed** — as the *same* absent or empty value. The rule is right; the
+implementation of the rule destroys information. No consumer can tell transient from
+terminal, so the UI cannot render an honest state, and no operator can tell a backlog
+from an outage. The suite stays green because every test asserts the documented
+contract, and the documented contract is the defect.
+
+**Live evidence (both verified by direct read, 2026-08-04):**
+1. `server/lib/value-summary.js`'s `enrichPoolAltitudes` — its own JSDoc states *"A unit
+   absent from the result means no altitude could be produced this round (LLM
+   off/unavailable, spawn failure, or unparsable output)"*, **plus** over the
+   `MAX_UNITS_PER_PROMPT = 40` cap, **plus** simply not attempted yet. Five states, one
+   wire representation. This is the entire content of the `value-summary-tick` request:
+   the user cannot distinguish "still generating" from "unavailable."
+2. `server/lib/reconciliation.js`'s `parseDispositionOutput` — ends in
+   `catch { return new Map(); }`, **silently**. An empty map means both "nothing to
+   disposition" and "the whole tick's verdicts were voided by one oversized prompt."
+   Already documented from a different angle under SHARED-BUDGET-STARVATION (§9.6);
+   recorded here because the *observability* failure is the same one, independent of the
+   budget cause.
+
+**How it gets written (both instances):** the bounded/never-throwing contract is copied
+from a sibling that solved the same problem more completely, and the half that made the
+sibling honest is dropped. `focus-summary.js` caps too — but it also **decomposes**
+(hierarchical per-day synthesis above `DIRECT_WINDOW_MAX_DAYS`, so no cap ever drops a
+whole day) and **discloses** ("earlier ones dropped with an explicit note").
+`value-summary.js` copied the cap and its rationale comment verbatim, and neither of
+those two.
+
+**Discrimination test — when this is NOT §9.1.** §9.1's criterion is *"same field, same
+value, across every consumer."* Apply that here and it is meaningless: there is no single
+value multiple sites should agree on. Filing this under §9.1 and "fixing" it by extracting
+a shared helper would leave the ambiguity entirely intact. Same reasoning that retracted
+the trunk-drift pre-flag on 2026-08-02 — ask first whether a single correct value exists.
+
+**Cure (recommended, not yet built):** a per-item **discriminated state** on the wire —
+at minimum `queued` vs. `unavailable-retrying` vs. `resolved` — never a heuristic
+reconstructed on the client from what is missing. Raising the bound is not a fix: it moves
+the threshold and preserves the ambiguity. Corollary worth applying independently: **any
+bound on a user-visible collection should cite, in its own declaring comment, the measured
+real distribution it was sized against.** `MAX_UNITS_PER_PROMPT = 40` was declared with
+*"Pool batches are small in practice, so overflow is expected to be rare"* one day after
+`intake/2026-08-02-plan-lifecycle-value-ledger/decisions.md` DEC-12 recorded a signed-off
+**182-unit** live pool. A comment forced to name the number could not have been written.
+
+**Trigger, and why it fired (2026-08-04, `qa-strategist`).** The written trigger was
+*"(a) a third surface is found collapsing distinguishable outcomes into one absent/empty
+value, or (b) one of the two instances above is shown to have misled a real diagnosis."*
+Both clauses are met, on evidence, and neither rests on the weak argument that a second
+team member read the same file — re-encountering a known instance is **not** an
+occurrence, and this entry should not be counted that way in future:
+
+- **(b), decisively.** `intake/2026-08-04-value-summary-tick/request-brief.md` exists
+  *because* instance #1 misled a real diagnosis: a 182-unit backlog was
+  indistinguishable from an outage, so the reasonable read of a half-empty Value Pool
+  was "this is broken," not "this is still working." The user's own diagnosis was the
+  one misled. That is the clause, satisfied literally.
+- **(a), twice, and from inside this pattern's own cure — which is the strongest
+  available evidence that it generalizes.** That intake's `risk.md` found two further
+  surfaces collapsing distinguishable outcomes: **Trap E**, the client's
+  `AltitudeText` fallback, which renders "old server that predates `states`" and
+  "new server sending a malformed/out-of-registry `states` value" identically, so a
+  real server regression is invisible; and **Trap C**, `pending_after_sweep`, a single
+  number that cannot distinguish "draining toward zero" from "treading water" for a
+  project whose pool grows between sweeps. Both were introduced by the change written
+  to cure instances #1 and #2. Compare §9.7's own argument for itself ("the failure
+  survives even in the build that builds the cure") and §9.1's 2026-08-03 note ("this
+  entry's own lesson landed a third time anyway").
+
+**Acceptance criterion.** For any module under the never-throws/never-blocks contract:
+each genuinely distinguishable outcome must be representable on the wire, and a
+consumer must never be asked to reconstruct *why* something is absent from *what*
+is absent. Concretely — every item submitted lands in **exactly one** bucket, never
+zero and never two; "not attempted yet," "over budget this round," and
+"attempted and failed" are different values; and any single number reported as
+progress must be **re-derived from the live input each round**, not decremented,
+or it silently becomes another collapsed absence. Prove the "never zero" direction
+explicitly: it is the one that a naive "no key appears in both maps" check misses.
+
+**How to comply.**
+- Return a discriminated per-item state, not a sparse map plus a JSDoc paragraph
+  explaining the five things an absence might mean. Raising the bound is not a fix:
+  it moves the threshold and preserves the ambiguity.
+- Test the **combination**, not the two branches separately. The
+  outage-vs-backlog conflation only reproduces when the item is *both* over-cap
+  *and* the LLM path is down; a suite with one test per branch passes while the
+  "cap first, then gate" ordering bug ships. (`intake/2026-08-04-value-summary-tick/`
+  got this right — copy its DEC-11 truth table shape.)
+- When copying a bounded/never-throwing contract from a sibling, copy the halves that
+  made the sibling honest too — `focus-summary.js` **decomposes** (hierarchical
+  per-day synthesis, so no cap ever drops a whole day) and **discloses** ("earlier
+  ones dropped with an explicit note"). Both live instances copied the cap and the
+  rationale comment and neither of those.
+- **Any bound on a user-visible collection must cite, in its own declaring comment,
+  the measured real distribution it was sized against.** `MAX_UNITS_PER_PROMPT = 40`
+  was declared with *"Pool batches are small in practice, so overflow is expected to
+  be rare"* one day after `intake/2026-08-02-plan-lifecycle-value-ledger/decisions.md`
+  DEC-12 recorded a signed-off **182-unit** live pool. A comment forced to name the
+  number could not have been written.
+
+**Still-open instances at promotion time (2026-08-04):** #2 (`parseDispositionOutput`'s
+silent `catch { return new Map(); }`) is **unfixed** — tracked from the budget angle
+under §9.6's SHARED-BUDGET-STARVATION candidate. Traps C and E above are unfixed and,
+as of the QA pass, carried no `decisions.md` row either. Remaining unexamined
+candidates, all sharing the never-throws contract: `focus-inference.js`'s
+`parseLlmOutput`, `focus-audit.js`, and any future `runClaudePromptJson` consumer.
+
+**BUILD-PHASE CONFIRMATION, 2026-08-04 — `intake/2026-08-04-value-summary-tick/`
+(the cure is BUILT for instance #1, and the entry is now proven out through a
+real build with real bugs caught at every layer it predicts; count unchanged —
+this is the same instance closing, not a new one).** Promoted from candidate
+during that intake's `team-qa` pass on argument alone; this is the build that
+tested the argument. `enrichPoolAltitudes` now returns
+`{ altitudes, states }` with a discriminated per-unit state
+(`queued` = known, not attempted this round; `unavailable` = attempted, produced
+nothing), exported as `ALTITUDE_STATES`, forwarded unchanged by
+`POST /api/project-plans/altitudes`, and rendered distinguishably by
+`PlanLedgerPanel`. The i18n obligation is closed *mechanically* — a server-side
+check derives its scope from the `ALTITUDE_STATES` export and `i18n.test.ts`
+E1.1 propagates it to all four locales. Raising the bound was never on the
+table; the bound is unchanged at 40 and the overflow is now **reported** and
+then **drained** by a background sweep, which is the "decompose and disclose"
+half this entry says both live instances dropped when they copied
+`focus-summary.js`'s cap.
+
+**The predictive claim held, three times, in the build written to cure it.**
+This entry's own argument for itself was that the failure survives even in the
+cure. Adversarial review and verification found exactly that, at three
+different layers, and **both halves of the acceptance criterion — "never zero"
+and "never two" — were violated inside the change enforcing them:**
+
+1. **"Never zero," at the observability layer (B2, blocker).** An errored sweep
+   ran its bookkeeping with every counter still at its initializer, writing
+   `pending_after_sweep = 0` — the most optimistic possible value — and
+   **overwriting** the last good sweep's count. A project whose
+   `assembleValuePool` throws every cycle (moved repo root, git lock) would
+   report "fully drained" forever, with no `outcome` column on
+   `value_summary_sweep_state` to tell it apart. This is verbatim this entry's
+   *"any single number reported as progress must be re-derived from the live
+   input each round … or it silently becomes another collapsed absence"* — and
+   WATCH-8's instrument failing in the one direction WATCH-8 exists to prevent.
+   The T-C test could not see it: T-C exercises only the happy path. Cured with
+   a second prepared statement (`upsertValueSweepStateKeepPending`) whose SQL
+   has **no `pending_after_sweep` clause at all**, so the error path is
+   *structurally* unable to touch it — inapplicability over compliance, per
+   §9.6's 2026-08-02 lesson. The bare `catch {}` was also bound and made to log.
+2. **"Never zero," one layer *above* the two states being discriminated (S3).**
+   A unit rejected by the route's own sanitizing loop (unrecognized
+   `value_source`) never reached the composer, so its key appeared in
+   **neither** `altitudes` nor `states` — and because `requestedAltitudesRef`
+   marks it already-requested, it rendered *"Generating…"* forever with no
+   retry. **The same diff's brand-new `api.ts` JSDoc asserted "never both,
+   never neither."** The contract was false at the route the day it was
+   written, and the test that would have exercised that path had been deleted
+   in the same diff. Cured by marking route-dropped keys `"unavailable"`. The
+   one irreducible case — a unit with no usable `unit_key` — genuinely has no
+   representable slot in a key-indexed map, and is documented as scoping rather
+   than papered over.
+3. **"Never two" (S6).** A duplicate `unitKey` straddling the 40-unit cap
+   landed in **both** maps (`queued` from the overflow copy, resolved from the
+   in-batch copy; the reconciling loop only ever *added* `unavailable`, never
+   cleared a stale `queued`). Not reachable from the tick — `assembleValuePool`
+   dedupes — but the route accepts caller-supplied arrays. Cured with one line
+   (`[...new Map(misses.map(u => [u.unitKey, u])).values()]`) placed *before*
+   the LLM-availability gate so the outage rule still applies to the deduped
+   set.
+
+**Two lessons to carry:**
+- **This entry's "prove the never-zero direction explicitly" instruction earned
+  its place.** Both #1 and #2 are never-zero failures, and the naive "no key in
+  both maps" check misses both. The build's DEC-11 truth-table Case 5 got this
+  right (`altKeys.size + stateKeys.size === submitted.length`) — but only *at
+  the composer*. The two failures landed at the **route** and at the
+  **sweep-state table**, i.e. at the seams the composer's partition test cannot
+  see. Extend the "exactly one bucket" assertion to every layer that can add or
+  drop an item, not just the one that computes the buckets.
+- **The DEC-11 truth table is the reusable artifact.** This entry already says
+  "copy its shape"; confirmed at build. The combination case (over-cap **and**
+  LLM down) is the one that catches a "cap first, then gate" ordering bug, and
+  the shipped code gets the order right — `llmAvailable()` runs *before* the
+  slice, so an outage marks every miss `unavailable` including over-cap ones,
+  pinned at the composer (Case 3), the route (Case B) and the client (the
+  45-unavailable render test).
+
 
 ---
 
