@@ -48,6 +48,19 @@ const VALUE_SOURCES = [
 ];
 const ATTRIBUTION_TIERS = ["mechanical", "correlational", "judgment"];
 
+// Value sources whose PROMPT INPUT SET (server/lib/value-summary.js's
+// unitFacts()) can change after a unit is first synthesized and cached — a
+// merge_commit unit's SHA is immutable, but value-ledger.js still stamps a
+// mutable `stage` onto it (below) and buildPrompt renders that stage, so its
+// cached text can go stale exactly like intake_initiative/detour's. Keyed on
+// value_source, never on "has a stage" (a source-taxonomy fact, not a
+// synthesis-layer inference) — value-summary.js's readCached/compareUnitInputs
+// gate a unit's cache on membership here; every other source (trunk_commit
+// chief among them) keeps the original generate-once-served-forever cache
+// behavior. Grow this list only when a NEW value_source's ground fact can
+// itself change post-generation, never to silence a false-positive elsewhere.
+const MUTABLE_VALUE_SOURCES = ["intake_initiative", "detour", "merge_commit"];
+
 // DEC-16 tripwire: every known reader of this module's derived values, so a
 // new one (MCP tools, an AGENT-PLAN.md export, a dedicated reconcile page)
 // is a reviewed, deliberate addition — never a silent third consumer
@@ -337,6 +350,7 @@ function summarizeDeliveredValue(dbModule, project) {
 module.exports = {
   VALUE_SOURCES,
   ATTRIBUTION_TIERS,
+  MUTABLE_VALUE_SOURCES,
   BACKFILL_LOOKBACK_DAYS,
   CONSUMERS,
   unitKey,

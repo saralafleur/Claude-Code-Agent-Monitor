@@ -52,6 +52,27 @@ const GRANDFATHERED = [
   "webhook_targets.config",
 ];
 
+// Grandfathered multi-column ALTER blocks — blocks containing 2+ ALTER TABLE…ADD COLUMN
+// that were written before the addColumnsIfMissing helper was adopted.
+// New multi-column blocks must use the helper; do not add to this object.
+// Corrected 2026-08-05 (altitude-invalidation build): the prior snapshot of
+// this registry named entries ("agents.workflow_run_id",
+// "model_pricing.fast_enabled", "color_thresholds.critical_r",
+// "color_thresholds.legend_r", "context_snapshots.input_tokens") that do not
+// match ALTER-BLOCK-SCAN's actual regex target (a single `db.exec(\`...\`)`
+// template literal containing 2+ "ALTER TABLE ... ADD COLUMN" statements) —
+// verified against server/db.js, those four other columns are each migrated
+// via separate `db.prepare(...).run()` calls (or don't exist under those
+// names at all), never a shared multi-statement db.exec block, so the scan
+// never found them in the first place. The two real pre-helper
+// color_thresholds blocks are keyed on their own first ADD COLUMN below.
+const GRANDFATHERED_ALTER_BLOCKS = {
+  "color_thresholds.session_rate_yellow_at": "2026-08-03, six-column pre-helper block",
+  "color_thresholds.session_yellow_at": "2026-08-03, six-column legacy split",
+  // Comment: A new multi-column ALTER block must go through addColumnsIfMissing;
+  //          do not add a row here to make this pass.
+};
+
 // Upgrade cases: each defines a migration test
 const UPGRADE_CASES = [
   {
@@ -595,6 +616,247 @@ const UPGRADE_CASES = [
         assertWritable,
       },
     ];
+  })(),
+  // M1: value_unit_summaries input-snapshot columns (input_stage, input_label,
+  // regenerated_at, regen_reason, seen_at) — five columns sharing one legacySql/seed
+  // via the color_thresholds spread-IIFE precedent. Seed one mutable row
+  // (intake_initiative) and one immutable trunk_commit row.
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS value_unit_summaries (
+        unit_key TEXT PRIMARY KEY,
+        project_level TEXT NOT NULL,
+        stakeholder_level TEXT NOT NULL,
+        model TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `;
+    const seed = (legacyDb) => {
+      // Mutable row (intake_initiative)
+      legacyDb
+        .prepare(
+          `INSERT INTO value_unit_summaries (unit_key, project_level, stakeholder_level, model, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .run(
+          "intake_initiative::2026-08-03-job-pipeline-tracker::/repo",
+          "job-pipeline-tracker",
+          "The job pipeline tracker is built and being tested",
+          "haiku",
+          "2026-08-01T12:00:00.000Z"
+        );
+      // Immutable row (trunk_commit)
+      legacyDb
+        .prepare(
+          `INSERT INTO value_unit_summaries (unit_key, project_level, stakeholder_level, model, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .run(
+          "trunk_commit::abc123def456::/repo",
+          "project-context",
+          "Updated documentation for project context",
+          "haiku",
+          "2026-08-01T11:00:00.000Z"
+        );
+    };
+    const assertLegacyRow = (db) => {
+      const row = db
+        .prepare(
+          "SELECT input_stage, input_label, regenerated_at, regen_reason, seen_at FROM value_unit_summaries WHERE unit_key = ?"
+        )
+        .get("intake_initiative::2026-08-03-job-pipeline-tracker::/repo");
+      assert.ok(row, "value_unit_summaries row should exist after migration");
+      assert.equal(row.input_stage, null, "input_stage should be NULL for legacy rows");
+      assert.equal(row.input_label, null, "input_label should be NULL for legacy rows");
+      assert.equal(row.regenerated_at, null, "regenerated_at should be NULL for legacy rows");
+      assert.equal(row.regen_reason, null, "regen_reason should be NULL for legacy rows");
+      assert.equal(row.seen_at, null, "seen_at should be NULL for legacy rows");
+    };
+    const assertWritable = (db) => {
+      // The widened upsertValueUnitSummary should work on legacy rows
+      const { stmts } = require("../db");
+      stmts.upsertValueUnitSummary.run(
+        "intake_initiative::2026-08-03-job-pipeline-tracker::/repo",
+        "job-pipeline-tracker-project",
+        "The job pipeline tracker is now shipped",
+        "haiku",
+        "built",
+        "2026-08-03-job-pipeline-tracker",
+        "2026-08-03T14:30:00.000Z",
+        "stage_changed",
+        null
+      );
+      const row = db
+        .prepare(
+          "SELECT input_stage, input_label, regen_reason FROM value_unit_summaries WHERE unit_key = ?"
+        )
+        .get("intake_initiative::2026-08-03-job-pipeline-tracker::/repo");
+      assert.equal(row.input_stage, "built", "input_stage should be writable");
+      assert.equal(
+        row.input_label,
+        "2026-08-03-job-pipeline-tracker",
+        "input_label should be writable"
+      );
+      assert.equal(row.regen_reason, "stage_changed", "regen_reason should be writable");
+    };
+    return ["input_stage", "input_label", "regenerated_at", "regen_reason", "seen_at"].map(
+      (column) => ({
+        table: "value_unit_summaries",
+        column,
+        legacySql,
+        seed,
+        assertLegacyRow,
+        assertWritable,
+      })
+    );
+  })(),
+  // M2: value_summary_generation_log.stale_regenerated — nullable, no DEFAULT.
+  // NULL means "predates measurement" (distinct from measured zero).
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS value_summary_generation_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('tick','request')),
+        outcome TEXT NOT NULL CHECK(outcome IN ('ok','skipped','error')),
+        pool_size INTEGER NOT NULL DEFAULT 0,
+        cache_hits INTEGER NOT NULL DEFAULT 0,
+        generated INTEGER NOT NULL DEFAULT 0,
+        queued INTEGER NOT NULL DEFAULT 0,
+        unavailable INTEGER NOT NULL DEFAULT 0,
+        model TEXT,
+        duration_ms INTEGER,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+    `;
+    const seed = (legacyDb) => {
+      legacyDb
+        .prepare(
+          `INSERT INTO value_summary_generation_log (project_id, source, outcome, pool_size, cache_hits, generated, queued, unavailable)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("project-1", "tick", "ok", 10, 5, 3, 2, 0);
+    };
+    const assertLegacyRow = (db) => {
+      const row = db
+        .prepare("SELECT stale_regenerated FROM value_summary_generation_log WHERE project_id = ?")
+        .get("project-1");
+      assert.ok(row, "value_summary_generation_log row should exist after migration");
+      assert.strictEqual(
+        row.stale_regenerated,
+        null,
+        "NULL = predates measurement — a DEFAULT 0 would stamp a false measured zero (DEC-3)"
+      );
+    };
+    const assertWritable = (db) => {
+      const { stmts } = require("../db");
+      // BL-3: insertValueSummaryGeneration has 11 placeholders (project_id,
+      // source, outcome, pool_size, cache_hits, generated, queued,
+      // unavailable, model, duration_ms, stale_regenerated) — the previous
+      // 8-argument call here would throw
+      // "RangeError: Too few parameter values were provided" the moment it
+      // was ever actually executed; it never was (§9.3 VACUOUS-GUARD).
+      stmts.insertValueSummaryGeneration.run(
+        "project-2",
+        "request",
+        "ok",
+        15,
+        8,
+        4,
+        2,
+        1,
+        "haiku",
+        42,
+        3
+      );
+      const row = db
+        .prepare("SELECT stale_regenerated FROM value_summary_generation_log WHERE project_id = ?")
+        .get("project-2");
+      assert.equal(row.stale_regenerated, 3, "stale_regenerated should be writable");
+    };
+    return [
+      {
+        table: "value_summary_generation_log",
+        column: "stale_regenerated",
+        legacySql,
+        seed,
+        assertLegacyRow,
+        assertWritable,
+      },
+    ];
+  })(),
+  // outcome/model/duration_ms on value_summary_generation_log — this
+  // table's ORIGINAL shape (before even those three existed), exposed by
+  // value-summary-legacy-boot.test.js's B1 fixture. Not part of this
+  // build's own diff (technical-plan.md never mentions these three), but a
+  // pre-existing migration gap this same addColumnsIfMissing call now also
+  // closes (folded into the same call site as stale_regenerated in db.js,
+  // so one HELPER-CASE-SCAN call site needs all four covered here).
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS value_summary_generation_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        pool_size INTEGER NOT NULL,
+        cache_hits INTEGER NOT NULL DEFAULT 0,
+        generated INTEGER NOT NULL DEFAULT 0,
+        queued INTEGER NOT NULL DEFAULT 0,
+        unavailable INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `;
+    const seed = (legacyDb) => {
+      legacyDb
+        .prepare(
+          `INSERT INTO value_summary_generation_log (project_id, source, pool_size, cache_hits, generated, queued, unavailable)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("project-3", "tick", 10, 5, 3, 2, 0);
+    };
+    const assertLegacyRow = (db) => {
+      const row = db
+        .prepare(
+          "SELECT outcome, model, duration_ms FROM value_summary_generation_log WHERE project_id = ?"
+        )
+        .get("project-3");
+      assert.ok(row, "value_summary_generation_log row should exist after migration");
+      assert.equal(row.outcome, "ok", "outcome backfills to 'ok' for a pre-existing completed row");
+      assert.equal(row.model, null, "model should be NULL for legacy rows");
+      assert.equal(row.duration_ms, null, "duration_ms should be NULL for legacy rows");
+    };
+    const assertWritable = (db) => {
+      const { stmts } = require("../db");
+      stmts.insertValueSummaryGeneration.run(
+        "project-4",
+        "request",
+        "ok",
+        15,
+        8,
+        4,
+        2,
+        1,
+        "haiku",
+        42,
+        3
+      );
+      const row = db
+        .prepare(
+          "SELECT outcome, model, duration_ms FROM value_summary_generation_log WHERE project_id = ?"
+        )
+        .get("project-4");
+      assert.equal(row.outcome, "ok");
+      assert.equal(row.model, "haiku", "model should be writable");
+      assert.equal(row.duration_ms, 42, "duration_ms should be writable");
+    };
+    return ["outcome", "model", "duration_ms"].map((column) => ({
+      table: "value_summary_generation_log",
+      column,
+      legacySql,
+      seed,
+      assertLegacyRow,
+      assertWritable,
+    }));
   })(),
 ];
 
@@ -1446,6 +1708,588 @@ describe("Migration meta-test", () => {
         `New column migration \`${alter}\` has no upgrade-path test. Add an \`UPGRADE_CASES\` entry — do not add to \`GRANDFATHERED\`.`
       );
     }
+  });
+
+  it("HELPER-CASE-SCAN: every column added via addColumnsIfMissing has its own UPGRADE_CASES entry", () => {
+    const dbPath = path.resolve(__dirname, "../db.js");
+    const dbSource = fs.readFileSync(dbPath, "utf8");
+
+    // Find all addColumnsIfMissing call sites. Prettier is free to add a
+    // trailing comma after the `columns: {...}` sub-object (its own
+    // formatting convention, not a project decision this scan should
+    // depend on) — `,?` tolerates it so a mechanical reformat can't
+    // silently zero out this scan's coverage.
+    const helperPattern = /addColumnsIfMissing\s*\(\s*{[^}]*columns\s*:\s*{[^}]*}\s*,?\s*}\s*\)/gs;
+    const calls = dbSource.match(helperPattern) || [];
+
+    assert.ok(
+      calls.length > 0 && calls.length <= 10,
+      `found ${calls.length} addColumnsIfMissing call sites; expected at least 1`
+    );
+
+    // Extract table.column pairs from each call
+    const pairs = new Set();
+    for (const call of calls) {
+      const tableMatch = call.match(/table\s*:\s*"([^"]+)"/);
+      const columnsMatch = call.match(/columns\s*:\s*{([^}]*)}/);
+      if (tableMatch && columnsMatch) {
+        const table = tableMatch[1];
+        const colsText = columnsMatch[1];
+        const colMatches = colsText.match(/(\w+)\s*:/g) || [];
+        for (const colMatch of colMatches) {
+          const col = colMatch.replace(/:/, "").trim();
+          pairs.add(`${table}.${col}`);
+        }
+      }
+    }
+
+    assert.ok(pairs.size >= 6, `found ${pairs.size} helper pairs, expected >= 6`);
+
+    const caseKeys = UPGRADE_CASES.map((uc) => `${uc.table}.${uc.column}`);
+    for (const pair of pairs) {
+      assert.ok(
+        caseKeys.includes(pair),
+        `missing UPGRADE_CASES for ${pair} — do not add to GRANDFATHERED`
+      );
+    }
+  });
+
+  it("ALTER-BLOCK-SCAN: no multi-column ALTER block bypasses addColumnsIfMissing", () => {
+    const dbPath = path.resolve(__dirname, "../db.js");
+    const dbSource = fs.readFileSync(dbPath, "utf8");
+
+    // Find db.exec blocks containing 2+ ALTER TABLE...ADD COLUMN statements
+    const multiAlterPattern = /db\.exec\s*\(\s*`[^`]*ALTER\s+TABLE[^`]*ALTER\s+TABLE[^`]*`/gs;
+    const blocks = dbSource.match(multiAlterPattern) || [];
+
+    const foundBlocks = [];
+    for (const block of blocks) {
+      const firstColMatch = block.match(/ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)/);
+      if (firstColMatch) {
+        const table = firstColMatch[1];
+        const col = firstColMatch[2];
+        foundBlocks.push(`${table}.${col}`);
+      }
+    }
+
+    const foundKeys = foundBlocks.sort();
+    const grandfatheredKeys = Object.keys(GRANDFATHERED_ALTER_BLOCKS).sort();
+
+    assert.deepEqual(
+      foundKeys,
+      grandfatheredKeys,
+      `multi-column ALTER blocks must match GRANDFATHERED_ALTER_BLOCKS exactly (no orphans, no omissions)`
+    );
+  });
+});
+
+describe("Migration: value_unit_summaries input-snapshot columns", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  // BL-3: all five value_unit_summaries UPGRADE_CASES entries share one
+  // legacySql/seed/assertLegacyRow/assertWritable (the color_thresholds
+  // spread-IIFE precedent) — any one of the five is representative.
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "value_unit_summaries" && uc.column === "input_stage"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-value-summary-${Date.now()}.db`);
+    // BL-3: seed a genuinely LEGACY database (pre-slice shape — none of the
+    // five input-snapshot columns exist) via the UPGRADE_CASES fixture
+    // itself. The prior version of this test only ever booted a FRESH
+    // database, whose own CREATE TABLE body already includes these five
+    // columns — so "M1" passed unconditionally whether or not
+    // addColumnsIfMissing ever actually ran (§9.3 VACUOUS-GUARD; the
+    // fixture's own seed/assertLegacyRow/assertWritable bodies were
+    // registered but never executed).
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("M1: five-column ALTER converges on a genuinely legacy database — legacy rows read NULL and are writable", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // After migration, all five columns should exist
+    const info = db.prepare("PRAGMA table_info(value_unit_summaries)").all();
+    const columnNames = info.map((col) => col.name);
+
+    assert.ok(columnNames.includes("input_stage"), "input_stage column should exist");
+    assert.ok(columnNames.includes("input_label"), "input_label column should exist");
+    assert.ok(columnNames.includes("regenerated_at"), "regenerated_at column should exist");
+    assert.ok(columnNames.includes("regen_reason"), "regen_reason column should exist");
+    assert.ok(columnNames.includes("seen_at"), "seen_at column should exist");
+
+    // BL-3: actually EXECUTE the UPGRADE_CASES fixture's own assertions —
+    // this is the part the prior version of this test never did.
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("M1 it4 (DEC-9 behavioral leg, build-task-list §5.1): a legacy MUTABLE row is treated as stale (an ordinary cache miss); a legacy trunk_commit row serves its original text unchanged", async () => {
+    // Its own isolated temp DB (not the describe-level `tempDbPath`, which
+    // the "M1" test above already mutates via upgradeCase.assertWritable —
+    // sharing it here would make this leg's own precondition depend on
+    // sibling-test ordering).
+    const it4DbPath = path.join(os.tmpdir(), `db-migration-value-summary-it4-${Date.now()}.db`);
+    const it4TempDb = new Database(it4DbPath);
+    it4TempDb.pragma("journal_mode = WAL");
+    it4TempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(it4TempDb);
+    it4TempDb.close();
+
+    process.env.DASHBOARD_DB_PATH = it4DbPath;
+    delete require.cache[require.resolve("../db")];
+    const dbModule = require("../db");
+    const { db } = dbModule;
+    const { MUTABLE_VALUE_SOURCES } = require("../lib/value-ledger");
+    const { enrichPoolAltitudes } = require("../lib/value-summary");
+
+    const legacyMutableRow = db
+      .prepare("SELECT input_label, input_stage FROM value_unit_summaries WHERE unit_key = ?")
+      .get("intake_initiative::2026-08-03-job-pipeline-tracker::/repo");
+    // Anti-vacuous precondition (§9.3): this row must genuinely BE the
+    // legacy, unsnapshotted shape this leg claims to exercise, on a source
+    // that is genuinely mutable — otherwise a passing assertion below would
+    // prove nothing.
+    assert.equal(
+      legacyMutableRow.input_label,
+      null,
+      "precondition: legacy row must have a NULL input_label snapshot"
+    );
+    assert.ok(
+      MUTABLE_VALUE_SOURCES.includes("intake_initiative"),
+      "precondition: intake_initiative must actually be a mutable source"
+    );
+
+    process.env.DASHBOARD_FOCUS_INFER_MODE = "heuristic"; // force LLM unavailable — deterministic, no spawn
+    const mutableUnit = {
+      unitKey: "intake_initiative::2026-08-03-job-pipeline-tracker::/repo",
+      value_source: "intake_initiative",
+      label: "job-pipeline-tracker",
+      stage: "built",
+    };
+    const immutableUnit = {
+      unitKey: "trunk_commit::abc123def456::/repo",
+      value_source: "trunk_commit",
+      label: null,
+      value_ref: "abc123def456",
+    };
+    const { altitudes, states } = await enrichPoolAltitudes(dbModule, [mutableUnit, immutableUnit]);
+    delete process.env.DASHBOARD_FOCUS_INFER_MODE;
+
+    // Mutable: a NULL input_label snapshot never matches unitFacts() (falls
+    // out via label_changed) — an ordinary cache miss. LLM is off this
+    // round, so it is re-homed with its OLD text plus a stale freshness
+    // marker (never blanked), and must not also appear in `states`.
+    assert.ok(
+      altitudes[mutableUnit.unitKey],
+      "the mutable unit must still be served (re-homed), not blanked"
+    );
+    assert.equal(
+      altitudes[mutableUnit.unitKey].freshness,
+      "stale_refresh_unavailable",
+      "the mutable unit must be marked stale (a cache miss this round), not served as a silent cache hit"
+    );
+    assert.equal(
+      states[mutableUnit.unitKey],
+      undefined,
+      "a re-homed stale unit must NOT also appear in states (DEC-11's never-both half)"
+    );
+
+    // Immutable: never gated on the snapshot at all — generate-once-served-
+    // forever, exact, its ORIGINAL cached text served unchanged.
+    assert.equal(
+      altitudes[immutableUnit.unitKey].cached,
+      true,
+      "trunk_commit must be an ordinary cache hit"
+    );
+    assert.equal(
+      altitudes[immutableUnit.unitKey].stakeholder,
+      "Updated documentation for project context",
+      "the immutable row's original cached text must be served unchanged"
+    );
+    assert.equal(
+      altitudes[immutableUnit.unitKey].freshness,
+      undefined,
+      "an immutable source must never carry a freshness marker"
+    );
+
+    db.close();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${it4DbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("M1-INT: five-column ALTER converges under interruption", () => {
+    // Seed a legacy DB with the schema plus input_stage only
+    // (simulating a crash between statements 1 and 2)
+    const legacyDb = new Database(tempDbPath);
+    legacyDb.pragma("journal_mode = WAL");
+    legacyDb.exec(`
+      CREATE TABLE IF NOT EXISTS value_unit_summaries (
+        unit_key TEXT PRIMARY KEY,
+        project_level TEXT NOT NULL,
+        stakeholder_level TEXT NOT NULL,
+        model TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        input_stage TEXT
+      );
+    `);
+    legacyDb
+      .prepare(
+        "INSERT INTO value_unit_summaries (unit_key, project_level, stakeholder_level, model, input_stage) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run("test-key", "test-project", "test-stakeholder", "haiku", "built");
+    legacyDb.close();
+
+    // Now boot the app, which should detect the partial state and add remaining columns
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    // The boot must not throw
+    assert.doesNotThrow(() => {
+      require("../db");
+    }, "db.js boot should not throw when value_unit_summaries has partial columns");
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // All five columns should exist
+    const info = db.prepare("PRAGMA table_info(value_unit_summaries)").all();
+    const columnNames = info.map((col) => col.name);
+
+    assert.equal(
+      columnNames.filter((c) =>
+        ["input_stage", "input_label", "regenerated_at", "regen_reason", "seen_at"].includes(c)
+      ).length,
+      5,
+      "all five input-snapshot columns should exist after recovery"
+    );
+
+    // Pre-existing input_stage data survived
+    const row = db
+      .prepare("SELECT input_stage FROM value_unit_summaries WHERE unit_key = ?")
+      .get("test-key");
+    assert.equal(
+      row.input_stage,
+      "built",
+      "pre-existing input_stage data should survive migration"
+    );
+
+    // Second boot should be a no-op
+    delete require.cache[require.resolve("../db")];
+    const db2 = require("../db").db;
+    const info2 = db2.prepare("PRAGMA table_info(value_unit_summaries)").all();
+    const columnNames2 = info2.map((col) => col.name);
+
+    assert.deepEqual(columnNames, columnNames2, "second boot should leave schema unchanged");
+
+    db.close();
+    db2.close();
+  });
+});
+
+describe("Migration: value_summary_generation_log.stale_regenerated", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "value_summary_generation_log" && uc.column === "stale_regenerated"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-gen-log-${Date.now()}.db`);
+    // BL-3: seed a genuinely legacy database (has outcome/model/duration_ms
+    // already, but not stale_regenerated) via the UPGRADE_CASES fixture
+    // itself — the prior version of this test only ever booted a FRESH
+    // database, which trivially has the column from CREATE TABLE alone.
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("M2: stale_regenerated column exists and reads NULL on legacy rows, and is writable", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // Column should exist
+    const info = db.prepare("PRAGMA table_info(value_summary_generation_log)").all();
+    const columnNames = info.map((col) => col.name);
+    assert.ok(columnNames.includes("stale_regenerated"), "stale_regenerated column should exist");
+
+    // BL-3: actually EXECUTE the UPGRADE_CASES fixture's own assertions.
+    // assertWritable's own arity bug (8 args into an 11-placeholder
+    // statement) is fixed in the fixture itself — this is the first time it
+    // has ever actually run.
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+});
+
+describe("Migration: value_summary_generation_log.outcome/model/duration_ms (oldest legacy shape)", () => {
+  // This table's ORIGINAL shape — before even outcome/model/duration_ms
+  // existed — folds through the SAME addColumnsIfMissing call site as
+  // stale_regenerated (db.js), so its own UPGRADE_CASES fixture needs the
+  // same real seed-legacy-DB -> boot -> assert treatment (BL-3): three of
+  // the nine new entries this build added had zero executed coverage.
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "value_summary_generation_log" && uc.column === "outcome"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-gen-log-oldest-${Date.now()}.db`);
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("outcome/model/duration_ms converge on the table's oldest legacy shape — outcome backfills to 'ok', model/duration_ms read NULL, all three writable", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const info = db.prepare("PRAGMA table_info(value_summary_generation_log)").all();
+    const columnNames = info.map((col) => col.name);
+    for (const col of ["outcome", "model", "duration_ms"]) {
+      assert.ok(columnNames.includes(col), `${col} column should exist after migration`);
+    }
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+});
+
+describe("addColumnsIfMissing helper contract (MIG-HELPER, BL-4)", () => {
+  // BL-4: the prior version of this describe had exactly one `it` with ZERO
+  // assertions ("we verify the behavior through the end result... if not,
+  // this test fails" — it could not fail). The helper's own "NEVER throws
+  // out of require()" property is the entire reason A-1/DEC-25 was
+  // MANDATORY (a throw here bricks Express, MCP, the desktop app and the
+  // VS Code extension simultaneously against the one shared user-global
+  // DB) — that property must be asserted directly, not inferred from a
+  // successful module boot.
+  let tempDbPath;
+  let dbModule;
+  let db;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-helper-${Date.now()}.db`);
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+    dbModule = require("../db");
+    db = dbModule.db;
+    assert.equal(dbModule.DB_PATH, tempDbPath, "positive DASHBOARD_DB_PATH control (DEC-22)");
+    assert.equal(
+      typeof dbModule.addColumnsIfMissing,
+      "function",
+      "db.js must export addColumnsIfMissing for direct contract testing"
+    );
+  });
+
+  after(() => {
+    db.close();
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("MIG-HELPER-1: returns false for a non-existent table, and never throws", () => {
+    let threw = false;
+    let result;
+    try {
+      result = dbModule.addColumnsIfMissing({
+        table: "mig_helper_no_such_table",
+        columns: { foo: "TEXT" },
+      });
+    } catch {
+      threw = true;
+    }
+    assert.equal(threw, false, "must never throw for a non-existent table");
+    assert.equal(result, false, "must return false for a non-existent table");
+  });
+
+  it("MIG-HELPER-2: a failed ALTER is caught, logged, returns false, never throws — and does not leave a partial column behind (all-or-nothing)", () => {
+    db.exec("CREATE TABLE mig_helper_2 (id INTEGER PRIMARY KEY)");
+
+    const originalConsoleError = console.error;
+    const logged = [];
+    console.error = (...args) => logged.push(args.map(String).join(" "));
+    let threw = false;
+    let result;
+    try {
+      // "INTEGER PRIMARY KEY" is a genuine SQLite ADD COLUMN rejection
+      // ("Cannot add a PRIMARY KEY column") — a real ALTER failure, not a
+      // simulated one.
+      result = dbModule.addColumnsIfMissing({
+        table: "mig_helper_2",
+        columns: { good_col: "TEXT", bad_col: "INTEGER PRIMARY KEY" },
+      });
+    } catch {
+      threw = true;
+    } finally {
+      console.error = originalConsoleError;
+    }
+    assert.equal(
+      threw,
+      false,
+      "addColumnsIfMissing must never throw, even when SQLite rejects an ALTER"
+    );
+    assert.equal(result, false, "a failed batch must return false");
+    assert.ok(
+      logged.some((line) => line.includes("mig_helper_2")),
+      "the failure must be logged (console.error), not swallowed silently"
+    );
+
+    // Whole-transaction rollback: good_col and bad_col were requested
+    // together inside ONE BEGIN/COMMIT — a failure on bad_col must roll
+    // good_col back too, never leave it half-applied.
+    const namesAfterFailure = db
+      .prepare("PRAGMA table_info(mig_helper_2)")
+      .all()
+      .map((c) => c.name);
+    assert.ok(
+      !namesAfterFailure.includes("good_col"),
+      "good_col must be rolled back along with the failed bad_col (all-or-nothing)"
+    );
+    assert.ok(!namesAfterFailure.includes("bad_col"), "bad_col itself must never land");
+
+    // "Other columns converge from partial state": a LATER call requesting
+    // only the surviving, valid column must still converge normally — the
+    // earlier failure must not corrupt the helper's own state.
+    const result2 = dbModule.addColumnsIfMissing({
+      table: "mig_helper_2",
+      columns: { good_col: "TEXT" },
+    });
+    assert.equal(result2, true, "a later call with only the valid column must converge");
+    const namesAfterRecovery = db
+      .prepare("PRAGMA table_info(mig_helper_2)")
+      .all()
+      .map((c) => c.name);
+    assert.ok(
+      namesAfterRecovery.includes("good_col"),
+      "good_col must exist after the recovering call"
+    );
+  });
+
+  it("MIG-HELPER-3: calling twice with the same request is idempotent — true, then false, never a duplicate column", () => {
+    db.exec("CREATE TABLE mig_helper_3 (id INTEGER PRIMARY KEY)");
+    const first = dbModule.addColumnsIfMissing({
+      table: "mig_helper_3",
+      columns: { extra: "TEXT" },
+    });
+    assert.equal(first, true, "first call adds the missing column");
+    const second = dbModule.addColumnsIfMissing({
+      table: "mig_helper_3",
+      columns: { extra: "TEXT" },
+    });
+    assert.equal(second, false, "second call is a no-op — nothing left to add");
+    const matches = db
+      .prepare("PRAGMA table_info(mig_helper_3)")
+      .all()
+      .filter((c) => c.name === "extra");
+    assert.equal(
+      matches.length,
+      1,
+      "exactly one extra column, never duplicated by the second call"
+    );
+  });
+
+  it("MIG-HELPER-4: partial state (one of three columns already present) adds exactly the two missing columns", () => {
+    db.exec("CREATE TABLE mig_helper_4 (id INTEGER PRIMARY KEY)");
+    db.exec("ALTER TABLE mig_helper_4 ADD COLUMN already_here TEXT");
+
+    const result = dbModule.addColumnsIfMissing({
+      table: "mig_helper_4",
+      columns: { already_here: "TEXT", new_one: "TEXT", new_two: "INTEGER" },
+    });
+    assert.equal(result, true, "at least one (of two missing) columns was added");
+
+    const names = db
+      .prepare("PRAGMA table_info(mig_helper_4)")
+      .all()
+      .map((c) => c.name);
+    assert.ok(names.includes("already_here"), "the pre-existing column must survive");
+    assert.ok(names.includes("new_one"), "the first missing column must be added");
+    assert.ok(names.includes("new_two"), "the second missing column must be added");
+    assert.equal(
+      names.filter((n) => n === "already_here").length,
+      1,
+      "the pre-existing column must not be duplicated/re-added (per-column PRAGMA probe, not a blind ALTER)"
+    );
   });
 });
 

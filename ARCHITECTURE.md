@@ -1094,7 +1094,12 @@ erDiagram
         TEXT project_level "Short phrase naming what this unit is part of"
         TEXT stakeholder_level "One plain, jargon-free sentence"
         TEXT model "LLM model that produced it, e.g. haiku"
-        TEXT created_at "ISO 8601 stamp of the synthesis - generated once, served forever"
+        TEXT created_at "ISO 8601 stamp of the synthesis"
+        TEXT input_stage "Snapshot for mutable-source staleness gating, NULL legit for detour"
+        TEXT input_label "Snapshot; NULL = legacy row (pre-dates this column)"
+        TEXT regenerated_at "NULL on first generation, set only when replaced"
+        TEXT regen_reason "initial / stage_changed / label_changed"
+        TEXT seen_at "Server-side acknowledge stamp, reset NULL on every regeneration"
     }
 ```
 

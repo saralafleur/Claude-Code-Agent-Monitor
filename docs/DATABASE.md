@@ -1084,7 +1084,9 @@ Managed through `/api/decision-queue/*` and `ccam decisions`; see [docs/API.md](
 
 ### value_unit_summaries
 
-Cached **PROJECT/STAKEHOLDER altitude synthesis** for one value-pool unit (`POST /api/project-plans/altitudes`, `server/lib/value-summary.js`) — the layer above the pool itself (`value-ledger.js`'s `assembleValuePool`). Every unit already carries its GROUND fact (`value_source`/label/attribution, not stored here); this table holds the two derived altitudes on top: a short PROJECT phrase and a plain-language STAKEHOLDER sentence, synthesized by a batched LLM call. Keyed on the unit's own identity (`unit_key`, the same `(value_source, value_ref, source_cwd)` composite `value-ledger.js` uses for pool dedup/claim-ratchet — see `unitKey()`), **not** a content digest like `focus_summaries` — a value unit's ground fact is immutable once seen (a commit's subject line, an intake slug, never change), so there is nothing to invalidate: generated once, served forever. No FK — describes a unit's identity, not a session/project row.
+Cached **PROJECT/STAKEHOLDER altitude synthesis** for one value-pool unit (`POST /api/project-plans/altitudes`, `server/lib/value-summary.js`) — the layer above the pool itself (`value-ledger.js`'s `assembleValuePool`). Every unit already carries its GROUND fact (`value_source`/label/attribution, not stored here); this table holds the two derived altitudes on top: a short PROJECT phrase and a plain-language STAKEHOLDER sentence, synthesized by a batched LLM call. Keyed on the unit's own identity (`unit_key`, the same `(value_source, value_ref, source_cwd)` composite `value-ledger.js` uses for pool dedup/claim-ratchet — see `unitKey()`), **not** a content digest like `focus_summaries`.
+
+A unit's cache key is stable forever, but its **prompt input set is not always immutable** (`intake_initiative`/`detour`/`merge_commit` units carry a `stage`, and sometimes a `label`, that can change after the text was cached — `MUTABLE_VALUE_SOURCES`, `server/lib/value-ledger.js`). `input_stage`/`input_label` store the exact input snapshot the cached text was generated from (`unitFacts()`); every read for a mutable source compares the unit's current facts against that snapshot and treats a mismatch as a cache miss for that one unit, regenerating it while every other cached unit is untouched. `trunk_commit` units (and any source outside `MUTABLE_VALUE_SOURCES`) keep the original generate-once-served-forever behavior exactly. `regenerated_at`/`regen_reason` record when/why a row was last replaced; `seen_at` is the server-side acknowledgement stamp for the "updated — stage changed" marker (`POST /api/project-plans/altitudes/seen`). No FK — describes a unit's identity, not a session/project row.
 
 ```sql
 CREATE TABLE value_unit_summaries (
@@ -1092,7 +1094,12 @@ CREATE TABLE value_unit_summaries (
     project_level TEXT NOT NULL,
     stakeholder_level TEXT NOT NULL,
     model TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    input_stage TEXT,
+    input_label TEXT,
+    regenerated_at TEXT,
+    regen_reason TEXT,
+    seen_at TEXT
 );
 ```
 
@@ -1105,6 +1112,11 @@ CREATE TABLE value_unit_summaries (
 | `stakeholder_level` | TEXT | NO | One plain, jargon-free sentence (<20 words) a non-technical reader could act on |
 | `model` | TEXT | YES | The `claude -p` model that produced it (`DASHBOARD_VALUE_SUMMARY_MODEL`, falling back to `DASHBOARD_FOCUS_SUMMARY_MODEL`, then `DASHBOARD_FOCUS_INFER_MODEL`, then `haiku`) |
 | `created_at` | TEXT | NO | ISO 8601 stamp of the synthesis (cache write time) |
+| `input_stage` | TEXT | YES | The unit's `stage` at generation time (`unitFacts().stage`). `NULL` does **not** discriminate legacy vs. fresh — a `detour` unit legitimately has no stage |
+| `input_label` | TEXT | YES | The unit's resolved label at generation time (`unitFacts().label`, never itself `NULL`). `NULL` here is the legacy-row discriminator — a row written before this column existed |
+| `regenerated_at` | TEXT | YES | `NULL` on first generation; set to the replacement timestamp only when a mutable unit's stale snapshot is replaced |
+| `regen_reason` | TEXT | YES | `'initial'` on first generation, else `'stage_changed'`/`'label_changed'` (stage takes precedence when both differ). `NULL` means legacy-only (predates this column) |
+| `seen_at` | TEXT | YES | Server-side acknowledgement stamp (`POST /api/project-plans/altitudes/seen`, compare-and-set on `regenerated_at`); reset to `NULL` on every regeneration so a new "unseen" generation always re-arms the marker |
 
 ---
 
@@ -1131,7 +1143,8 @@ CREATE TABLE value_summary_generation_log (
     unavailable INTEGER NOT NULL DEFAULT 0,
     model TEXT,
     duration_ms INTEGER,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    stale_regenerated INTEGER
 );
 ```
 
@@ -1141,9 +1154,10 @@ CREATE TABLE value_summary_generation_log (
 |--------|------|----------|-------------|
 | `value_summary_sweep_state.last_swept_at` | TEXT | YES | `NULL` until a project's first sweep — sorts first in the rotation (`ORDER BY (last_swept_at IS NOT NULL) ASC, last_swept_at ASC`), so a never-swept project is never starved behind a slower-rotating one |
 | `value_summary_sweep_state.pending_after_sweep` | INTEGER | NO | **Re-derived from that sweep's own `queued + unavailable` counts every time** — never decremented from a prior value, never a stale `pool_size` read. A project whose pool grows between sweeps must show that growth here |
-| `value_summary_generation_log.source` | TEXT | NO | `'tick'` (the only value v1 writes) or `'request'` — the unused-in-v1 enum value is paid for up front so a future request-path log write is additive, not a `CHECK`-widening rebuild |
+| `value_summary_generation_log.source` | TEXT | NO | `'tick'` or `'request'` — request-path logging (`POST /api/project-plans/altitudes`) landed alongside `stale_regenerated` below, using the same statement the tick already wrote through |
 | `value_summary_generation_log.outcome` | TEXT | NO | `ok`, `skipped` (reserved), or `error` — a per-project sweep failure never stops the rest of the sweep, and still writes an `error` row so the rotation's next-target logic and the operator both see it |
 | `value_summary_generation_log.pool_size` / `cache_hits` / `generated` / `queued` / `unavailable` | INTEGER | NO | A strict four-term partition: `cache_hits + generated + queued + unavailable === pool_size`, always — the direct audit-trail evidence that a sweep accounted for every unit in the pool it read |
+| `value_summary_generation_log.stale_regenerated` | INTEGER | YES | An **overlap counter, not a fifth partition term**: how many of that row's `generated` units were a mutable unit's stale snapshot being replaced, not a genuinely new unit. `NULL` means this row predates the column (measurement never ran) — distinct from a measured zero, so there is no `DEFAULT 0` |
 
 **Indexes:**
 

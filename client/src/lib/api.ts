@@ -418,6 +418,8 @@ import type {
   ValuePool,
   ValueUnit,
   PlanHealth,
+  MarkAltitudeSeenRequest,
+  MarkAltitudeSeenResponse,
   DecisionQueueItem,
   DecisionQueueKind,
   DetourDisposition,
@@ -2729,6 +2731,22 @@ export const api = {
             model: string | null;
             generated_at: string;
             cached: boolean;
+            /** Present only on a mutable unit's regenerated-but-unseen entry
+             *  (`"updated_unseen"`) or a stale unit re-homed here with its
+             *  OLD text because this round couldn't refresh it
+             *  (`"stale_refresh_queued"`/`"stale_refresh_unavailable"`).
+             *  Absent on a plain resolved/cache-hit entry and on any
+             *  older-server response (backward compat). */
+            freshness?: "updated_unseen" | "stale_refresh_queued" | "stale_refresh_unavailable";
+            /** Present alongside `freshness` — why the snapshot no longer
+             *  matched (`"stage_changed"` | `"label_changed"`), or any other
+             *  string a future server version might add (render generic
+             *  copy for anything unrecognized, never leak the raw value). */
+            update_reason?: string;
+            /** Present alongside `freshness` — pass straight through to
+             *  {@link api.projectPlans.markAltitudesSeen} to acknowledge
+             *  exactly this generation (compare-and-set on the server). */
+            regenerated_at?: string | null;
           }
         >;
         states?: Record<string, "queued" | "unavailable">;
@@ -2744,6 +2762,26 @@ export const api = {
             stage: u.stage ?? null,
           })),
         }),
+      }),
+    /**
+     * POST /api/project-plans/altitudes/seen — explicit acknowledgement of a
+     * regenerated (mutable, `freshness: "updated_unseen"`) unit's altitude
+     * entry. Never called automatically on render/fetch (DEC-8) — only from
+     * an explicit user gesture (the panel's per-unit dismiss control).
+     * `regenerated_at` must be the exact value the acknowledged entry
+     * carried (`null` for a first-generation entry, matched via SQL `IS`)
+     * — a stale value (the unit regenerated again meanwhile) is silently
+     * rejected server-side, never clearing a marker for a generation the
+     * user never saw.
+     * @param projectId The project id (advisory only — `unit_key` is the
+     *   real scope; a wrong/stale project_id still succeeds).
+     * @param units     `{ unit_key, regenerated_at }` pairs to acknowledge.
+     * @returns `{ updated }` — count actually stamped.
+     */
+    markAltitudesSeen: (projectId: string, units: MarkAltitudeSeenRequest["units"]) =>
+      request<MarkAltitudeSeenResponse>("/project-plans/altitudes/seen", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, units }),
       }),
     /**
      * GET /api/project-plans/health?project_id= — `computePlanHealth`'s

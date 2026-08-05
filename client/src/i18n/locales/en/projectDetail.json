@@ -154,7 +154,14 @@
       "altitudes": {
         "generating": "Generating…",
         "unavailable": "Not available",
-        "queued": "Queued"
+        "queued": "Queued",
+        "updatedStageChanged": "Updated — stage changed",
+        "updatedLabelChanged": "Updated — label changed",
+        "staleRefreshQueued": "Refresh queued",
+        "staleRefreshUnavailable": "Refresh unavailable",
+        "dismiss": "Dismiss",
+        "dismissAll": "Dismiss all",
+        "updatedGeneric": "Updated"
       }
     },
     "health": {

@@ -820,15 +820,39 @@ db.exec(`
 
   -- Stakeholder-altitude cache for one value-pool unit (server/lib/value-summary.js,
   -- the synthesis layer above assembleValuePool). Keyed on the unit's own
-  -- unitKey, NOT a content digest like focus_summaries — a unit's ground
-  -- fact (a commit's subject line, an intake slug) is immutable once seen,
-  -- so there is nothing to invalidate: generated once, served forever.
+  -- unitKey, NOT a content digest like focus_summaries. Contrary to this
+  -- comment's old claim ("generated once, served forever"), a unit's PROMPT
+  -- INPUT SET is not always immutable: intake_initiative/detour/merge_commit
+  -- units carry a stage (and sometimes a label) that can change after the
+  -- text was cached (MUTABLE_VALUE_SOURCES, server/lib/value-ledger.js).
+  -- input_stage/input_label below store the exact snapshot unitFacts()
+  -- (server/lib/value-summary.js) produced at generation time; every read
+  -- for a mutable source compares the unit's CURRENT facts against that
+  -- snapshot (compareUnitInputs) and treats a mismatch as a cache miss for
+  -- that one unit. trunk_commit units (and any other source outside
+  -- MUTABLE_VALUE_SOURCES) keep the original generate-once-served-forever
+  -- behavior exactly -- their ground fact really is immutable.
   CREATE TABLE IF NOT EXISTS value_unit_summaries (
     unit_key TEXT PRIMARY KEY,
     project_level TEXT NOT NULL,
     stakeholder_level TEXT NOT NULL,
     model TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    -- input_label IS NULL is the legacy discriminator (unitFacts() guarantees
+    --    a non-empty label -- "(untitled)" at worst -- so NULL only occurs on
+    --    a row written before this column existed).
+    -- input_stage IS NULL does NOT discriminate legacy vs fresh -- a detour
+    --    unit legitimately has no stage, so its snapshot is NULL by design.
+    -- regen_reason IS NULL also means legacy-only (every write under this
+    --    schema stamps a reason, 'initial' the first time). No CHECK
+    --    constraint -- future reasons stay additive.
+    -- regenerated_at is the marker discriminator: NULL on first generation,
+    --    set only when a mutable unit's stale snapshot is replaced.
+    input_stage TEXT,
+    input_label TEXT,
+    regenerated_at TEXT,
+    regen_reason TEXT,
+    seen_at TEXT
   );
 
   -- Layer 6: reconciliation's output queue — shaped like alert_events but
@@ -1708,6 +1732,49 @@ function rebuildTableAtomically({ table, isAlreadyMigrated, preflightCheck, exec
   return true;
 }
 
+// Shared helper for additive multi-column migrations (A-1, replacing a raw
+// multi-ALTER `db.exec` block — see db-migration.test.js's
+// GRANDFATHERED_ALTER_BLOCKS / HELPER-CASE-SCAN / ALTER-BLOCK-SCAN meta-tests
+// and the value_unit_summaries/value_summary_generation_log migrations
+// below). Probes PER COLUMN via PRAGMA table_info (DEC-5's idiom, not the
+// try/SELECT-LIMIT-1/catch form — §9.2's chronology-ordering scan reads
+// db.js's SQL literals, and a probe query is not a "most recent N rows"
+// read), so a process that died mid-migration (some columns present, some
+// not) converges on the next boot instead of throwing "duplicate column
+// name" on a re-run of an already-applied ALTER. Applies only the missing
+// columns inside ONE transaction. NEVER throws — a throw here would brick
+// the Express server, MCP server, Electron app, and VS Code extension
+// simultaneously (same rule as rebuildTableAtomically above).
+/**
+ * @param {{ table: string, columns: Record<string,string> }} opts
+ * @returns {boolean} true if at least one column was added
+ */
+function addColumnsIfMissing({ table, columns }) {
+  const meta = db.prepare("PRAGMA table_info(" + table + ")").all();
+  if (!meta || meta.length === 0) return false; // table doesn't exist
+  const existing = new Set(meta.map((c) => c.name));
+  const toAdd = Object.entries(columns).filter(([name]) => !existing.has(name));
+  if (!toAdd.length) return false; // all present — idempotent no-op
+  try {
+    db.exec("BEGIN");
+    for (const [name, type] of toAdd) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+    db.exec("COMMIT");
+    return true;
+  } catch (err) {
+    if (db.inTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* best-effort */
+      }
+    }
+    console.error(`[addColumnsIfMissing] Failed to add columns to ${table}:`, err.message);
+    return false;
+  }
+}
+
 rebuildTableAtomically({
   table: "coach_observations",
   isAlreadyMigrated: (sql) => !!sql && sql.includes("CHECK(severity IN"),
@@ -1854,7 +1921,15 @@ db.exec(`
     unavailable INTEGER NOT NULL DEFAULT 0,
     model TEXT,
     duration_ms INTEGER,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    -- Overlap counter, not a fifth partition term: how many of this row's
+    -- generated units were a MUTABLE_VALUE_SOURCES unit's stale snapshot
+    -- being replaced, not a genuinely-new unit. NULL = predates this column
+    -- (measurement never ran) -- distinct from a measured zero, so no
+    -- DEFAULT 0 (a DEFAULT would stamp every historical row with a false
+    -- measured zero). The four-term identity above stays unconditional and
+    -- never includes this column.
+    stale_regenerated INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_value_summary_generation_log_created_at
     ON value_summary_generation_log(created_at);
@@ -2145,6 +2220,44 @@ try {
   db.prepare("ALTER TABLE usage_captures ADD COLUMN account_id TEXT").run();
 }
 db.exec("CREATE INDEX IF NOT EXISTS idx_usage_captures_account_id ON usage_captures(account_id)");
+
+// Migrate: value_unit_summaries input-snapshot columns (M1) and
+// value_summary_generation_log.stale_regenerated (M2) — additive/nullable,
+// via the shared addColumnsIfMissing helper (A-1). Per-column PRAGMA probes
+// converge even if a prior process died mid-migration (M1-INT,
+// db-migration.test.js) — never a raw multi-ALTER db.exec block (see
+// GRANDFATHERED_ALTER_BLOCKS's dated pre-helper entries; this migration is
+// NOT one of them).
+addColumnsIfMissing({
+  table: "value_unit_summaries",
+  columns: {
+    input_stage: "TEXT",
+    input_label: "TEXT",
+    regenerated_at: "TEXT",
+    regen_reason: "TEXT",
+    seen_at: "TEXT",
+  },
+});
+// value_summary_generation_log's original CREATE TABLE (this table's very
+// first shape, before `outcome`/`model`/`duration_ms` existed) predates any
+// migration for those three columns — a gap exposed by
+// value-summary-legacy-boot.test.js, not introduced by this build, but this
+// helper is the correct, already-established fix (same additive/nullable
+// shape as every other addColumnsIfMissing call here), folded into the same
+// call as `stale_regenerated` above. `outcome` legacy rows backfill to 'ok'
+// (a logged row always meant a completed attempt, predating the outcome
+// concept itself) — nullable would be dishonest (every row DID have an
+// outcome, just unrecorded) and the fresh CREATE TABLE body above still
+// enforces NOT NULL + CHECK for every new install.
+addColumnsIfMissing({
+  table: "value_summary_generation_log",
+  columns: {
+    stale_regenerated: "INTEGER",
+    outcome: "TEXT NOT NULL DEFAULT 'ok'",
+    model: "TEXT",
+    duration_ms: "INTEGER",
+  },
+});
 
 const stmts = {
   getSession: db.prepare("SELECT * FROM sessions WHERE id = ?"),
@@ -3245,14 +3358,37 @@ const stmts = {
   // Stakeholder-altitude cache (see the value_unit_summaries schema comment)
   // - read/written by server/lib/value-summary.js only.
   getValueUnitSummary: db.prepare("SELECT * FROM value_unit_summaries WHERE unit_key = ?"),
+  // Params: unit_key, project_level, stakeholder_level, model, input_stage,
+  // input_label, regenerated_at, regen_reason, seen_at. `enrichPoolAltitudes`
+  // (value-summary.js, the ONE lexical caller — single-writer-guard.test.js)
+  // passes regenerated_at/regen_reason computed once via compareUnitInputs —
+  // this statement never re-derives the comparison itself. seen_at is reset
+  // to NULL unconditionally on every write here (the ON CONFLICT branch,
+  // hardcoded, not parameterized) — the single "re-arm on regeneration"
+  // writer SEEN-4/G3 requires; a caller-side second UPDATE would trip W-1.
   upsertValueUnitSummary: db.prepare(
-    `INSERT INTO value_unit_summaries (unit_key, project_level, stakeholder_level, model)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO value_unit_summaries
+       (unit_key, project_level, stakeholder_level, model, input_stage, input_label, regenerated_at, regen_reason, seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(unit_key) DO UPDATE SET
        project_level = excluded.project_level,
        stakeholder_level = excluded.stakeholder_level,
        model = excluded.model,
+       input_stage = excluded.input_stage,
+       input_label = excluded.input_label,
+       regenerated_at = excluded.regenerated_at,
+       regen_reason = excluded.regen_reason,
+       seen_at = NULL,
        created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+  ),
+  // A-5: compare-and-set acknowledge. `regenerated_at IS ?` (not `=`) so a
+  // first-generation row (regenerated_at IS NULL) is acknowledgeable via a
+  // NULL param — `=` never matches NULL in SQL. Second production writer of
+  // this table (route handler only — W-3 guard).
+  markValueUnitSummariesSeen: db.prepare(
+    `UPDATE value_unit_summaries
+     SET seen_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE unit_key = ? AND regenerated_at IS ?`
   ),
 
   // Background-tick sweep bookkeeping (see the value_summary_sweep_state /
@@ -3288,9 +3424,20 @@ const stmts = {
   ),
   insertValueSummaryGeneration: db.prepare(
     `INSERT INTO value_summary_generation_log
-       (project_id, source, outcome, pool_size, cache_hits, generated, queued, unavailable, model, duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (project_id, source, outcome, pool_size, cache_hits, generated, queued, unavailable, model, duration_ms, stale_regenerated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ),
 };
 
-module.exports = { db, stmts, DB_PATH, DEFAULT_PRICING, applyIntroPricing };
+// Convenience alias: some callers/tests pass the raw `db` handle where a
+// `dbModule`-shaped object (`{ stmts, ... }`) is expected — both resolve to
+// the same prepared statements either way.
+db.stmts = stmts;
+
+// addColumnsIfMissing is exported so its "never throws out of require()"
+// contract (DEC-25, MIG-HELPER-1..4, db-migration.test.js) can be asserted
+// directly against arbitrary {table, columns} inputs — the property this
+// helper exists for is the reason A-1 was MANDATORY in the first place, and
+// it must be provable by direct call, not merely inferred from a successful
+// module boot.
+module.exports = { db, stmts, DB_PATH, DEFAULT_PRICING, applyIntroPricing, addColumnsIfMissing };

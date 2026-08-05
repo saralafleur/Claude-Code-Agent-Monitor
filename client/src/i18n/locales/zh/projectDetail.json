@@ -154,7 +154,14 @@
       "altitudes": {
         "generating": "生成中…",
         "unavailable": "暂不可用",
-        "queued": "排队中"
+        "queued": "排队中",
+        "updatedStageChanged": "已更新 — 阶段已变更",
+        "updatedLabelChanged": "已更新 — 标签已变更",
+        "staleRefreshQueued": "刷新已排队",
+        "staleRefreshUnavailable": "无法刷新",
+        "dismiss": "关闭",
+        "dismissAll": "全部关闭",
+        "updatedGeneric": "已更新"
       }
     },
     "health": {

@@ -168,8 +168,115 @@ router.post("/altitudes", async (req, res) => {
       stage: typeof u.stage === "string" ? u.stage : null,
     });
   }
-  const enriched = await enrichPoolAltitudes(dbModule, clean);
-  res.json({ altitudes: enriched.altitudes, states: { ...states, ...enriched.states } });
+  const startedAt = Date.now();
+  // A-3: every submitted unit this loop itself rejected (bad value_source,
+  // unrepresentable keyless) still belongs in the submitted batch's
+  // pool_size/unavailable — the composer folds it in via opts.droppedCount
+  // rather than this route re-deriving any partition term of its own (T-F).
+  const droppedCount = units.length - clean.length;
+  const enriched = await enrichPoolAltitudes(dbModule, clean, { droppedCount });
+  // The route never computes a partition term itself — it logs `counts`
+  // verbatim, the same object the wire response below also carries.
+  // SF-6: guarded — this is an AUDIT-LOG write, running AFTER the LLM work
+  // and cache writes above have already succeeded. Under Express 4, an
+  // unguarded synchronous throw here (e.g. SQLITE_BUSY against the shared
+  // DB) means no response is ever sent and an unhandled rejection can exit
+  // the process — the exact BL-1 failure mechanism, for a write whose
+  // failure should never sink a request that already succeeded (mirrors
+  // value-summary-tick.js's own "per-project fail-safe" wrap around its
+  // equivalent write).
+  try {
+    dbModule.stmts.insertValueSummaryGeneration.run(
+      projectId,
+      "request",
+      "ok",
+      enriched.counts.pool_size,
+      enriched.counts.cache_hits,
+      enriched.counts.generated,
+      enriched.counts.queued,
+      enriched.counts.unavailable,
+      null,
+      Date.now() - startedAt,
+      enriched.counts.stale_regenerated
+    );
+  } catch (err) {
+    console.warn(`/altitudes audit-log write failed for project ${projectId}:`, err.message);
+  }
+  res.json({
+    altitudes: enriched.altitudes,
+    states: { ...states, ...enriched.states },
+    counts: enriched.counts,
+  });
+});
+
+// POST /api/project-plans/altitudes/seen {project_id, units:[{unit_key,
+// regenerated_at}]} - explicit acknowledgement of a regenerated (mutable,
+// `freshness: "updated_unseen"`) unit's stakeholder-altitude cache entry
+// (A-5). `project_id` is validated but otherwise advisory (T-K, SEEN-7,
+// BY DESIGN) — `unit_key` already embeds the cwd, so cross-project
+// collision is not a real risk, and requiring the caller's own project_id to
+// match would only make a legitimate acknowledge fail on a stale client-side
+// project selection. Compare-and-set (`markValueUnitSummariesSeen`, the ONE
+// lexical call site below, W-3 guard): stamps `seen_at` only if the row's
+// CURRENT `regenerated_at` still matches what the caller last saw — a stale
+// stamp (the tick regenerated the unit again since the caller fetched it)
+// is silently rejected (`updated: 0`), never acknowledging a generation the
+// user never actually saw (T-D).
+router.post("/altitudes/seen", async (req, res) => {
+  const { project_id: projectId, units } = req.body || {};
+  if (!projectId || typeof projectId !== "string") {
+    return res
+      .status(400)
+      .json({ error: { code: "INVALID_INPUT", message: "project_id (string) is required" } });
+  }
+  if (!Array.isArray(units) || units.length === 0 || units.length > 500) {
+    return res.status(400).json({
+      error: { code: "INVALID_INPUT", message: "units[] is required (1-500 entries)" },
+    });
+  }
+  for (const u of units) {
+    if (!u || typeof u !== "object" || Array.isArray(u)) {
+      return res
+        .status(400)
+        .json({ error: { code: "INVALID_INPUT", message: "each unit must be an object" } });
+    }
+    if (typeof u.unit_key !== "string" || !u.unit_key) {
+      return res.status(400).json({
+        error: { code: "INVALID_INPUT", message: "each unit requires a unit_key string" },
+      });
+    }
+    if (u.regenerated_at !== null && typeof u.regenerated_at !== "string") {
+      return res.status(400).json({
+        error: {
+          code: "INVALID_INPUT",
+          message: "each unit's regenerated_at must be a string or null",
+        },
+      });
+    }
+  }
+
+  let updated = 0;
+  // SF-6: guarded. Unlike the audit-log write in POST /altitudes above,
+  // this transaction IS the acknowledgement itself, so a failure here
+  // must not silently report success — but it must also never throw
+  // unguarded out of an async Express handler (the same BL-1 failure
+  // mechanism: no response ever sent, possible process exit).
+  try {
+    const ackTxn = dbModule.db.transaction(() => {
+      for (const { unit_key: unitKey, regenerated_at: regeneratedAt } of units) {
+        const result = dbModule.stmts.markValueUnitSummariesSeen.run(unitKey, regeneratedAt);
+        updated += result.changes;
+      }
+    });
+    ackTxn();
+  } catch (err) {
+    console.warn(`/altitudes/seen acknowledge failed for project ${projectId}:`, err.message);
+    return res.status(500).json({
+      error: { code: "INTERNAL_ERROR", message: "failed to record acknowledgement" },
+    });
+  }
+
+  res.json({ updated });
 });
 
 // POST /api/project-plans/import {project_id, cwd} - DEC-P2 generation-1

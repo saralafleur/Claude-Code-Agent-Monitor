@@ -154,7 +154,14 @@
       "altitudes": {
         "generating": "Đang tạo…",
         "unavailable": "Chưa có sẵn",
-        "queued": "Đang chờ"
+        "queued": "Đang chờ",
+        "updatedStageChanged": "Đã cập nhật — giai đoạn thay đổi",
+        "updatedLabelChanged": "Đã cập nhật — nhãn thay đổi",
+        "staleRefreshQueued": "Đang chờ làm mới",
+        "staleRefreshUnavailable": "Không thể làm mới",
+        "dismiss": "Bỏ qua",
+        "dismissAll": "Bỏ qua tất cả",
+        "updatedGeneric": "Đã cập nhật"
       }
     },
     "health": {

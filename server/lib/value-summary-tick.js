@@ -92,6 +92,7 @@ async function runValueSummaryTickOnce(dbModule, opts = {}) {
     const targets = listSweepTargets(dbModule, maxProjects);
     const nowIso = now || new Date().toISOString();
     const projects = [];
+    const broadcastEvents = [];
 
     for (const target of targets) {
       const projectId = target.project_id;
@@ -102,25 +103,28 @@ async function runValueSummaryTickOnce(dbModule, opts = {}) {
       let generated = 0;
       let queued = 0;
       let unavailable = 0;
+      let staleRegenerated = 0;
       let model = null;
       const generatedKeys = [];
 
       try {
         const { units } = await poolAssembler(dbModule, { id: projectId });
         poolSize = units.length;
-        const { altitudes, states } = await enrichPoolAltitudes(dbModule, units);
+        // Counts are read verbatim from the composer's own computed-once
+        // partition object (DEC-14, §9.8) — this tick never re-derives a
+        // hit/generated/queued/unavailable count from `altitudes`/`states`
+        // itself, the exact T-A/T-F-shaped hazard the composer's `counts`
+        // return exists to close off.
+        const { altitudes, counts } = await enrichPoolAltitudes(dbModule, units);
+        poolSize = counts.pool_size;
+        cacheHits = counts.cache_hits;
+        generated = counts.generated;
+        queued = counts.queued;
+        unavailable = counts.unavailable;
+        staleRegenerated = counts.stale_regenerated;
         for (const [unitKey, entry] of Object.entries(altitudes)) {
-          if (entry.cached) {
-            cacheHits += 1;
-          } else {
-            generated += 1;
-            generatedKeys.push(unitKey);
-            if (model == null) model = entry.model;
-          }
-        }
-        for (const state of Object.values(states)) {
-          if (state === "queued") queued += 1;
-          else if (state === "unavailable") unavailable += 1;
+          if (!entry.cached && model == null) model = entry.model;
+          if (!entry.cached) generatedKeys.push(unitKey);
         }
       } catch (err) {
         // Per-project fail-safe: one bad project cannot stop the sweep. Log
@@ -165,14 +169,17 @@ async function runValueSummaryTickOnce(dbModule, opts = {}) {
           queued,
           unavailable,
           model,
-          durationMs
+          durationMs,
+          outcome === "error" ? null : staleRegenerated
         );
-        if (generated > 0 && broadcast) {
-          broadcast("value_altitudes_updated", {
+        if (generated > 0) {
+          const payload = {
             project_id: projectId,
             unit_keys: generatedKeys,
             pending: queued + unavailable,
-          });
+          };
+          broadcastEvents.push({ event: "value_altitudes_updated", payload });
+          if (broadcast) broadcast("value_altitudes_updated", payload);
         }
       } catch (err) {
         console.warn(
@@ -184,7 +191,7 @@ async function runValueSummaryTickOnce(dbModule, opts = {}) {
       projects.push({ project_id: projectId, generated, queued, unavailable });
     }
 
-    return { swept: targets.length, projects };
+    return { swept: targets.length, projects, broadcast: broadcastEvents };
   } finally {
     running = false;
   }

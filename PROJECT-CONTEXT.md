@@ -305,6 +305,59 @@ client-side re-slice of the same 10-minute `chunks` grid the Calendar's idle
 stripes already render from (not a re-derivation from raw events), bounding
 drift from the server's own number to ≤1 chunk (10 min) at a window boundary.
 
+**Design-time pre-flag (2026-08-04, same intake — NOT an occurrence, count
+unchanged at 6).** The obvious §9.1 read of this slice was "share the digest
+function so write-time and check-time can't drift" — this entry's classic
+cure, with its classic weakness (a rogue-*reader* scan cannot see a rogue
+*re-derivation* of a formula). The plan instead **removes the formula**: raw
+prompt-feeding fields are stored and compared field-wise, so there is no
+digest formula for a second site to re-derive, and `buildPrompt` consumes
+`unitFacts()` rather than raw units, so the prompt's input set and the
+compared input set are the same object. **Inapplicability over compliance,
+applied to this entry rather than to §9.5/§9.6** — where that preference was
+first stated (2026-08-02) and has since paid off twice. The residual risk
+this entry should watch is the *inverse* direction it has not previously
+named: a **prompt** that grows a field the **comparator** doesn't cover.
+That is why the structural scan here asserts `buildPrompt` reads no
+`u.<field>` outside the facts object.
+
+**BUILT, 2026-08-05 — `intake/2026-08-04-altitude-invalidation/` (occurrence 7;
+count 6 → 7). The pre-flag directly above named the exact residual risk, and
+the build shipped it anyway.** The cure landed one-directional: `unitFacts()`
+returned three fields (`value_source`, `label`, `stage`), `compareUnitInputs`
+compared **two** (`stage`, `label`), there was no `input_value_source` column
+and no snapshot of it — while the file header and `unitFacts`'s own JSDoc both
+asserted *"adding a field to the prompt is physically impossible without adding
+it to the comparison."* False as built, with `value_source` as the live
+counterexample. It was harmless only by accident: `unit_key` embeds
+`value_source`, i.e. a **different** invariant that nothing in the build
+asserted and no comment connected to the claim. The A2 scan guarded
+`buildPrompt → unitFacts`; **nothing guarded `unitFacts → compareUnitInputs`**.
+Caught by adversarial review (BL-6), not by any planned test.
+
+Three things generalize:
+
+1. **A pre-flag is not a guard.** This entry's own note, written days earlier
+   in this same file, named "a prompt that grows a field the comparator doesn't
+   cover" as the direction to watch — and the build still shipped exactly that,
+   with a comment claiming the opposite. Prose in the catalog does not enforce;
+   only an assertion enforces. When a pre-flag names a direction, the plan must
+   name the **test** that closes it, or the pre-flag is decoration.
+2. **The strongest tell was in the cure's own documentation.** The header
+   asserted a *physical impossibility*. Any comment claiming a class of change
+   is impossible is a checkable claim: enumerate the class, walk it, assert it.
+   Here that is a nine-line test. *Standing check for this entry:* when a cure's
+   header says "cannot diverge," find the loop that proves it or downgrade the
+   comment to "should not."
+3. **The fix shape is the one to reuse** (and it is §9.7-compliant):
+   `UNCOMPARED_FIELD_GUARANTORS`, an **enumerated exception registry** naming
+   `value_source` and citing `unit_key` as its guarantor, plus a coverage test
+   that walks `Object.keys(unitFacts(fixture))`, mutates each key, asserts
+   `compareUnitInputs` detects it, and asserts the excepted set is **exactly**
+   `["value_source"]`. Red-proven by adding an uncovered field to the return
+   shape and watching it fail. The registry converts a silent gap into a listed
+   one, and the "exactly" assertion stops the list growing quietly.
+
 ### 9.2 row-id-as-chronology-proxy
 
 A query or aggregation over a table with an auto-increment `id` assumes
@@ -631,6 +684,97 @@ makes it usable:
   sites. That is the guard working — but write invariants *about* a lexical
   scan without repeating its match text.
 
+**2026-08-05, `intake/2026-08-04-altitude-invalidation/` — NINE §9.3-family
+events, on the same file surface, in the very next effort. The record set one
+day earlier was broken by the build that was explicitly briefed about it.**
+Every agent in this build was handed the 2026-08-04 note above by name; the
+run-plan forced `build-reviewer` back on citing it; the technical plan carried
+a "Verification discipline (non-negotiable)" section quoting it. It produced
+nine anyway. **Being warned about this entry does not reduce its incidence.**
+The count that matters is not per-build, it is per-*gate*: nine events, spread
+across five independent passes, each found by a *different* pass than the one
+that should have caught it.
+
+1. *(test-author pass 2, self-report)* `P1`/`P2` and tick `L1`/`L2` reported
+   **GREEN** against unbuilt code. Direct re-run: **RED** (`unitFacts is not a
+   function`; `TypeError` in `readCached`). The claim was simply false.
+2. *(same self-report)* client `C1`/`C1b`/`C2`/`C3` reported green — and were
+   green, and were **vacuous**: they asserted only that mocked API text renders
+   and that no raw i18n key leaks, never that any marker or dismiss control
+   exists. The plan's own stated red proof for C1 was "disable the marker
+   branch → C1 red"; a test that stays green with the branch *entirely absent*
+   cannot be that proof.
+3. *(same)* `C3`'s `expect(warnSpy).toHaveBeenCalled()` was satisfied by an
+   unrelated pre-existing `states` out-of-registry warn — true before and after
+   the feature exists.
+4. *(same)* `C-registry`'s single assertion (`getByText("proj-1")`) tested
+   nothing the test named — not the prop, not any registry.
+5. *(same, still shipped)* tick `L4` — `assert.ok(x >= 0)` ×4 plus the
+   four-term identity, all satisfied by the **pre-Slice-1** hand-rolled
+   counting loop, so it cannot distinguish a correct DEC-14 fix from a no-op.
+   Flagged at authoring, re-confirmed vacuous at review, re-confirmed at final
+   verification, and **shipped still vacuous** as a logged WATCH (SF-7).
+6. *(adversarial review, BL-3)* all **nine** new `UPGRADE_CASES` entries were
+   dead code. See REGISTRATION ≠ EXECUTION below.
+7. *(review, BL-4)* `MIG-HELPER-1` had **zero assertions** and did not test the
+   case its own title named; `MIG-HELPER-2/3/4` were never written. Its comment
+   was the tell: *"we verify the behavior through the end result (if the
+   function exists and works, the migration succeeds; if not, this test
+   fails)"* — it could not fail. The unasserted property was
+   `addColumnsIfMissing`'s **"never throws out of `require()`"**, the entire
+   reason A-1 was MANDATORY.
+8. *(review, BL-5)* the MANDATORY A2 structural scan shipped in the **weak
+   form DEC-24 explicitly forbade with "no veto path"** — 3 of 9 assertions,
+   scoped to the `.map` callback body only. Verified evadable: a
+   `units[0].stage` read elsewhere in `buildPrompt` passed clean.
+9. *(review, BL-1)* the suite **encoded** the empty-batch crash. See
+   TEST-PINS-THE-DEFECT below.
+
+**Three sub-patterns this build adds, each with a cheap detector:**
+
+- **TEST-PINS-THE-DEFECT (new; the inverse of vacuity).** `value-summary.test.js`
+  asserted `deepEqual(await enrichPoolAltitudes(dbModule, []), {altitudes: {},
+  states: {}})` — actively pinning `counts` as **absent** on the one return path
+  that had not been widened — and a hand-written comment narrowed the invariant
+  to fit: *"Every **non-empty** call also carries `counts` (DEC-14)."* The
+  carve-out was written to accommodate the defect rather than report it. This is
+  not a guard that asserts nothing; it is a specific, load-bearing assertion that
+  is specific about **the wrong thing**, so the correct fix arrives looking like a
+  regression and the next person weakens the fix instead of the test. *Detector:*
+  when a shipped assertion or comment contains a scope qualifier the plan's
+  invariant does not (`non-empty`, `when present`, `except`), treat the qualifier
+  as an undisclosed defect report until someone proves the plan wrong.
+- **REGISTRATION ≠ EXECUTION (new).** `HELPER-CASE-SCAN` correctly matched both
+  `addColumnsIfMissing` call sites and all nine `table.column` pairs — the
+  registry was complete, honest, and green. The nine registered cases' bodies
+  (`legacySql`/`seed`/`assertLegacyRow`/`assertWritable`) were then **never
+  invoked**: the harness only ever iterates `UPGRADE_CASES[0]`, and the
+  meta-scans read only `uc.table`/`uc.column`. Proof they never ran: an
+  `assertWritable` passing **8 arguments into an 11-placeholder statement** —
+  guaranteed `RangeError` on execution — in a green suite. A
+  registry-completeness meta-test proves entries *exist*, never that they *run*.
+  *Detector:* assert the harness's own iteration count equals the registry
+  length, and give every registry a deliberately-broken canary entry.
+- **THE DROPPED ASSERTION LEAVES A FINGERPRINT (new).** BL-5's weak scan
+  contained `const arrayParam = buildPromptSig ? buildPromptSig[1].trim() :
+  "units";` — extracted, then never asserted on. That dead local is precisely
+  the residue of DEC-24's assertion (i), the designated closure for evasion
+  class #9 (`units[0].stage`), the one class DEC-24 recorded as matching **none**
+  of the designed regexes. The author set up the assertion and dropped it.
+  *Detector:* in any structural/static guard, an extracted-but-unused local is a
+  dropped assertion — greppable, and worth grepping every time a guard lands.
+
+**What actually worked, again, and it is not a technique — it is a headcount.**
+Every gate in this build caught something the previous gate's self-report had
+missed or mis-stated: the orchestrator caught the test-author twice (#1–#4); the
+verifier caught a real **product gap** no planned test covered (the cache-hit
+branch dropped the freshness marker on the very next read, so the marker the
+whole slice exists to show survived exactly one page load); the reviewer caught
+six blockers on a build two prior passes had called green; the final verifier
+caught seven undisposed should-fix items (§9.4). **Re-verifying at every gate
+cost this build two full fix cycles and found nine things. Trusting any single
+self-report would have shipped all nine.**
+
 **Candidate new pattern, NOT yet catalogued — TEST-AGAINST-LIVE-DB (recorded with
 an explicit promotion trigger; 2026-08-03,
 `intake/2026-08-02-practice-kind-override/`).** The §9.3 instance above had a
@@ -701,6 +845,39 @@ review round must end the build in one of exactly two states — *fixed with a
 test*, or *recorded in `decisions.md` with an id*. "Should-fix" is a triage
 label, not a disposition. And a severity assigned by reading is provisional
 until someone tries to reach the bug: 1 of these 4 upgraded on contact.
+
+**2026-08-05, `intake/2026-08-04-altitude-invalidation/` — the unfixed-remainder
+half recurred literally, in a build whose own brief cited this entry.** The
+adversarial review returned 6 blockers, 11 should-fix, 7 nits. Fix cycle 2
+fixed all 6 blockers and 3 should-fix (SF-2/6/8). The other **7 (SF-1, SF-3,
+SF-4, SF-5, SF-7, SF-9, SF-11) ended the round with no fix and no disposition
+record anywhere** — no `decisions.md` row, no WATCH row, no code comment — and
+the suite was green, so nothing in the pipeline objected. Two things about the
+recurrence are worth keeping:
+
+- **The instruction was given explicitly and still did not survive the round.**
+  `decisions.md` DEC-B6 set the bar in this build's own words before dispatch:
+  should-fix items *"get fixed if the implementer confirms them real and
+  low-risk, otherwise logged as follow-up debt, not silently dropped."* The
+  implementer fixed the six mandatory items and simply stopped. The 2026-08-01
+  note says a review finding must end in one of two states; this build proves
+  **stating that rule inside the fix instruction is not sufficient** — the fix
+  round needs a separate pass whose only job is to diff the review's finding
+  list against the shipped tree. Here that was the **final verifier pass**, and
+  it is the only reason the seven surfaced; it downgraded an otherwise-clean
+  build to GREEN-WITH-CAVEATS on this ground alone, which is what forced
+  DEC-B7's per-item disposition table and re-cleared the build to GREEN.
+- **Severity-on-read was provisional again, and one item was underrated.**
+  The verifier noted none of the seven "looked like" 2026-08-01's S9 on read.
+  On disposition, **SF-1 was worse than its triage label**: "dismiss-all was
+  never built" reads as a missing convenience, but DEC-21/QA-DEC-5 had accepted
+  the ~182-marker first-upgrade flood **conditional on that mitigation being
+  tested, not assumed**. The unfixed should-fix item was therefore silently
+  voiding an *already-granted* risk acceptance upstream — a plan-level
+  invariant, not a UI nicety. **Add to how-to-comply:** when triaging an
+  unfixed finding, grep the decision log for the feature's name before
+  assigning severity — an item that some earlier decision cited as *its own*
+  mitigation is never a should-fix.
 
 ### 9.5 FRESH-DB-BLIND SCHEMA CHANGE
 
@@ -1242,6 +1419,24 @@ and "never two" — were violated inside the change enforcing them:**
   pinned at the composer (Case 3), the route (Case B) and the client (the
   45-unavailable render test).
 
+**Design-time pre-flag (2026-08-04,
+`requests/2026-08-04-value-pool-grouping/intake/2026-08-04-altitude-invalidation/`
+— NOT an occurrence, count unchanged).** This entry's live instance #1
+(`enrichPoolAltitudes`) returns for the *other* half of its problem: not
+which absence, but which *staleness*. The generalizable addition is the
+**invariant sibling** of this entry's existing bounds rule. Today it says a
+bound must cite the measured distribution it was sized against; add: **a
+cache/immutability claim must enumerate the input set it is a claim about,
+and name the single function that computes that set.**
+`value_unit_summaries`' schema comment ("a unit's ground fact — a commit's
+subject line, an intake slug — is immutable once seen, so there is nothing
+to invalidate") was true of the two fields it names and false of the three
+`buildPrompt` actually renders, because `u.stage` was never enumerated.
+Same mechanism as `MAX_UNITS_PER_PROMPT = 40` one day earlier, one class
+over: an unevidenced **invariant** rather than an unevidenced **bound**,
+falsifiable at the moment of writing from code thirty lines away. A comment
+forced to enumerate `{value_source, label||value_ref, stage}` could not
+have concluded "immutable."
 
 ---
 
@@ -1365,6 +1560,14 @@ authored version used the unrelated `yaml` npm package and could never have pass
 project state, past or future; (2) the collision guard is only real if red-proven by
 temporarily authoring a colliding id, which was done and reverted. `npm run openapi:yaml`
 should now be a standing step in the docs pass of any route-touching change set.
+
+**Scope limit found 2026-08-04 (`altitude-invalidation`):** the mount↔path scan is
+derived from `app.use("/api/…")` mounts, so a NEW route under an ALREADY-documented
+mount (`POST /api/project-plans/altitudes/seen`) is structurally invisible to it —
+§9.7's shape inside this candidate's own cure. This slice declined the OpenAPI
+fragment (DEC-19, QA-DEC-3) — `docs/API.md` documents the endpoint instead — so
+`openapi.yaml` and `openapi-contract.test.js` both stay silent over the omission.
+Count unchanged (pre-flag, not an occurrence; neither promotion trigger is met).
 
 ---
 

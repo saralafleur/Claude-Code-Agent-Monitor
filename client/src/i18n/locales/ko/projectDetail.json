@@ -154,7 +154,14 @@
       "altitudes": {
         "generating": "생성 중…",
         "unavailable": "아직 없음",
-        "queued": "대기 중"
+        "queued": "대기 중",
+        "updatedStageChanged": "업데이트됨 — 단계 변경",
+        "updatedLabelChanged": "업데이트됨 — 라벨 변경",
+        "staleRefreshQueued": "새로고침 대기 중",
+        "staleRefreshUnavailable": "새로고침 불가",
+        "dismiss": "닫기",
+        "dismissAll": "모두 닫기",
+        "updatedGeneric": "업데이트됨"
       }
     },
     "health": {

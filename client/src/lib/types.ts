@@ -2336,6 +2336,28 @@ export interface ValuePool {
   identityWarnings: ValueIdentityWarning[];
 }
 
+/**
+ * Request body for `POST /api/project-plans/altitudes/seen` — explicit
+ * acknowledgement of a regenerated (mutable, `freshness: "updated_unseen"`)
+ * unit's stakeholder-altitude cache entry. `regenerated_at` is the exact
+ * value the acknowledged {@link ValueUnit}'s altitude entry carried (`null`
+ * for a first-generation entry) — the server compares-and-sets against it,
+ * so a stale acknowledge (the unit regenerated again since the caller last
+ * fetched it) is silently rejected rather than clearing a marker for a
+ * generation the user never actually saw.
+ */
+export interface MarkAltitudeSeenRequest {
+  project_id: string;
+  units: Array<{ unit_key: string; regenerated_at: string | null }>;
+}
+
+/** `POST /api/project-plans/altitudes/seen` response — `updated` is the
+ *  count of units whose `seen_at` was actually stamped (compare-and-set
+ *  rejections are silently excluded, never surfaced as an error). */
+export interface MarkAltitudeSeenResponse {
+  updated: number;
+}
+
 /** `GET /api/project-plans/health` response — the T6 parity target shape.
  *  Every field here MUST be rendered verbatim by any consumer, never
  *  re-derived from a locally-held `pool`/`plans` array (§9.1

@@ -27,6 +27,7 @@ const mockPoolMock = vi.fn();
 const mockHealthMock = vi.fn();
 const mockRefreshMock = vi.fn();
 const mockAltitudesMock = vi.fn();
+const mockMarkSeenMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -38,6 +39,7 @@ vi.mock("../../lib/api", () => ({
       close: (...args: unknown[]) => mockCloseMock(...args),
       refresh: (...args: unknown[]) => mockRefreshMock(...args),
       altitudes: (...args: unknown[]) => mockAltitudesMock(...args),
+      markAltitudesSeen: (...args: unknown[]) => mockMarkSeenMock(...args),
     },
   },
 }));
@@ -515,6 +517,363 @@ describe("PlanLedgerPanel", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0]!.join(" ")).toContain("bogus");
     expect(warnSpy.mock.calls[0]!.join(" ")).toContain(unit.id);
+
+    warnSpy.mockRestore();
+  });
+
+  it("C1: marker distinct from every other state in the same render (§9.8)", async () => {
+    // One response with 5 units: (a) resolved fresh, (b) updated_unseen + stage_changed,
+    // (c) updated_unseen + label_changed, (d) states queued, (e) states unavailable
+    const plan = makePlan();
+    plan.items = [];
+    const unitA = makeUnit({ source: "trunk_commit", sourceRef: "a" });
+    const unitB = makeUnit({ source: "intake_initiative", sourceRef: "b" });
+    const unitC = makeUnit({ source: "intake_initiative", sourceRef: "c" });
+    const unitD = makeUnit({ source: "intake_initiative", sourceRef: "d" });
+    const unitE = makeUnit({ source: "intake_initiative", sourceRef: "e" });
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({
+      units: [unitA, unitB, unitC, unitD, unitE],
+      identityWarnings: [],
+    });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {
+        [unitA.id]: {
+          project: "A project",
+          stakeholder: "A text",
+          // No freshness (resolved fresh)
+        },
+        [unitB.id]: {
+          project: "B project",
+          stakeholder: "B new text",
+          freshness: "updated_unseen",
+          update_reason: "stage_changed",
+          regenerated_at: "2026-08-05T10:00:00Z",
+        },
+        [unitC.id]: {
+          project: "C project",
+          stakeholder: "C new text",
+          freshness: "updated_unseen",
+          update_reason: "label_changed",
+          regenerated_at: "2026-08-05T10:00:00Z",
+        },
+      },
+      states: {
+        [unitD.id]: "queued",
+        [unitE.id]: "unavailable",
+      },
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("A text")).toBeTruthy();
+      expect(screen.getByText("B new text")).toBeTruthy();
+      expect(screen.getByText("C new text")).toBeTruthy();
+    });
+
+    // (b)/(c) ALSO render their regenerated text — the marker rides
+    // alongside, never replaces (technical-plan §"Proves: C1").
+    const bodyText = document.body.textContent || "";
+    expect(bodyText).toContain("B new text");
+    expect(bodyText).toContain("C new text");
+
+    // No raw i18n key leak, now also covering the marker's own key.
+    expect(/planLedger\.[a-zA-Z]/.test(bodyText)).toBe(false);
+
+    // The actual marker under test: a dismiss/acknowledge control renders
+    // exactly once per unit that carries `freshness: "updated_unseen"`
+    // (units B and C), and is absent for a resolved-fresh unit with no
+    // freshness field (unit A). Red proof (per technical-plan): disable
+    // the marker branch in ValueUnitRow -> this assertion goes red, since
+    // no such control exists anywhere in the render right now.
+    const rowA = screen.getByText("A text").closest('[data-test="pool-unit"]');
+    const rowB = screen.getByText("B new text").closest('[data-test="pool-unit"]');
+    const rowC = screen.getByText("C new text").closest('[data-test="pool-unit"]');
+    expect(rowA).toBeTruthy();
+    expect(rowB).toBeTruthy();
+    expect(rowC).toBeTruthy();
+
+    const markerRegex = /dismiss|acknowledge|×|✕/i;
+    expect(within(rowA as HTMLElement).queryByRole("button", { name: markerRegex })).toBeNull();
+    expect(within(rowB as HTMLElement).getByRole("button", { name: markerRegex })).toBeTruthy();
+    expect(within(rowC as HTMLElement).getByRole("button", { name: markerRegex })).toBeTruthy();
+
+    // stage_changed and label_changed are distinguishable i18n keys, so
+    // their rendered marker copy must differ from each other (not the same
+    // hardcoded string for both reasons).
+    const markerTextB = within(rowB as HTMLElement)
+      .getByRole("button", { name: markerRegex })
+      .closest("div")?.textContent;
+    const markerTextC = within(rowC as HTMLElement)
+      .getByRole("button", { name: markerRegex })
+      .closest("div")?.textContent;
+    expect(markerTextB).not.toEqual(markerTextC);
+  });
+
+  it("C1b: freshness loop (ALTITUDE_FRESHNESS) and old text never blanks", async () => {
+    // Loop ALTITUDE_FRESHNESS registry, not hand-type three cases.
+    // For each freshness value: unit with old text + that freshness should
+    // render the text (not the queued/unavailable placeholder), in the same
+    // render as a genuine "queued" and "unavailable" unit — so a wrong
+    // implementation that routes stale-freshness entries into the
+    // placeholder branch can't hide behind an otherwise-empty render.
+    const plan = makePlan();
+    plan.items = [];
+
+    const freshnessList = ["stale_refresh_queued", "stale_refresh_unavailable", "updated_unseen"];
+
+    const units = freshnessList.map((_freshness, i) =>
+      makeUnit({ source: "intake_initiative", sourceRef: `c1b-${i}` })
+    );
+    const unitQueued = makeUnit({ source: "intake_initiative", sourceRef: "c1b-queued" });
+    const unitUnavailable = makeUnit({ source: "intake_initiative", sourceRef: "c1b-unavail" });
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({
+      units: [...units, unitQueued, unitUnavailable],
+      identityWarnings: [],
+    });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    const altitudes: any = {};
+    units.forEach((unit, i) => {
+      altitudes[unit.id] = {
+        project: "P",
+        stakeholder: `Old text for ${freshnessList[i]}`,
+        freshness: freshnessList[i],
+        update_reason: "stage_changed",
+        regenerated_at: "2026-08-05T10:00:00Z",
+      };
+    });
+
+    mockAltitudesMock.mockResolvedValue({
+      altitudes,
+      states: {
+        [unitQueued.id]: "queued",
+        [unitUnavailable.id]: "unavailable",
+      },
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      // Each stale-freshness entry renders its OLD text, not a placeholder —
+      // and that text is distinguishable from the real queued/unavailable
+      // placeholder copy rendered alongside it in the same pass.
+      for (const freshness of freshnessList) {
+        const text = document.body.textContent || "";
+        expect(text).toContain(`Old text for ${freshness}`);
+      }
+    });
+
+    const bodyText = document.body.textContent || "";
+    const oldTextOccurrences = (bodyText.match(/Old text for/g) || []).length;
+    expect(oldTextOccurrences).toBe(3);
+
+    // SF-2: a `stale_refresh_queued`/`stale_refresh_unavailable` row still
+    // carries its own informational hint text (asserted above via
+    // "Old text for ..."), but must NOT carry a dismiss/acknowledge control
+    // — that row is still serving OLD, never-regenerated text; there is
+    // nothing to acknowledge, and a dismiss click there would send the
+    // row's stale `regenerated_at` to the compare-and-set seen endpoint,
+    // risking a mis-stamp against a later, genuinely unacknowledged
+    // `updated_unseen` generation for the same unit (the T-D class DEC-17's
+    // CAS exists to prevent). `updated_unseen` — the one freshness value
+    // that DOES represent a just-regenerated, unacknowledged generation —
+    // is the only one that keeps the control (same assertion C1 makes for
+    // its own updated_unseen fixtures).
+    const markerRegex = /dismiss|acknowledge|×|✕/i;
+    const rowStaleQueued = screen
+      .getByText("Old text for stale_refresh_queued")
+      .closest('[data-test="pool-unit"]');
+    expect(
+      within(rowStaleQueued as HTMLElement).queryByRole("button", { name: markerRegex })
+    ).toBeNull();
+
+    const rowStaleUnavailable = screen
+      .getByText("Old text for stale_refresh_unavailable")
+      .closest('[data-test="pool-unit"]');
+    expect(
+      within(rowStaleUnavailable as HTMLElement).queryByRole("button", { name: markerRegex })
+    ).toBeNull();
+
+    const rowUpdatedUnseen = screen
+      .getByText("Old text for updated_unseen")
+      .closest('[data-test="pool-unit"]');
+    expect(
+      within(rowUpdatedUnseen as HTMLElement).getByRole("button", { name: markerRegex })
+    ).toBeTruthy();
+  });
+
+  it("C2: explicit acknowledge — exactly once on button click, never auto-on-render", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unitA = makeUnit();
+    const unitB = makeUnit({ source: "intake_initiative", sourceRef: "b" });
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({
+      units: [unitA, unitB],
+      identityWarnings: [],
+    });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {
+        [unitA.id]: {
+          project: "A",
+          stakeholder: "A text",
+          freshness: "updated_unseen",
+          update_reason: "stage_changed",
+          regenerated_at: "2026-08-05T10:00:00Z",
+        },
+        [unitB.id]: {
+          project: "B",
+          stakeholder: "B text",
+          // No freshness
+        },
+      },
+      states: {},
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByText("A text")).toBeTruthy());
+    expect(screen.getByText("B text")).toBeTruthy();
+
+    // (a) Rendering alone never calls markAltitudesSeen (DEC-8, no
+    // auto-on-render) — asserted here as a real precondition for (b)/(c)
+    // below, not as the whole test.
+    expect(mockMarkSeenMock).not.toHaveBeenCalled();
+
+    // (b) Click per-unit dismiss control on unit A (has freshness) →
+    // markAltitudesSeen called exactly once. Red proof (per technical-plan):
+    // double-fire the handler → the exactly-once assertion goes red; today
+    // it's red because no such button exists to click at all.
+    const rowA = screen.getByText("A text").closest('[data-test="pool-unit"]');
+    const dismissButtonA = within(rowA as HTMLElement).getByRole("button", {
+      name: /dismiss|acknowledge|×|✕/i,
+    });
+    fireEvent.click(dismissButtonA);
+
+    await waitFor(() => expect(mockMarkSeenMock).toHaveBeenCalledTimes(1));
+
+    // Unit B carries no freshness, so it must have no dismiss control at
+    // all — nothing to click, nothing to acknowledge.
+    const rowB = screen.getByText("B text").closest('[data-test="pool-unit"]');
+    expect(
+      within(rowB as HTMLElement).queryByRole("button", { name: /dismiss|acknowledge|×|✕/i })
+    ).toBeNull();
+  });
+
+  it("C3: compat, degradation, and unknown values", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unitOld = makeUnit({ source: "trunk_commit", sourceRef: "old" });
+    const unitUnknown = makeUnit({ source: "intake_initiative", sourceRef: "unknown" });
+    const unitBogusState = makeUnit({ source: "intake_initiative", sourceRef: "bogus" });
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({
+      units: [unitOld, unitUnknown, unitBogusState],
+      identityWarnings: [],
+    });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // (a) Old-server response (entries with no freshness fields)
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {
+        [unitOld.id]: {
+          project: "Old",
+          stakeholder: "Old server text",
+          // No freshness, no update_reason
+        },
+        [unitUnknown.id]: {
+          project: "Unknown",
+          stakeholder: "Unknown text",
+          freshness: "unknown_freshness_xyz",
+          update_reason: "something_changed",
+          regenerated_at: "2026-08-05T10:00:00Z",
+        },
+      },
+      states: {
+        [unitBogusState.id]: "bogus_state_xyz",
+      },
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByText("Old server text")).toBeTruthy());
+
+    // (a) Old-server entries (no freshness fields at all) render as-is, with
+    // NO marker/dismiss control — this is the actual "no marker" claim, not
+    // just "the text renders" (which is true whether or not the feature
+    // exists at all).
+    const bodyText = document.body.textContent || "";
+    expect(bodyText).toContain("Old server text");
+    const rowOld = screen.getByText("Old server text").closest('[data-test="pool-unit"]');
+    expect(
+      within(rowOld as HTMLElement).queryByRole("button", { name: /dismiss|acknowledge|×|✕/i })
+    ).toBeNull();
+
+    // (b) Unknown freshness value warns to console, specifically — isolated
+    // from (c)'s pre-existing out-of-registry `states` warn below by
+    // checking the warn call's own message, not just "warn was called at
+    // all" (that assertion would already pass today from (c) alone, proving
+    // nothing about the NEW freshness registry).
+    const freshnessWarnCall = warnSpy.mock.calls.find((call) =>
+      String(call[0]).includes("unknown_freshness_xyz")
+    );
+    expect(freshnessWarnCall).toBeTruthy();
+
+    // (c) Existing out-of-registry states value still works and warns
+    expect(bodyText).toContain("Unknown text");
+    const statesWarnCall = warnSpy.mock.calls.find((call) =>
+      String(call[0]).includes("bogus_state_xyz")
+    );
+    expect(statesWarnCall).toBeTruthy();
+
+    // (d) Unknown update_reason → generic copy from i18n, no raw key leak
+    // The test verifies that a reason like "something_changed" routes to the generic
+    // "updated" key, not a literal "planLedger.pool.altitudes.updatedSomethingChanged"
+    const hasRawKey = /planLedger\.pool\.altitudes\.[a-zA-Z]/.test(bodyText);
+    expect(hasRawKey).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it("C-registry: hand-typed registries move together (WATCH-E/F)", async () => {
+    // The three hand-typed client registries (Altitude union, the
+    // states Record type, and ALTITUDE_FRESHNESS) aren't exported for
+    // direct inspection, so this is a black-box baseline: an empty pool
+    // renders its real empty-state copy with no warnings and no marker
+    // scaffolding left over — a component that hard-crashes or warns
+    // unconditionally when the new freshness registry is wired in would
+    // fail this. §9.7 accepted exception (WATCH-F) — this cannot fully
+    // close the trap by itself; C1/C1b/C3 close the behavioral legs.
+    const plan = makePlan();
+    plan.items = [];
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockAltitudesMock.mockResolvedValue({ altitudes: {}, states: {} });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Nothing unclaimed right now.")).toBeTruthy();
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('[data-test="pool-unit"]')).toHaveLength(0);
 
     warnSpy.mockRestore();
   });

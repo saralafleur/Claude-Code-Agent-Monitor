@@ -38,6 +38,18 @@ import { Info, X } from "lucide-react";
 import { api } from "../lib/api";
 import type { PlanHealth, ProjectPlanItem, ProjectPlanWithItems, ValueUnit } from "../lib/types";
 
+/** Hand-maintained mirror of `server/lib/value-summary.js`'s
+ *  `ALTITUDE_FRESHNESS` export (§9.7 accepted exception, WATCH-F — a CJS
+ *  server module cannot be imported across the Vite/Node boundary). Grow
+ *  this ONLY when the server export grows; `server/__tests__/value-summary.test.js`'s
+ *  i18n-registry test and this file's own out-of-registry warn below are the
+ *  two compensating pins that keep this copy from drifting silently. */
+const ALTITUDE_FRESHNESS = [
+  "stale_refresh_queued",
+  "stale_refresh_unavailable",
+  "updated_unseen",
+] as const;
+
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
 const TIER_BADGE_CLASS: Record<"mechanical" | "correlational" | "judgment", string> = {
@@ -305,6 +317,24 @@ function PlanSection({
   );
 }
 
+/** One resolved unit's PROJECT/STAKEHOLDER synthesis, optionally carrying a
+ *  freshness marker (mutability-aware caching, altitude-invalidation build):
+ *  `freshness: "updated_unseen"` means this text just replaced a mutable
+ *  unit's stale text and the user has not yet explicitly acknowledged it
+ *  (the per-unit dismiss control below); `"stale_refresh_queued"`/
+ *  `"stale_refresh_unavailable"` mean the unit's cache went stale but could
+ *  NOT be refreshed this round — this is still its OLD text, never blanked.
+ *  All three fields are absent on a plain resolved/cache-hit entry and on
+ *  any older-server response (backward compat — `"freshness" in altitude`
+ *  is the presence check used throughout, never a truthy check alone). */
+type ResolvedAltitude = {
+  project: string;
+  stakeholder: string;
+  freshness?: string;
+  update_reason?: string;
+  regenerated_at?: string | null;
+};
+
 /** One unit's PROJECT/STAKEHOLDER synthesis, four states (DEC-11):
  *  `undefined` while {@link api.projectPlans.altitudes} hasn't resolved for
  *  this unit yet this mount; `"queued"` when the server says this unit fell
@@ -313,12 +343,43 @@ function PlanSection({
  *  `"unavailable"` when the server attempted this unit and still produced
  *  nothing (LLM off, spawn failure, unparsable output) OR when an older
  *  server sent no `states` entry at all (the safe fallback — precedent:
- *  `TrunkDriftResult["skipped"]`); or the resolved `{project, stakeholder}`
- *  text. The two string literals mirror `server/lib/value-summary.js`'s
+ *  `TrunkDriftResult["skipped"]`); or the resolved {@link ResolvedAltitude}.
+ *  The two string literals mirror `server/lib/value-summary.js`'s
  *  `ALTITUDE_STATES` export — that export is the canonical source (§9.7);
  *  this union is a known, hand-maintained cross-runtime member because a
  *  CJS server module cannot be imported across the Vite/Node boundary. */
-type Altitude = { project: string; stakeholder: string } | "queued" | "unavailable" | undefined;
+type Altitude = ResolvedAltitude | "queued" | "unavailable" | undefined;
+
+/** Chooses the i18n key for one resolved altitude's freshness marker —
+ *  never a hardcoded English string, and never a raw `update_reason`/
+ *  `freshness` value interpolated into a key (that would fabricate a key
+ *  this file's registry never declared, the exact §9.7 hazard this helper
+ *  exists to close off). Returns `null` when the entry carries no
+ *  `freshness` at all (a plain resolved entry, or an older-server
+ *  response) — the ONLY case with no marker control. Any `freshness` value
+ *  outside {@link ALTITUDE_FRESHNESS} still renders (generic fallback,
+ *  A-6) after the caller warns once (see the altitude-fetch effect below). */
+function altitudeMarkerKey(altitude: ResolvedAltitude): string | null {
+  if (!("freshness" in altitude) || !altitude.freshness) return null;
+  if (altitude.freshness === "stale_refresh_queued") {
+    return "planLedger.pool.altitudes.staleRefreshQueued";
+  }
+  if (altitude.freshness === "stale_refresh_unavailable") {
+    return "planLedger.pool.altitudes.staleRefreshUnavailable";
+  }
+  if (altitude.freshness === "updated_unseen") {
+    if (altitude.update_reason === "stage_changed") {
+      return "planLedger.pool.altitudes.updatedStageChanged";
+    }
+    if (altitude.update_reason === "label_changed") {
+      return "planLedger.pool.altitudes.updatedLabelChanged";
+    }
+    return "planLedger.pool.altitudes.updatedGeneric";
+  }
+  // Out-of-registry freshness value (future server, or a malformed
+  // response) — same generic fallback rather than rendering nothing.
+  return "planLedger.pool.altitudes.updatedGeneric";
+}
 
 /** Renders one altitude line's content: the resolved text, or a muted
  *  "generating…"/"queued"/"unavailable" placeholder — never blank, so the
@@ -369,6 +430,7 @@ function ValueUnitRow({
   openItems,
   busy,
   onClaim,
+  onAcknowledge,
   t,
 }: {
   unit: ValueUnit;
@@ -376,9 +438,15 @@ function ValueUnitRow({
   openItems: Array<{ id: number; text: string }>;
   busy: boolean;
   onClaim: (unit: ValueUnit, itemId: number) => void;
+  onAcknowledge: (unit: ValueUnit, altitude: ResolvedAltitude) => void;
   t: TFunc;
 }) {
   const [targetItemId, setTargetItemId] = useState<number | null>(openItems[0]?.id ?? null);
+  // A resolved entry only (never "queued"/"unavailable"/undefined) can carry
+  // a freshness marker — `altitude[field]` above already narrows this same
+  // way for AltitudeText's own object branch.
+  const resolved = altitude && typeof altitude === "object" ? (altitude as ResolvedAltitude) : null;
+  const markerKey = resolved ? altitudeMarkerKey(resolved) : null;
   return (
     <div
       data-test="pool-unit"
@@ -423,6 +491,38 @@ function ValueUnitRow({
               <AltitudeText altitude={altitude} field="stakeholder" t={t} />
             </div>
           </div>
+          {markerKey && resolved && (
+            <div className="flex items-center gap-1.5 pl-[calc(4rem+0.5rem)]">
+              <span className="text-[10px] text-amber-400/90 italic">{t(markerKey)}</span>
+              {/* SF-2: the dismiss control only makes sense for
+                  `updated_unseen` — the marker that means "this text WAS
+                  just regenerated; has the user seen it." A
+                  `stale_refresh_queued`/`stale_refresh_unavailable` row is
+                  still serving its OLD, never-regenerated text (this round
+                  simply couldn't refresh it); there is no new generation to
+                  acknowledge. Rendering a dismiss control there let a click
+                  send the row's stale `regenerated_at` (an EARLIER,
+                  separate, already-served generation) to the compare-and-set
+                  seen endpoint, which could mis-stamp `seen_at` for that
+                  earlier generation and silently swallow a later, genuinely
+                  unacknowledged `updated_unseen` marker for the same unit —
+                  the exact T-D class DEC-17's CAS exists to prevent. Those
+                  markers keep their informational text above; they simply
+                  get no dismiss affordance (server re-derives them from
+                  staleness on every read regardless of any client action). */}
+              {resolved.freshness === "updated_unseen" && (
+                <button
+                  type="button"
+                  aria-label={t("planLedger.pool.altitudes.dismiss")}
+                  title={t("planLedger.pool.altitudes.dismiss")}
+                  onClick={() => onAcknowledge(unit, resolved)}
+                  className="text-[11px] leading-none text-gray-500 hover:text-gray-300 px-1 rounded"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
       {openItems.length > 0 && (
@@ -561,12 +661,33 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
             );
           }
         }
+        // Same T-E-shaped coverage for the new freshness registry: an
+        // out-of-registry `freshness` value (a malformed/future-server
+        // response) still renders (generic fallback, altitudeMarkerKey
+        // above) but is never silently unremarked in dev.
+        for (const [uid, entry] of Object.entries(res.altitudes)) {
+          const freshness = (entry as { freshness?: string }).freshness;
+          if (
+            freshness &&
+            !ALTITUDE_FRESHNESS.includes(freshness as (typeof ALTITUDE_FRESHNESS)[number])
+          ) {
+            console.warn(
+              `Altitude freshness "${freshness}" not in ALTITUDE_FRESHNESS registry for unit ${uid}`
+            );
+          }
+        }
         setAltitudes((prev) => {
           const next = { ...prev };
           for (const u of missing) {
             const a = res.altitudes[u.id];
             next[u.id] = a
-              ? { project: a.project, stakeholder: a.stakeholder }
+              ? {
+                  project: a.project,
+                  stakeholder: a.stakeholder,
+                  ...(a.freshness ? { freshness: a.freshness } : {}),
+                  ...(a.update_reason ? { update_reason: a.update_reason } : {}),
+                  ...("regenerated_at" in a ? { regenerated_at: a.regenerated_at ?? null } : {}),
+                }
               : res.states?.[u.id] === "queued"
                 ? "queued"
                 : "unavailable";
@@ -600,6 +721,32 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
       }
     },
     [projectId, load]
+  );
+
+  // Explicit acknowledge only (DEC-8) — never called from a render/effect,
+  // only from ValueUnitRow's dismiss button's own onClick. Optimistically
+  // clears the local marker on success so the row doesn't wait for the next
+  // altitude fetch to stop showing it; a failure leaves the marker exactly
+  // as it was (no optimistic clear), matching the server's own
+  // compare-and-set semantics (a stale/failed acknowledge must not look
+  // like it succeeded).
+  const handleAcknowledge = useCallback(
+    async (unit: ValueUnit, altitude: ResolvedAltitude) => {
+      try {
+        await api.projectPlans.markAltitudesSeen(projectId, [
+          { unit_key: unit.id, regenerated_at: altitude.regenerated_at ?? null },
+        ]);
+        setAltitudes((prev) => {
+          const current = prev[unit.id];
+          if (!current || typeof current !== "object") return prev;
+          const { freshness: _freshness, update_reason: _updateReason, ...rest } = current;
+          return { ...prev, [unit.id]: rest };
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [projectId]
   );
 
   const handleClose = useCallback(
@@ -706,6 +853,7 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
                 openItems={openItems}
                 busy={claimingUnitId === unit.id}
                 onClaim={handleClaim}
+                onAcknowledge={handleAcknowledge}
                 t={t}
               />
             ))
