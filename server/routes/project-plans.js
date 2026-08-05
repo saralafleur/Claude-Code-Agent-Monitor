@@ -20,7 +20,7 @@ const dbModule = require("../db");
 const { broadcast } = require("../websocket");
 const planLifecycle = require("../lib/plan-lifecycle");
 const valueLedger = require("../lib/value-ledger");
-const valueSummary = require("../lib/value-summary");
+const { enrichPoolAltitudes } = require("../lib/value-summary");
 const cwdIdentity = require("../lib/cwd-identity");
 
 const { VALUE_SOURCES, ATTRIBUTION_TIERS } = valueLedger;
@@ -129,8 +129,15 @@ router.get("/history", (req, res) => {
 // above /pool). Never recomputes the pool itself — callers pass the exact
 // units their own /pool fetch already resolved (DEC-16: pool assembly stays
 // value-ledger.js's alone). Always 200, even when the LLM path is
-// off/unavailable — affected units simply come back missing from
-// `altitudes`, never as an error (value-summary.js's "unavailable" contract).
+// off/unavailable — affected units simply come back in `states` (`queued` or
+// `unavailable`, DEC-11), never as an error. A submitted unit with a valid
+// unit_key but an unrecognized value_source is itself reported `unavailable`
+// in `states` rather than silently dropped from both maps (S3) — every unit
+// with an identifiable key lands in exactly one of the two, same as
+// enrichPoolAltitudes's own contract. This is the same-visit fast path only,
+// still capped at MAX_UNITS_PER_PROMPT (40) inline; overflow beyond that cap
+// is drained unattended by `server/lib/value-summary-tick.js` — this route's
+// behavior is otherwise unchanged by that tick's existence.
 router.post("/altitudes", async (req, res) => {
   const { project_id: projectId, units } = req.body || {};
   if (!projectId || !Array.isArray(units)) {
@@ -139,9 +146,20 @@ router.post("/altitudes", async (req, res) => {
       .json({ error: { code: "INVALID_INPUT", message: "project_id and units[] are required" } });
   }
   const clean = [];
+  // Units this loop itself rejects still need to land in exactly one of the
+  // two response maps (DEC-11 / the "never both, never neither" contract
+  // api.ts documents) — pre-seed `states` here for anything with an
+  // identifiable key that fails validation, so it is not silently dropped
+  // into neither map (S3). A missing/blank/non-string unit_key has no key to
+  // report a state against at all, so it is the one case that is genuinely
+  // unrepresentable and stays dropped.
+  const states = {};
   for (const u of units) {
     if (!u || typeof u.unit_key !== "string" || !u.unit_key) continue;
-    if (!VALUE_SOURCES.includes(u.value_source)) continue;
+    if (!VALUE_SOURCES.includes(u.value_source)) {
+      states[u.unit_key] = "unavailable";
+      continue;
+    }
     clean.push({
       unitKey: u.unit_key,
       value_source: u.value_source,
@@ -150,8 +168,8 @@ router.post("/altitudes", async (req, res) => {
       stage: typeof u.stage === "string" ? u.stage : null,
     });
   }
-  const altitudes = await valueSummary.enrichPoolAltitudes(dbModule, clean);
-  res.json({ altitudes });
+  const enriched = await enrichPoolAltitudes(dbModule, clean);
+  res.json({ altitudes: enriched.altitudes, states: { ...states, ...enriched.states } });
 });
 
 // POST /api/project-plans/import {project_id, cwd} - DEC-P2 generation-1

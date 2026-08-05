@@ -2213,12 +2213,46 @@ pool assembly. Unlike `focus_summaries`, caching in `value_unit_summaries` is
 keyed on the unit's own identity with no digest gating — a value unit's
 ground fact is immutable once seen, so it is generated once and served
 forever. Every not-yet-cached unit in one request batches into a single
-`claude -p` spawn (never one call per unit), so sibling units can inform each
-other's PROJECT phrasing. `PlanLedgerPanel` fetches altitudes as a separate,
-non-blocking request once the pool's units are known — a cold cache's LLM
-latency never delays the rest of the panel — and shows a "Generating…"
-placeholder per row until it resolves, or "Not available" if the LLM path is
-off/unavailable.
+`claude -p` spawn (never one call per unit, capped at `MAX_UNITS_PER_PROMPT`
+= 40), so sibling units can inform each other's PROJECT phrasing. The
+route's response is `{ altitudes, states }`: `altitudes` is unchanged from
+before; `states` discriminates *why* a unit has no text yet — `"queued"`
+(beyond this request's 40-unit cap, never attempted, picked up by a later
+pass) versus `"unavailable"` (attempted this request and still produced
+nothing — LLM off/unavailable, spawn failure, or unparsable output). This
+replaces an earlier overloaded-absence contract where both cases looked
+identical. `PlanLedgerPanel` fetches altitudes as a separate, non-blocking
+request once the pool's units are known — a cold cache's LLM latency never
+delays the rest of the panel — and shows "Generating…" per row until the
+fetch resolves, then "Queued" or "Not available" (visibly distinct) for
+whichever of the two states the server reports.
+
+**Background overflow sweep** (`server/lib/value-summary-tick.js`, new)
+drains what the ≤40-unit-per-visit request cap above cannot reach in one
+page load — the measured worst case is a 182-unit pool, several manual
+reloads under the old request-only design. Registered in
+`startBackgroundServices()`, it sweeps `MAX_PROJECTS_PER_TICK` (default 3)
+projects per cycle, in **least-recently-swept rotation** (never all projects
+at once, never ordered by recency of user attention — a project nobody has
+opened recently still gets swept), making exactly one `assembleValuePool` +
+one `enrichPoolAltitudes` call per swept project — the same composer the
+request path uses, never a second pool-assembly or cache-write path (the
+hybrid's single-writer invariant, enforced structurally by
+`single-writer-guard.test.js`). Two additive tables record what happened:
+`value_summary_sweep_state` (one row per project — `last_swept_at`, the
+rotation's own ordering key, and `pending_after_sweep`, re-derived from that
+sweep's own `queued + unavailable` counts every time, never decremented) and
+`value_summary_generation_log` (one row per sweep attempt — `pool_size`,
+`cache_hits`, `generated`, `queued`, `unavailable`, `model`, `duration_ms`;
+the four counted columns always sum to `pool_size`). A sweep that generated
+at least one unit broadcasts `value_altitudes_updated`
+(`{project_id, unit_keys, pending}`) — v1 ships no client subscriber for
+this broadcast, so an already-open panel picks up newly-swept coverage on
+its next mount, not in place. One project failing never stops the sweep or
+starves the rotation (its `last_swept_at` still advances). Env:
+`DASHBOARD_VALUE_SUMMARY_TICK_MODE` (`on` default / `off`),
+`DASHBOARD_VALUE_SUMMARY_TICK_MS` (tick interval, default 600000 = 10m; ≤0
+disables), `MAX_PROJECTS_PER_TICK` (default 3).
 
 ---
 

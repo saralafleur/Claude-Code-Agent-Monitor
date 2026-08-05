@@ -305,18 +305,27 @@ function PlanSection({
   );
 }
 
-/** One unit's PROJECT/STAKEHOLDER synthesis: `undefined` while {@link
- *  api.projectPlans.altitudes} hasn't resolved for this unit yet, `null`
- *  once resolved without an entry for it (LLM off/unavailable this round —
- *  see value-summary.js's "unavailable" contract), or the resolved text. */
-type Altitude = { project: string; stakeholder: string } | null | undefined;
+/** One unit's PROJECT/STAKEHOLDER synthesis, four states (DEC-11):
+ *  `undefined` while {@link api.projectPlans.altitudes} hasn't resolved for
+ *  this unit yet this mount; `"queued"` when the server says this unit fell
+ *  beyond this round's cap and was never attempted (a later pass — the
+ *  background tick, `server/lib/value-summary-tick.js` — will pick it up);
+ *  `"unavailable"` when the server attempted this unit and still produced
+ *  nothing (LLM off, spawn failure, unparsable output) OR when an older
+ *  server sent no `states` entry at all (the safe fallback — precedent:
+ *  `TrunkDriftResult["skipped"]`); or the resolved `{project, stakeholder}`
+ *  text. The two string literals mirror `server/lib/value-summary.js`'s
+ *  `ALTITUDE_STATES` export — that export is the canonical source (§9.7);
+ *  this union is a known, hand-maintained cross-runtime member because a
+ *  CJS server module cannot be imported across the Vite/Node boundary. */
+type Altitude = { project: string; stakeholder: string } | "queued" | "unavailable" | undefined;
 
 /** Renders one altitude line's content: the resolved text, or a muted
- *  "generating…"/"unavailable" placeholder — never blank, so the row's
- *  three-line shape never jumps as altitudes resolve. Reads `field` off the
- *  whole `altitude` object itself (not a pre-extracted value) — optional
- *  chaining on a `null` altitude collapses to `undefined` at the field
- *  level, which would make "resolved but unavailable" indistinguishable
+ *  "generating…"/"queued"/"unavailable" placeholder — never blank, so the
+ *  row's three-line shape never jumps as altitudes resolve. Reads `field`
+ *  off the whole `altitude` object itself (not a pre-extracted value) —
+ *  optional chaining on a string altitude collapses to `undefined` at the
+ *  field level, which would make "resolved but unavailable" indistinguishable
  *  from "not yet resolved". */
 function AltitudeText({
   altitude,
@@ -332,7 +341,12 @@ function AltitudeText({
       <span className="italic text-gray-600">{t("planLedger.pool.altitudes.generating")}</span>
     );
   }
-  if (altitude === null) {
+  if (altitude === "queued") {
+    return <span className="italic text-gray-600">{t("planLedger.pool.altitudes.queued")}</span>;
+  }
+  if (typeof altitude === "string") {
+    // "unavailable", or any other unrecognized string — same safe fallback
+    // (see the out-of-registry console.warn in the altitude effect below).
     return (
       <span className="italic text-gray-600">{t("planLedger.pool.altitudes.unavailable")}</span>
     );
@@ -535,11 +549,27 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
       .altitudes(projectId, missing)
       .then((res) => {
         if (cancelled) return;
+        // T-E trap coverage: an out-of-registry states value (a malformed
+        // new-server response) must not silently masquerade as an
+        // old-server absence — warn once per occurrence so it is visible in
+        // dev, then still fall through to the same safe "unavailable"
+        // render as any other unrecognized string (see AltitudeText above).
+        for (const [uid, state] of Object.entries(res.states ?? {})) {
+          if (state && !["queued", "unavailable"].includes(state)) {
+            console.warn(
+              `Altitude state "${state}" not in ALTITUDE_STATES registry for unit ${uid}`
+            );
+          }
+        }
         setAltitudes((prev) => {
           const next = { ...prev };
           for (const u of missing) {
             const a = res.altitudes[u.id];
-            next[u.id] = a ? { project: a.project, stakeholder: a.stakeholder } : null;
+            next[u.id] = a
+              ? { project: a.project, stakeholder: a.stakeholder }
+              : res.states?.[u.id] === "queued"
+                ? "queued"
+                : "unavailable";
           }
           return next;
         });
@@ -548,7 +578,7 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
         if (cancelled) return;
         setAltitudes((prev) => {
           const next = { ...prev };
-          for (const u of missing) next[u.id] = null;
+          for (const u of missing) next[u.id] = "unavailable";
           return next;
         });
       });

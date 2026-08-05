@@ -1108,6 +1108,54 @@ CREATE TABLE value_unit_summaries (
 
 ---
 
+### value_summary_sweep_state / value_summary_generation_log
+
+**Background overflow-sweep audit trail** (`intake/2026-08-04-value-summary-tick/`, `server/lib/value-summary-tick.js`): `POST /api/project-plans/altitudes` only ever synthesizes up to `MAX_UNITS_PER_PROMPT` (40) units per visit, so a large pool (the measured worst case is 182 units) needs a background sweep to reach full coverage without repeated manual reloads. The tick sweeps `MAX_PROJECTS_PER_TICK` (default 3) projects per cycle in **least-recently-swept rotation** (`value_summary_sweep_state.last_swept_at`, a real timestamp — never a row id), calling `value-ledger.js`'s `assembleValuePool` and `value-summary.js`'s `enrichPoolAltitudes` exactly once per swept project — the same composer the request path uses, never a second pool-assembly or cache-write path. Both tables are additive; landing them required zero `ALTER TABLE` and zero rebuilds.
+
+```sql
+CREATE TABLE value_summary_sweep_state (
+    project_id TEXT PRIMARY KEY,
+    last_swept_at TEXT,
+    pending_after_sweep INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE value_summary_generation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('tick','request')),
+    outcome TEXT NOT NULL CHECK(outcome IN ('ok','skipped','error')),
+    pool_size INTEGER NOT NULL DEFAULT 0,
+    cache_hits INTEGER NOT NULL DEFAULT 0,
+    generated INTEGER NOT NULL DEFAULT 0,
+    queued INTEGER NOT NULL DEFAULT 0,
+    unavailable INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
+**Columns:**
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `value_summary_sweep_state.last_swept_at` | TEXT | YES | `NULL` until a project's first sweep — sorts first in the rotation (`ORDER BY (last_swept_at IS NOT NULL) ASC, last_swept_at ASC`), so a never-swept project is never starved behind a slower-rotating one |
+| `value_summary_sweep_state.pending_after_sweep` | INTEGER | NO | **Re-derived from that sweep's own `queued + unavailable` counts every time** — never decremented from a prior value, never a stale `pool_size` read. A project whose pool grows between sweeps must show that growth here |
+| `value_summary_generation_log.source` | TEXT | NO | `'tick'` (the only value v1 writes) or `'request'` — the unused-in-v1 enum value is paid for up front so a future request-path log write is additive, not a `CHECK`-widening rebuild |
+| `value_summary_generation_log.outcome` | TEXT | NO | `ok`, `skipped` (reserved), or `error` — a per-project sweep failure never stops the rest of the sweep, and still writes an `error` row so the rotation's next-target logic and the operator both see it |
+| `value_summary_generation_log.pool_size` / `cache_hits` / `generated` / `queued` / `unavailable` | INTEGER | NO | A strict four-term partition: `cache_hits + generated + queued + unavailable === pool_size`, always — the direct audit-trail evidence that a sweep accounted for every unit in the pool it read |
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_value_summary_generation_log_created_at ON value_summary_generation_log(created_at);
+CREATE INDEX idx_value_summary_generation_log_project ON value_summary_generation_log(project_id, created_at);
+```
+
+Registered in `startBackgroundServices()`; disabled via `DASHBOARD_VALUE_SUMMARY_TICK_MODE=off` or `DASHBOARD_VALUE_SUMMARY_TICK_MS=0`. See [ARCHITECTURE.md](../ARCHITECTURE.md#portfolio-plan-lifecycle--value-ledger).
+
+---
+
 ### focus_summaries
 
 Cached stakeholder-readable **window summaries** for `GET /api/focus-report/summary` (`server/lib/focus-summary.js`): 2–4 plain-language bullets synthesized by a one-shot LLM call from a report window's per-session focus segments. `cache_key` identifies the full scope+window request (project/session/unassigned/sources + from/to); `input_digest` hashes the summary-relevant report data, so a cached row is served only while the underlying data is unchanged — a finished day is generated exactly once and served forever, while a still-running day regenerates whenever new activity lands in the window. Generated on request, not by a background service; no FK — a summary describes a window, not one session.

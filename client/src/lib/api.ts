@@ -2703,12 +2703,21 @@ export const api = {
      * a batch of {@link ValueUnit}s already fetched from {@link
      * api.projectPlans.pool} (server/lib/value-summary.js, the layer above
      * the pool itself). Never re-fetches or recomputes the pool — callers
-     * pass the exact units they already hold. A unit absent from the
-     * returned map means no altitude could be produced this round (LLM
-     * off/unavailable) — never an error.
+     * pass the exact units they already hold, capped at 40 synchronous
+     * resolutions per call (unchanged fast path — overflow beyond that cap
+     * is drained unattended by `server/lib/value-summary-tick.js`'s
+     * background sweep, never by this call).
+     *
+     * A unit lands in exactly one of two places (DEC-11), never both, never
+     * neither: `altitudes` (resolved this call or already cached), or
+     * `states` (unresolved — `"queued"` if it fell beyond this call's cap
+     * and was never attempted, `"unavailable"` if it WAS in scope this call
+     * and still produced nothing, e.g. LLM off). `states` may be absent on
+     * an older server (pre-this-build) — callers should treat a missing
+     * `states` key the same as an empty one, never as an error.
      * @param projectId The project id.
      * @param units     The {@link ValueUnit}s to synthesize altitudes for.
-     * @returns `{ altitudes }` keyed by each unit's `id` (server `unitKey`).
+     * @returns `{ altitudes, states }` both keyed by each unit's `id` (server `unitKey`).
      */
     altitudes: (projectId: string, units: ValueUnit[]) =>
       request<{
@@ -2722,6 +2731,7 @@ export const api = {
             cached: boolean;
           }
         >;
+        states?: Record<string, "queued" | "unavailable">;
       }>("/project-plans/altitudes", {
         method: "POST",
         body: JSON.stringify({

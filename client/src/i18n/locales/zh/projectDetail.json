@@ -153,7 +153,8 @@
       },
       "altitudes": {
         "generating": "生成中…",
-        "unavailable": "暂不可用"
+        "unavailable": "暂不可用",
+        "queued": "排队中"
       }
     },
     "health": {
