@@ -11,7 +11,8 @@
     "description": "Huấn luyện viên đang theo dõi các phiên làm việc của bạn trong nền. Khi có điều gì đáng chú ý, nó sẽ hiển thị ở đây."
   },
   "feed": {
-    "loading": "Đang tải…"
+    "loading": "Đang tải…",
+    "showFewer": "Ẩn bớt"
   },
   "kindLabel": {
     "risk": "Cảnh báo",
@@ -50,7 +51,18 @@
     "parseError": "Nhập một số, ví dụ 500k hoặc 1.2m",
     "kindOverrideLabel": "Loại",
     "severityOverrideLabel": "Mức độ",
-    "useDefaultOption": "Dùng mặc định ({{value}})"
+    "useDefaultOption": "Dùng mặc định ({{value}})",
+    "settingsTitle": "Tự động giải quyết",
+    "settingsDescription": "Một cảnh báo sẽ không bao giờ tự đóng lại khi phiên của nó vẫn đang hoạt động. Sau khi phiên kết thúc, đây là thời gian chờ trước khi các cảnh báo đang mở tự đóng lại — để bạn không phải tự tay bỏ qua từng cái. Một khoảng thời gian duy nhất cho mọi thực hành — không cần cấu hình riêng cho từng thực hành.",
+    "settingsFieldLabel": "Tự động giải quyết sau khi phiên kết thúc",
+    "settingsUnit": "phút",
+    "settingsParseError": "Nhập một số phút, từ 0 trở lên",
+    "settingsDisabledHint": "0 sẽ tắt tính năng này — một cảnh báo chỉ đóng lại khi bạn bỏ qua nó, kể cả sau khi phiên liên quan đã kết thúc.",
+    "sidecar": {
+      "label": "Các mục của Sổ tay",
+      "settingsLabel": "Cài đặt",
+      "practicesLabel": "Thực hành"
+    }
   },
   "practices": {
     "sessionTokenCeiling": {
@@ -60,17 +72,19 @@
       "hint": "vd. 500k hoặc 1.2m",
       "unit": "tokens",
       "message": "Ngữ cảnh của phiên đang trở nên lớn ({{tokens}} tokens)",
-      "recommendation": "Hãy dùng /compact hoặc /clear trước khi tiếp tục — sao chép lại ngữ cảnh hiện tại của bạn trước."
+      "recommendation": "Hãy dùng /compact hoặc /clear trước khi tiếp tục — sao chép lại ngữ cảnh hiện tại của bạn trước.",
+      "autoResolveOnSessionEndLabel": "Tự động giải quyết sau khi phiên kết thúc",
+      "autoResolveOnSessionEndHint": "Một phiên không còn hoạt động thì không thể /compact hay /clear được nữa. Sau khi phiên kết thúc, cảnh báo này sẽ tự đóng lại sau khoảng thời gian Tự động giải quyết ở trên — không bao giờ đóng khi phiên vẫn đang hoạt động."
     },
     "accountWeeklyBalance": {
       "name": "Luân phiên tài khoản",
-      "description": "Cảnh báo khi hai tài khoản trở lên có mức sử dụng hằng tuần lệch nhau đáng kể, để bạn có thể chuyển công việc sang tài khoản còn nhiều hạn mức hơn thay vì dùng cạn một tài khoản duy nhất.",
-      "fieldLabel": "Ngưỡng chênh lệch",
-      "unit": "%",
+      "description": "Cảnh báo khi tài khoản Claude bạn đang thực sự sử dụng đã vượt qua ngưỡng chuyển đổi của Rotation Plan (trang Usage), trong khi một tài khoản đã kết nối khác vẫn còn hạn mức để tiếp quản.",
+      "thresholdInfo": "Dùng chung ngưỡng chuyển đổi {{value}}% với Rotation Plan ở trang Usage — hãy chỉnh sửa ở đó, không phải ở đây.",
+      "autoResolveNote": "Tự động đóng lại khi tài khoản đang hoạt động giảm xuống dưới ngưỡng (do reset hằng tuần, hoặc do bạn đã thực sự chuyển tài khoản) — không cần cấu hình gì thêm.",
+      "previewActiveLabel": "Cá nhân",
       "previewLowLabel": "Công việc",
-      "previewHighLabel": "Cá nhân",
-      "message": "{{lowLabel}} còn nhiều hạn mức tuần hơn {{highLabel}} {{gapPct}}% ({{lowPct}}% so với {{highPct}}% đã dùng)",
-      "recommendation": "Hãy chuyển công việc hiện tại sang {{lowLabel}} — luân phiên giúp luôn có thể đổi phiên làm việc và bảo toàn hạn mức tuần của cả hai tài khoản."
+      "message": "{{activeLabel}} đang ở mức {{activePct}}% hạn mức tuần — hãy chuyển sang {{lowLabel}} (đã dùng {{lowPct}}%) trước khi hết hạn mức.",
+      "recommendation": "Hãy chuyển công việc hiện tại sang {{lowLabel}} — Rotation Plan ở trang Usage cũng đã đề xuất điều này, đồng thời bảo toàn hạn mức tuần còn lại của {{activeLabel}}."
     }
   }
 }

@@ -1752,6 +1752,29 @@ rebuildTableAtomically({
   ],
 });
 
+// playbook_settings — global Coach settings that apply across every
+// practice, as opposed to playbook_practice_config's per-practice values
+// (same singleton-row convention as dashboard_layout/color_thresholds
+// above — no user accounts, so one setting applies to every connected
+// client). Currently a single knob: `auto_resolve_after_ms`, how long AFTER
+// A SESSION HAS ENDED an open Observation may sit unactioned before the
+// Playbook engine (lib/playbook/engine.js) auto-transitions it to
+// `resolved` — a still-active session's Observation is never auto-resolved
+// by time alone, no matter its age (0 = the sweep is disabled entirely, not
+// "resolve instantly on session end"). Kept separate from
+// playbook_practice_config because it isn't a practice-specific override —
+// a new practice should not have to configure this itself, and a single
+// dial the operator sets once is exactly the point (see
+// server/routes/playbook.js's GET/PUT /settings).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS playbook_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    auto_resolve_after_ms INTEGER NOT NULL DEFAULT 10800000,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+`);
+db.prepare("INSERT OR IGNORE INTO playbook_settings (id) VALUES (1)").run();
+
 // Focus-summary access log: one row per focus-window-summary cache
 // resolution (hit or miss), fed from server/lib/focus-summary.js at each
 // readCachedSummary / upsertFocusSummary decision point. This is what makes
@@ -2262,6 +2285,38 @@ const stmts = {
   updateCoachObservationStatus: db.prepare(
     `UPDATE coach_observations SET status = ?, responded_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = ?`
+  ),
+  // Open, session-scoped observations for one practice whose session has
+  // ENDED for at least `playbook_settings.auto_resolve_after_ms` — the
+  // auto-resolve sweep's sole trigger (lib/playbook/engine.js's
+  // autoResolveStaleObservations): a still-active session never qualifies
+  // no matter how long its observation has been open, only a session that
+  // has actually ended, and only once the configured window has elapsed
+  // since it did. `COALESCE(s.ended_at, s.updated_at)` is the "when did
+  // this session end" reference — `ended_at` isn't reliably stamped on
+  // every status-flip-away-from-active code path (some leave it NULL, see
+  // practices.js's file header), but `updated_at` always is, since it's set
+  // unconditionally on every `UPDATE sessions` write. A session deleted
+  // outright (the LEFT JOIN's `s.id IS NULL` branch) has no reference time
+  // to wait out, so it qualifies immediately once the sweep runs at all.
+  // Both branches are still gated by the caller checking
+  // `auto_resolve_after_ms > 0` before running this query — 0 means the
+  // sweep doesn't run, full stop, not "wait zero minutes."
+  listOpenSessionObservationsWithEndedSession: db.prepare(
+    `SELECT o.id FROM coach_observations o
+     LEFT JOIN sessions s ON s.id = o.scope_id
+     WHERE o.status = 'open' AND o.scope_type = 'session' AND o.practice_id = ?
+       AND (
+         s.id IS NULL
+         OR (s.status != 'active' AND COALESCE(s.ended_at, s.updated_at) <= ?)
+       )`
+  ),
+
+  getPlaybookSettings: db.prepare("SELECT * FROM playbook_settings WHERE id = 1"),
+  updatePlaybookSettings: db.prepare(
+    `UPDATE playbook_settings
+     SET auto_resolve_after_ms = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = 1`
   ),
 
   getAgent: db.prepare("SELECT * FROM agents WHERE id = ?"),

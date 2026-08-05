@@ -1,8 +1,10 @@
 /**
  * @file Tests for CoachPage: renders the empty state with zero open
  * Observations, renders a fetched Observation as a card with its
- * i18n-templated message, and Dismiss calls
- * `api.coach.respondToObservation` and removes the card from the Feed.
+ * i18n-templated message, Dismiss calls `api.coach.respondToObservation` and
+ * removes the card from the Feed, and — when several open Observations share
+ * a `practice_id` — only the latest renders up front with a "show more"
+ * toggle that reveals the rest (see `ObservationGroup.tsx`).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -25,6 +27,19 @@ const OBSERVATION = {
   responded_at: null,
 };
 
+const OLDER_OBSERVATION = {
+  id: 3,
+  practice_id: "session-token-ceiling",
+  scope_type: "session" as const,
+  scope_id: "sess-3",
+  kind: "risk" as const,
+  severity: "warning",
+  values_json: JSON.stringify({ totalTokens: 120_000_000, thresholdTokens: 100_000_000 }),
+  status: "open" as const,
+  detected_at: new Date().toISOString(),
+  responded_at: null,
+};
+
 const ACCOUNT_BALANCE_OBSERVATION = {
   id: 2,
   practice_id: "account-weekly-balance",
@@ -33,11 +48,11 @@ const ACCOUNT_BALANCE_OBSERVATION = {
   kind: "info" as const,
   severity: "info",
   values_json: JSON.stringify({
+    activeLabel: "Personal",
+    activePct: 85,
     lowLabel: "Work",
     lowPct: 40,
-    highLabel: "Personal",
-    highPct: 80,
-    gapPct: 40,
+    rotationSwitchPct: 80,
   }),
   status: "open" as const,
   detected_at: new Date().toISOString(),
@@ -100,7 +115,9 @@ describe("CoachPage", () => {
     listObservations.mockResolvedValue({ observations: [ACCOUNT_BALANCE_OBSERVATION] });
     renderPage();
     expect(
-      await screen.findByText("Work has 40% more weekly quota left than Personal (40% vs 80% used)")
+      await screen.findByText(
+        "Personal is at 85% of its weekly quota — switch to Work (40% used) before it runs out."
+      )
     ).toBeInTheDocument();
     // Global-scoped observations have no session to open, so no "Open session" action...
     expect(screen.queryByRole("link", { name: "Open session" })).not.toBeInTheDocument();
@@ -113,7 +130,9 @@ describe("CoachPage", () => {
     respondToObservation.mockResolvedValue({ ...ACCOUNT_BALANCE_OBSERVATION, status: "dismissed" });
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("Work has 40% more weekly quota left than Personal (40% vs 80% used)");
+    await screen.findByText(
+      "Personal is at 85% of its weekly quota — switch to Work (40% used) before it runs out."
+    );
 
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
 
@@ -122,7 +141,9 @@ describe("CoachPage", () => {
     });
     await waitFor(() => {
       expect(
-        screen.queryByText("Work has 40% more weekly quota left than Personal (40% vs 80% used)")
+        screen.queryByText(
+          "Personal is at 85% of its weekly quota — switch to Work (40% used) before it runs out."
+        )
       ).not.toBeInTheDocument();
     });
   });
@@ -141,5 +162,44 @@ describe("CoachPage", () => {
     await waitFor(() => {
       expect(screen.queryByText(/150\.0M tokens/)).not.toBeInTheDocument();
     });
+  });
+
+  it("groups several open observations sharing a practice_id, showing only the latest until expanded", async () => {
+    listObservations.mockResolvedValue({
+      observations: [OBSERVATION, OLDER_OBSERVATION],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText(/150\.0M tokens/);
+    expect(screen.queryByText(/120\.0M tokens/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show more/i }));
+
+    expect(await screen.findByText(/120\.0M tokens/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show fewer" })).toBeInTheDocument();
+  });
+
+  it("dismissing the latest card in an expanded group only removes that observation", async () => {
+    listObservations.mockResolvedValue({
+      observations: [OBSERVATION, OLDER_OBSERVATION],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: /show more/i }));
+    await screen.findByText(/120\.0M tokens/);
+
+    const dismissButtons = screen.getAllByRole("button", { name: "Dismiss" });
+    await user.click(dismissButtons[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(respondToObservation).toHaveBeenCalledWith(1, "dismissed");
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/150\.0M tokens/)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/120\.0M tokens/)).toBeInTheDocument();
   });
 });

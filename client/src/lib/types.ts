@@ -2813,15 +2813,20 @@ export interface ColorThresholdsConfig {
   rotationSwitchPct: number;
 }
 
-/** One user-adjustable numeric field on a {@link PlaybookPractice} (e.g. the
- *  session-token-ceiling practice's `thresholdTokens`). Purely descriptive -
- *  the server validates against this same shape, the client renders a
- *  labeled number input from it. */
+/** One user-adjustable field on a {@link PlaybookPractice}. `type: "number"`
+ *  (e.g. session-token-ceiling's `thresholdTokens`) is validated against
+ *  `min`, the client renders a labeled number input from it. `type:
+ *  "boolean"` (e.g. session-token-ceiling's `autoResolveOnSessionEnd`, read
+ *  by the engine's auto-resolve sweep, not by any `detect()`) is a plain
+ *  true/false with no `min` — the client renders a toggle. Purely
+ *  descriptive; the server validates against this same shape
+ *  (server/lib/playbook/practices.js's file header explains why a boolean
+ *  field needed no new plumbing beyond a type branch). */
 export interface PlaybookPracticeField {
   key: string;
-  type: "number";
-  default: number;
-  min: number;
+  type: "number" | "boolean";
+  default: number | boolean;
+  min?: number;
 }
 
 /** The only `kind` values a Playbook practice (or a per-practice
@@ -2869,7 +2874,22 @@ export interface PlaybookPractice {
   fields: PlaybookPracticeField[];
   enabled: boolean;
   /** Current values keyed by each field's `key` (defaults merged with any stored override). */
-  config: Record<string, number>;
+  config: Record<string, number | boolean>;
+}
+
+/** The Coach's Playbook's global settings — NOT scoped to any one practice
+ *  (unlike {@link PlaybookPractice.config}), so a new practice never has to
+ *  configure this itself. GET/PUT /api/playbook/settings's response shape,
+ *  and the payload of `playbook_settings_updated` WebSocket pushes. Server-
+ *  shared, same no-accounts/one-setting-for-everyone model as
+ *  {@link ColorThresholdsConfig}. */
+export interface PlaybookSettings {
+  /** How long an open Observation may sit before the Playbook engine's
+   *  auto-resolve sweep transitions it to `resolved`, regardless of
+   *  practice. `0` disables this time-based backstop entirely (a session-
+   *  scoped practice may still auto-resolve independently once its session
+   *  ends — see PlaybookPracticeField's `autoResolveOnSessionEnd` doc). */
+  autoResolveAfterMs: number;
 }
 
 /** A detected occurrence of a Playbook practice firing for a scope - the
@@ -2917,6 +2937,7 @@ export interface WSMessage {
    *  MonitorLayoutPayload; color_thresholds_updated → ColorThresholdsConfig;
    *  decision_queue_updated → DecisionQueueItem; detour_disposition →
    *  DetourDisposition; playbook_practice_config_updated → PlaybookPractice;
+   *  playbook_settings_updated → PlaybookSettings;
    *  coach_observation_created/coach_observation_updated → CoachObservation. */
   type:
     | "session_created"
@@ -2942,6 +2963,7 @@ export interface WSMessage {
     | "decision_queue_updated"
     | "detour_disposition"
     | "playbook_practice_config_updated"
+    | "playbook_settings_updated"
     | "coach_observation_created"
     | "coach_observation_updated";
   /** The message body, whose concrete shape is selected by `type` above. */
@@ -2966,6 +2988,7 @@ export interface WSMessage {
     | DecisionQueueItem
     | DetourDisposition
     | PlaybookPractice
+    | PlaybookSettings
     | CoachObservation;
   /** ISO timestamp the server broadcast this message (not necessarily the
    *  same instant the underlying event occurred). */

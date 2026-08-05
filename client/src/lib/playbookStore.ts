@@ -187,7 +187,7 @@ export const playbookStore = {
     id: string,
     patch: {
       enabled?: boolean;
-      config?: Record<string, number>;
+      config?: Record<string, number | boolean>;
       kindOverride?: ObservationKind | null;
       severityOverride?: ObservationSeverity | null;
     }

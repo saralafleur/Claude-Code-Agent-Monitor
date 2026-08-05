@@ -11,7 +11,8 @@
     "description": "The Coach is watching your sessions in the background. When something's worth your attention, it'll show up here."
   },
   "feed": {
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "showFewer": "Show fewer"
   },
   "kindLabel": {
     "risk": "Warning",
@@ -50,7 +51,18 @@
     "parseError": "Enter a number, like 500k or 1.2m",
     "kindOverrideLabel": "Kind",
     "severityOverrideLabel": "Severity",
-    "useDefaultOption": "Use default ({{value}})"
+    "useDefaultOption": "Use default ({{value}})",
+    "settingsTitle": "Auto-resolve",
+    "settingsDescription": "A warning never closes on its own while its session is still active. Once the session ends, this is how long to wait before its open warnings close automatically — so you don't have to dismiss every one by hand. One window for every practice — nothing to configure per practice.",
+    "settingsFieldLabel": "Auto-resolve after session ends",
+    "settingsUnit": "minutes",
+    "settingsParseError": "Enter a number of minutes, 0 or greater",
+    "settingsDisabledHint": "0 disables this — a warning only closes when you dismiss it, even after its session ends.",
+    "sidecar": {
+      "label": "Playbook sections",
+      "settingsLabel": "Settings",
+      "practicesLabel": "Practices"
+    }
   },
   "practices": {
     "sessionTokenCeiling": {
@@ -60,17 +72,19 @@
       "hint": "e.g. 500k or 1.2m",
       "unit": "tokens",
       "message": "Session context is becoming large ({{tokens}} tokens)",
-      "recommendation": "Compact or clear the session before continuing — copy your current context first."
+      "recommendation": "Compact or clear the session before continuing — copy your current context first.",
+      "autoResolveOnSessionEndLabel": "Resolve automatically after the session ends",
+      "autoResolveOnSessionEndHint": "A session that's no longer active can't be compacted or cleared. Once it ends, this warning closes on its own after the Auto-resolve window above — never while the session is still active."
     },
     "accountWeeklyBalance": {
       "name": "Account Rotation",
-      "description": "Flags when two or more connected accounts have drifted apart on weekly usage, so you can rotate active work to the one with more headroom instead of draining a single account solo.",
-      "fieldLabel": "Gap threshold",
-      "unit": "%",
+      "description": "Flags when the Claude account you're actively using has crossed the Usage page's Rotation Plan switch threshold and another connected account still has headroom to take over.",
+      "thresholdInfo": "Uses the same {{value}}% switch threshold as the Usage page's Rotation Plan — edit it there, not here.",
+      "autoResolveNote": "Clears itself automatically once the active account drops back under the threshold (a weekly reset, or once you've actually switched) — nothing to configure.",
+      "previewActiveLabel": "Personal",
       "previewLowLabel": "Work",
-      "previewHighLabel": "Personal",
-      "message": "{{lowLabel}} has {{gapPct}}% more weekly quota left than {{highLabel}} ({{lowPct}}% vs {{highPct}}% used)",
-      "recommendation": "Switch your active work to {{lowLabel}} — rotating keeps a session-window swap available and protects both accounts' weekly quota."
+      "message": "{{activeLabel}} is at {{activePct}}% of its weekly quota — switch to {{lowLabel}} ({{lowPct}}% used) before it runs out.",
+      "recommendation": "Switch your active work to {{lowLabel}} — the Usage page's Rotation Plan already recommends it, and it protects {{activeLabel}}'s remaining weekly quota."
     }
   }
 }

@@ -6,3 +6,7 @@
 - [x] 4. Cost Tracking: Know exactly what every session and subagent is costing you. — acceptance: accurate per-session and per-subagent cost breakdowns
 - [x] 5. Desktop App: Run the dashboard as its own app on Mac and Windows. — acceptance: installable desktop app with a menu-bar icon
 - [ ] 6. MCP Reliability: Make the local MCP tools something you can always count on. — acceptance: MCP tools work reliably, every time
+- [ ] 7. Playbook Threshold Input UX: Improve configuration experience for playbook thresholds
+      id: 542c53c7
+- [ ] 8. Playbook Coach Foundation: Build core infrastructure and UX for AI-assisted playbook coaching
+      id: 416b653d

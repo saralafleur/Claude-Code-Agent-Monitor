@@ -2069,7 +2069,7 @@ Every account object returned by `GET /api/accounts` (and the `account` embedded
 
 ### Playbook
 
-The `/api/playbook/*` namespace exposes the Coach's Playbook — the catalog of rule-based **practices** the Coach engine (`server/lib/playbook/engine.js`) evaluates on a tick, plus each practice's user-editable config. Practice config is **server-shared**, not per-user: this app has no accounts, so one setting applies to every connected computer, and a change from one client is pushed live to every other connected client over the [`playbook_practice_config_updated`](#playbook_practice_config_updated) WebSocket message.
+The `/api/playbook/*` namespace exposes the Coach's Playbook — the catalog of rule-based **practices** the Coach engine (`server/lib/playbook/engine.js`) evaluates on a tick, plus each practice's user-editable config, plus (`/api/playbook/settings`) the Playbook's global, non-per-practice settings. Practice config is **server-shared**, not per-user: this app has no accounts, so one setting applies to every connected computer, and a change from one client is pushed live to every other connected client over the [`playbook_practice_config_updated`](#playbook_practice_config_updated) WebSocket message.
 
 **Practice shape:**
 
@@ -2081,16 +2081,17 @@ The `/api/playbook/*` namespace exposes the Coach's Playbook — the catalog of 
   "kind": "risk",
   "defaultSeverity": "warning",
   "fields": [
-    { "key": "thresholdTokens", "type": "number", "default": 100000000, "min": 1000000 }
+    { "key": "thresholdTokens", "type": "number", "default": 100000000, "min": 1000000 },
+    { "key": "autoResolveOnSessionEnd", "type": "boolean", "default": true }
   ],
   "enabled": true,
-  "config": { "thresholdTokens": 100000000 }
+  "config": { "thresholdTokens": 100000000, "autoResolveOnSessionEnd": true }
 }
 ```
 
-`scope` (`session`/`project`/`global`) is what one Observation from the practice is scoped to — the engine evaluates `session`-scoped practices against every currently-active session, and `global`-scoped practices once per tick against dashboard-wide state; `project`-scoped evaluation isn't built yet. `fields` describes the practice's own config schema; every practice so far only has `type: "number"` fields (a threshold), each with a `default` and a `min` floor. `config` is the practice's current values, keyed by each field's `key` — a key not yet configured falls back to that field's `default`. Ships two practices: `session-token-ceiling` (scope `session`), which flags a session whose total token usage crosses `thresholdTokens`, and `account-weekly-balance` (scope `global`), which flags when two or more enabled Claude accounts (Usage page's Accounts panel) still have weekly-quota headroom and the gap between the lowest- and highest-used of them crosses `gapThresholdPct` — recommending a switch to the lower-used account.
+`scope` (`session`/`project`/`global`) is what one Observation from the practice is scoped to — the engine evaluates `session`-scoped practices against every currently-active session, and `global`-scoped practices once per tick against dashboard-wide state; `project`-scoped evaluation isn't built yet. `fields` describes the practice's own config schema; a field's `type` is `"number"` (a threshold, validated against `min`) or `"boolean"` (e.g. `autoResolveOnSessionEnd` above — consumed by the engine's auto-resolve sweep, not by `detect()`, so it doesn't change what fires, only whether an already-open Observation for that practice is eligible to auto-close once its session ends and `autoResolveAfterMs` has since elapsed — see [Playbook → Get Settings](#get-settings) below), each with a `default`. `config` is the practice's current values, keyed by each field's `key` — a key not yet configured falls back to that field's `default`. Ships two practices: `session-token-ceiling` (scope `session`), which flags a session whose total token usage crosses `thresholdTokens`, and `account-weekly-balance` (scope `global`), which flags when the Claude account currently ACTIVE (inferred the same way the Usage page's own `is_active` field is) has crossed the Usage page's own Rotation Plan switch threshold (`color_thresholds.rotation_switch_pct`) and another enabled account still has headroom under that same threshold — recommending a switch to whichever eligible account has the most headroom. This practice's open Observations also auto-resolve without any time window: the engine re-checks the same condition every tick and resolves the moment it stops holding (see [Coach](#coach)'s `status` note below).
 
-**A second practice's shape** (`account-weekly-balance`, note the string-valued `id`/`label` fields inside `values_json` alongside the numeric ones — a global-scoped practice's Observation names the accounts it's about):
+**A second practice's shape** (`account-weekly-balance` — note `fields` is empty: this practice has no config of its own, since it shares its one trigger threshold with the Usage page's Rotation Plan card, `color_thresholds.rotation_switch_pct`, rather than carrying an independent value; see [Color Thresholds](#color-thresholds) for that endpoint):
 
 ```json
 {
@@ -2099,11 +2100,9 @@ The `/api/playbook/*` namespace exposes the Coach's Playbook — the catalog of 
   "scope": "global",
   "kind": "info",
   "defaultSeverity": "info",
-  "fields": [
-    { "key": "gapThresholdPct", "type": "number", "default": 25, "min": 1 }
-  ],
+  "fields": [],
   "enabled": true,
-  "config": { "gapThresholdPct": 25 }
+  "config": {}
 }
 ```
 
@@ -2125,9 +2124,33 @@ Returns every catalog practice merged with its stored config (or catalog default
 PUT /api/playbook/practices/:id/config
 ```
 
-**Request Body:** `{ "enabled"?: boolean, "config"?: { [fieldKey]: number } }` — both optional and independent; an omitted field keeps its current stored value. `config` is itself a patch: only the keys supplied are overwritten, not the whole object. Persists the change, broadcasts [`playbook_practice_config_updated`](#playbook_practice_config_updated) with the merged practice, and returns that same practice.
+**Request Body:** `{ "enabled"?: boolean, "config"?: { [fieldKey]: number | boolean } }` — both optional and independent; an omitted field keeps its current stored value. `config` is itself a patch: only the keys supplied are overwritten, not the whole object; each key's value must match that field's own `type` (a finite number for `"number"`, true/false for `"boolean"`). Persists the change, broadcasts [`playbook_practice_config_updated`](#playbook_practice_config_updated) with the merged practice, and returns that same practice.
 
-**Error Responses:** `404` `{ "error": { "code": "UNKNOWN_PRACTICE", "message" } }` for an `:id` not in the catalog. `400` `{ "error": { "code": "INVALID_CONFIG", "message" } }` for a `config` key that isn't one of the practice's own `fields[].key`, a value that isn't a finite number, or a value below that field's `min`.
+**Error Responses:** `404` `{ "error": { "code": "UNKNOWN_PRACTICE", "message" } }` for an `:id` not in the catalog. `400` `{ "error": { "code": "INVALID_CONFIG", "message" } }` for a `config` key that isn't one of the practice's own `fields[].key`, a value whose type doesn't match that field's `type`, or a `"number"` field's value below its `min`.
+
+#### Get Settings
+
+```http
+GET /api/playbook/settings
+```
+
+Returns the Playbook's global settings — not scoped to any one practice:
+
+```json
+{ "autoResolveAfterMs": 10800000 }
+```
+
+`autoResolveAfterMs` is how long (ms), AFTER a session has ended, before the engine's auto-resolve sweep transitions that session's open Observations to `resolved` — a still-active session's Observation is never auto-resolved regardless of age. Default `10800000` (180min/3h). `0` disables the sweep entirely — it does not mean "resolve instantly on session end." Only applies to a session-scoped practice whose own `autoResolveOnSessionEnd` field is `true`.
+
+#### Update Settings
+
+```http
+PUT /api/playbook/settings
+```
+
+**Request Body:** `{ "autoResolveAfterMs"?: number }` — optional; an omitted body (or an omitted key) is a no-op that just returns the current value. Persists the change, broadcasts `playbook_settings_updated` with the resulting settings, and returns that same object.
+
+**Error Responses:** `400` `{ "error": { "code": "INVALID_SETTINGS", "message" } }` for a value that isn't a finite number `>= 0`.
 
 ---
 
@@ -2152,7 +2175,7 @@ The `/api/coach/*` namespace exposes the Coach's Feed — **Observations** the P
 }
 ```
 
-`scope_type` (`session`/`project`/`global`) says what `scope_id` identifies; `scope_id` is `null` for a `global`-scoped Observation. `values_json` is a **JSON-encoded string**, not a nested object — callers `JSON.parse` it to read the practice-specific values that triggered detection; a global-scoped practice's `values_json` can carry strings (e.g. account labels) alongside numbers, not just numbers. `status` starts `"open"` and moves to `"acknowledged"`/`"dismissed"`/`"resolved"` via the respond endpoint below; `responded_at` is `null` until it does.
+`scope_type` (`session`/`project`/`global`) says what `scope_id` identifies; `scope_id` is `null` for a `global`-scoped Observation. `values_json` is a **JSON-encoded string**, not a nested object — callers `JSON.parse` it to read the practice-specific values that triggered detection; a global-scoped practice's `values_json` can carry strings (e.g. account labels) alongside numbers, not just numbers. `status` starts `"open"` and moves to `"acknowledged"`/`"dismissed"`/`"resolved"` via the respond endpoint below — or, for `"resolved"` specifically, automatically via one of the Playbook engine's two auto-resolve sweeps, with no client action required: a session-scoped Observation once its session has been ended for at least the configured window (see [docs/DATABASE.md](./DATABASE.md)'s `playbook_settings` row), or a global-scoped Observation (e.g. `account-weekly-balance`) the moment its underlying condition simply stops holding — the engine re-checks it every tick, no time window involved for that scope. `responded_at` is `null` until either sets it.
 
 **A global-scoped Observation** (`account-weekly-balance`, `scope_id` null):
 
@@ -2164,7 +2187,7 @@ The `/api/coach/*` namespace exposes the Coach's Feed — **Observations** the P
   "scope_id": null,
   "kind": "info",
   "severity": "info",
-  "values_json": "{\"gapPct\":40,\"gapThresholdPct\":25,\"lowAccountId\":\"acct-work\",\"lowLabel\":\"Work\",\"lowPct\":40,\"highAccountId\":\"acct-personal\",\"highLabel\":\"Personal\",\"highPct\":80}",
+  "values_json": "{\"activeAccountId\":\"acct-personal\",\"activeLabel\":\"Personal\",\"activePct\":85,\"lowAccountId\":\"acct-work\",\"lowLabel\":\"Work\",\"lowPct\":40,\"rotationSwitchPct\":80}",
   "status": "open",
   "detected_at": "2026-08-02T12:00:00.000Z",
   "responded_at": null
@@ -2475,9 +2498,17 @@ Broadcast whenever `PUT /api/playbook/practices/:id/config` changes a practice's
 { "type": "playbook_practice_config_updated", "data": { "id": "session-token-ceiling", "category": "context-management", "scope": "session", "kind": "risk", "defaultSeverity": "warning", "fields": [{ "key": "thresholdTokens", "type": "number", "default": 100000000, "min": 1000000 }], "enabled": true, "config": { "thresholdTokens": 150000000 } } }
 ```
 
+#### playbook_settings_updated
+
+Broadcast whenever `PUT /api/playbook/settings` changes the Playbook's global settings — from any connected client/computer. Carries the full resulting settings object (see [Playbook](#playbook)).
+
+```json
+{ "type": "playbook_settings_updated", "data": { "autoResolveAfterMs": 3600000 } }
+```
+
 #### coach_observation_created / coach_observation_updated
 
-`coach_observation_created` is broadcast by the Playbook engine itself on the tick that detects a new Observation (not from a route). `coach_observation_updated` is broadcast whenever `POST /api/coach/observations/:id/respond` records a user's response. Both carry the full Observation row (see [Coach](#coach)).
+`coach_observation_created` is broadcast by the Playbook engine itself on the tick that detects a new Observation (not from a route). `coach_observation_updated` is broadcast whenever `POST /api/coach/observations/:id/respond` records a user's response, **or** whenever either of the Playbook engine's own auto-resolve sweeps transitions an Observation to `resolved` — a session-scoped one once its session has been ended for at least `autoResolveAfterMs`, or a global-scoped one the moment its condition simply stops holding (no time window) — no client action involved either way. Both carry the full Observation row (see [Coach](#coach)).
 
 ```json
 { "type": "coach_observation_created", "data": { "id": 42, "practice_id": "session-token-ceiling", "scope_type": "session", "scope_id": "5f3c0e2a-1b9d-4c77-8a21-9e0f7b6d4c11", "kind": "risk", "severity": "warning", "values_json": "{\"totalTokens\":150000000,\"thresholdTokens\":100000000}", "status": "open", "detected_at": "2026-07-24T18:41:55.117Z", "responded_at": null } }

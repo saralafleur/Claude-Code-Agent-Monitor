@@ -13,10 +13,18 @@
  * the way to the Playbook editor — no separate button needed, the tab itself
  * is the click-through.
  *
+ * The flat list is clustered by `practice_id` (order preserved — the API
+ * already returns most-recent-first, so a group sorts wherever its newest
+ * member falls) and each cluster renders as one `ObservationGroup`, so a
+ * practice that has tripped for many sessions (e.g. session-token-ceiling)
+ * shows as one card + a "show more" toggle instead of flooding the Feed with
+ * near-duplicate cards. Grouping is derived with `useMemo` from `observations`
+ * so it stays correct through the same live create/update pushes below.
+ *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Compass, Radar } from "lucide-react";
 import { api } from "../lib/api";
@@ -24,7 +32,7 @@ import { eventBus } from "../lib/eventBus";
 import type { CoachObservation, WSMessage } from "../lib/types";
 import { EmptyState } from "../components/EmptyState";
 import { CoachTabs } from "../components/coach/CoachTabs";
-import { ObservationCard } from "../components/coach/ObservationCard";
+import { ObservationGroup } from "../components/coach/ObservationGroup";
 
 export function CoachPage() {
   const { t } = useTranslation("coach");
@@ -68,6 +76,19 @@ export function CoachPage() {
       .finally(() => setRespondingId(null));
   };
 
+  const groups = useMemo(() => {
+    const byPractice = new Map<string, CoachObservation[]>();
+    const order: string[] = [];
+    for (const o of observations) {
+      if (!byPractice.has(o.practice_id)) {
+        byPractice.set(o.practice_id, []);
+        order.push(o.practice_id);
+      }
+      byPractice.get(o.practice_id)!.push(o);
+    }
+    return order.map((practiceId) => ({ practiceId, items: byPractice.get(practiceId)! }));
+  }, [observations]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -89,18 +110,12 @@ export function CoachPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {observations.map((o) => (
-            <ObservationCard
-              key={o.id}
-              practiceId={o.practice_id}
-              kind={o.kind}
-              values={JSON.parse(o.values_json) as Record<string, number | string>}
-              scopeType={o.scope_type}
-              scopeId={o.scope_id}
-              detectedAt={o.detected_at}
-              status={o.status}
-              onRespond={() => respond(o.id)}
-              respondPending={respondingId === o.id}
+          {groups.map(({ practiceId, items }) => (
+            <ObservationGroup
+              key={practiceId}
+              items={items}
+              respondingId={respondingId}
+              onRespond={respond}
             />
           ))}
         </div>

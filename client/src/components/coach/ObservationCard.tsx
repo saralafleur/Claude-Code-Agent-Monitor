@@ -42,11 +42,11 @@ function messageParams(
   }
   if (practiceId === "account-weekly-balance") {
     return {
+      activeLabel: String(values.activeLabel ?? ""),
+      activePct: String(values.activePct ?? 0),
       lowLabel: String(values.lowLabel ?? ""),
       lowPct: String(values.lowPct ?? 0),
-      highLabel: String(values.highLabel ?? ""),
-      highPct: String(values.highPct ?? 0),
-      gapPct: String(values.gapPct ?? 0),
+      rotationSwitchPct: String(values.rotationSwitchPct ?? 0),
     };
   }
   return {};

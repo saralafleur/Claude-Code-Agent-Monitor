@@ -1,6 +1,6 @@
 /**
  * @file Express router for the Coach's Playbook — the catalog of practices
- * and their user-editable config:
+ * and their user-editable config, plus the Playbook's global settings:
  *
  *   GET /api/playbook/practices — every catalog practice merged with its
  *     stored config (or catalog defaults if never touched):
@@ -11,18 +11,32 @@
  *     (null = unset); `resolvedKind`/`resolvedSeverity` are the effective
  *     values the engine would stamp onto a new Observation right now — all
  *     computed by the single resolver, `resolvePracticeConfig()`
- *     (server/lib/playbook/practices.js).
+ *     (server/lib/playbook/practices.js). `config` includes every declared
+ *     `fields` entry regardless of `type` — a `"boolean"` field (e.g.
+ *     session-token-ceiling's `autoResolveOnSessionEnd`, consumed by the
+ *     engine's auto-resolve sweep, not by `detect()`) resolves the same way
+ *     a `"number"` field does, just validated as true/false instead of
+ *     against `min`.
  *   PUT /api/playbook/practices/:id/config — patch
  *     { enabled?, config?, kindOverride?, severityOverride? }; validates
- *     `config` keys against that practice's own `fields` schema and the two
- *     override keys against the pinned `KIND_VALUES`/`SEVERITY_VALUES`
- *     enums, persists, and broadcasts the merged practice over the WebSocket
- *     (`playbook_practice_config_updated`) so every other connected client
- *     picks up the change live, without a reload — same pattern as
- *     server/routes/color-thresholds.js. Every field is independently
- *     optional and partial-patch (an omitted key leaves it unchanged; an
- *     explicit `null` on an override key clears it back to the catalog
- *     default) — see `validateOverridePatch()`/the `PUT` handler below.
+ *     `config` keys against that practice's own `fields` schema (per-field
+ *     `type`) and the two override keys against the pinned
+ *     `KIND_VALUES`/`SEVERITY_VALUES` enums, persists, and broadcasts the
+ *     merged practice over the WebSocket (`playbook_practice_config_updated`)
+ *     so every other connected client picks up the change live, without a
+ *     reload — same pattern as server/routes/color-thresholds.js. Every
+ *     field is independently optional and partial-patch (an omitted key
+ *     leaves it unchanged; an explicit `null` on an override key clears it
+ *     back to the catalog default) — see `validateOverridePatch()`/the `PUT`
+ *     handler below.
+ *   GET/PUT /api/playbook/settings — the Playbook's global settings, not
+ *     scoped to any one practice: currently just `{ autoResolveAfterMs }`,
+ *     how long an open Observation may sit before the engine's auto-resolve
+ *     sweep transitions it to `resolved` regardless of practice (0 =
+ *     disabled). Persisted in the singleton `playbook_settings` row
+ *     (server/db.js), broadcasting `playbook_settings_updated` on change —
+ *     deliberately NOT part of any one practice's `config`, since it's meant
+ *     to be set once and apply everywhere (see practices.js's file header).
  *
  * Practice config is server-shared (this app has no user accounts, so one
  * setting applies to every connected computer), persisted per-practice in
@@ -76,9 +90,13 @@ function serializePractice(practice) {
 }
 
 // Validates a config patch against the practice's own field schema - only
-// known keys, only finite numbers at or above that field's minimum. Unknown
-// keys are rejected outright rather than silently dropped, so a typo'd
-// field name surfaces immediately instead of quietly doing nothing.
+// known keys, and only a value matching that field's own `type`: a finite
+// number at or above `min` for a "number" field, or a plain true/false for
+// a "boolean" field (e.g. session-token-ceiling's autoResolveOnSessionEnd —
+// see practices.js's file header for why a boolean field needs no new
+// plumbing beyond this branch). Unknown keys are rejected outright rather
+// than silently dropped, so a typo'd field name surfaces immediately
+// instead of quietly doing nothing.
 function validateConfigPatch(practice, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     throw new ValidationError("config must be an object");
@@ -90,6 +108,12 @@ function validateConfigPatch(practice, patch) {
       throw new ValidationError(`unknown config field "${key}" for practice "${practice.id}"`);
     }
     const value = patch[key];
+    if (field.type === "boolean") {
+      if (typeof value !== "boolean") {
+        throw new ValidationError(`${key} must be a boolean`);
+      }
+      continue;
+    }
     if (typeof value !== "number" || !Number.isFinite(value)) {
       throw new ValidationError(`${key} must be a finite number`);
     }
@@ -167,6 +191,44 @@ router.put("/practices/:id/config", (req, res) => {
   stmts.upsertPlaybookPracticeConfig.run(practice.id, enabled ? 1 : 0, JSON.stringify(stored));
   const result = serializePractice(practice);
   broadcast("playbook_practice_config_updated", result);
+  res.json(result);
+});
+
+const MIN_AUTO_RESOLVE_AFTER_MS = 0; // 0 = disabled — never auto-resolve by time alone
+
+function serializeSettings(row) {
+  return { autoResolveAfterMs: row.auto_resolve_after_ms };
+}
+
+// GET /settings — the global Coach settings (currently: the auto-resolve
+// time window every practice's open Observations share — see
+// playbook_settings in server/db.js for why this is separate from
+// per-practice config).
+router.get("/settings", (_req, res) => {
+  res.json(serializeSettings(stmts.getPlaybookSettings.get()));
+});
+
+// PUT /settings — patch { autoResolveAfterMs }; broadcasts the resulting
+// state (`playbook_settings_updated`) so every other connected client picks
+// it up live, same pattern as PUT /practices/:id/config and
+// server/routes/color-thresholds.js.
+router.put("/settings", (req, res) => {
+  const body = req.body || {};
+  if (body.autoResolveAfterMs === undefined) {
+    return res.json(serializeSettings(stmts.getPlaybookSettings.get()));
+  }
+  const value = body.autoResolveAfterMs;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < MIN_AUTO_RESOLVE_AFTER_MS) {
+    return res.status(400).json({
+      error: {
+        code: "INVALID_SETTINGS",
+        message: `autoResolveAfterMs must be a finite number >= ${MIN_AUTO_RESOLVE_AFTER_MS}`,
+      },
+    });
+  }
+  stmts.updatePlaybookSettings.run(value);
+  const result = serializeSettings(stmts.getPlaybookSettings.get());
+  broadcast("playbook_settings_updated", result);
   res.json(result);
 });
 

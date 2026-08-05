@@ -11,7 +11,8 @@
     "description": "코치가 백그라운드에서 세션을 계속 관찰하고 있습니다. 주목할 만한 내용이 생기면 여기에 표시됩니다."
   },
   "feed": {
-    "loading": "불러오는 중…"
+    "loading": "불러오는 중…",
+    "showFewer": "간략히 보기"
   },
   "kindLabel": {
     "risk": "경고",
@@ -50,7 +51,18 @@
     "parseError": "500k 또는 1.2m처럼 숫자를 입력하세요",
     "kindOverrideLabel": "종류",
     "severityOverrideLabel": "심각도",
-    "useDefaultOption": "기본값 사용 ({{value}})"
+    "useDefaultOption": "기본값 사용 ({{value}})",
+    "settingsTitle": "자동 해결",
+    "settingsDescription": "세션이 아직 활성 상태인 동안에는 경고가 절대 자동으로 닫히지 않습니다. 세션이 종료된 후, 열려 있는 경고가 자동으로 닫히기까지 얼마나 기다릴지 설정합니다 — 하나하나 직접 무시할 필요가 없습니다. 모든 practice에 공통으로 적용되는 시간 하나로, practice마다 따로 설정할 필요가 없습니다.",
+    "settingsFieldLabel": "세션 종료 후 자동 해결까지 걸리는 시간",
+    "settingsUnit": "분",
+    "settingsParseError": "0 이상의 분(숫자)을 입력하세요",
+    "settingsDisabledHint": "0으로 설정하면 이 기능이 완전히 꺼집니다 — 관련 세션이 종료된 후에도 경고는 사용자가 직접 무시할 때만 닫힙니다.",
+    "sidecar": {
+      "label": "플레이북 섹션",
+      "settingsLabel": "설정",
+      "practicesLabel": "Practice"
+    }
   },
   "practices": {
     "sessionTokenCeiling": {
@@ -60,17 +72,19 @@
       "hint": "예: 500k 또는 1.2m",
       "unit": "tokens",
       "message": "세션 컨텍스트가 커지고 있습니다 ({{tokens}} tokens)",
-      "recommendation": "계속하기 전에 /compact 또는 /clear를 사용하세요 — 먼저 현재 컨텍스트를 복사해 두세요."
+      "recommendation": "계속하기 전에 /compact 또는 /clear를 사용하세요 — 먼저 현재 컨텍스트를 복사해 두세요.",
+      "autoResolveOnSessionEndLabel": "세션 종료 후 자동으로 해결",
+      "autoResolveOnSessionEndHint": "더 이상 활성 상태가 아닌 세션은 /compact나 /clear를 할 수 없습니다. 세션이 종료되면, 위의 자동 해결 시간이 지난 뒤 이 경고가 자동으로 닫힙니다 — 세션이 활성 상태인 동안에는 절대 닫히지 않습니다."
     },
     "accountWeeklyBalance": {
       "name": "계정 순환",
-      "description": "연결된 두 개 이상의 계정 간 주간 사용량 차이가 벌어졌을 때 알려줘서, 한 계정만 소진하지 않고 여유가 더 많은 계정으로 작업을 전환할 수 있게 합니다.",
-      "fieldLabel": "차이 임계값",
-      "unit": "%",
+      "description": "실제로 사용 중인 Claude 계정이 Usage 페이지 Rotation Plan의 전환 임계값을 넘었고, 연결된 다른 계정에 아직 넘길 수 있는 여유가 있을 때 알려줍니다.",
+      "thresholdInfo": "Usage 페이지의 Rotation Plan과 동일한 {{value}}% 전환 임계값을 공유합니다 — 여기가 아니라 그곳에서 수정하세요.",
+      "autoResolveNote": "활성 계정의 사용률이 임계값 아래로 다시 떨어지면(주간 초기화 또는 실제로 계정을 전환한 경우) 이 알림은 자동으로 닫힙니다 — 별도 설정이 필요 없습니다.",
+      "previewActiveLabel": "개인용",
       "previewLowLabel": "업무용",
-      "previewHighLabel": "개인용",
-      "message": "{{lowLabel}} 계정이 {{highLabel}} 계정보다 주간 한도가 {{gapPct}}% 더 남아 있습니다 ({{lowPct}}% 대 {{highPct}}% 사용)",
-      "recommendation": "현재 작업을 {{lowLabel}} 계정으로 전환하세요 — 순환 사용하면 세션 전환 여유를 유지하고 두 계정의 주간 한도를 모두 보호할 수 있습니다."
+      "message": "{{activeLabel}} 계정이 주간 한도의 {{activePct}}%를 사용했습니다 — 한도가 소진되기 전에 {{lowLabel}} 계정({{lowPct}}% 사용)으로 전환하세요.",
+      "recommendation": "현재 작업을 {{lowLabel}} 계정으로 전환하세요 — Usage 페이지의 Rotation Plan도 이미 이 계정을 추천하고 있으며, {{activeLabel}} 계정의 남은 주간 한도도 보호할 수 있습니다."
     }
   }
 }

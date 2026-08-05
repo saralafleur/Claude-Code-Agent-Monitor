@@ -9,7 +9,13 @@
  * The `fields` schema and the pure `detect()` contract are generic on
  * purpose, so a new practice is a new catalog entry, not new plumbing —
  * `session-token-ceiling` (session scope) and `account-weekly-balance`
- * (global scope) each prove that out.
+ * (global scope) each prove that out. A field's `type` is `"number"`
+ * (validated against its own `min`, the original and still most common
+ * shape) or `"boolean"` (validated as a plain true/false, no `min`) —
+ * `session-token-ceiling`'s `autoResolveOnSessionEnd` is the first of the
+ * latter. Both flow through the exact same `detect(ctx, config)` config
+ * object and the exact same resolver merge below; a boolean field is not
+ * special plumbing, just a second value shape the existing plumbing accepts.
  *
  * `detect(ctx, config)` is a pure function — no I/O, no db access — so it's
  * unit-testable in isolation from the engine's scheduling/persistence
@@ -17,6 +23,22 @@
  * It returns `null` when the practice doesn't fire, or `{ values }` (the raw
  * numbers/labels a client-side i18n template interpolates — this app has no
  * server-side i18n, so no display strings live here) when it does.
+ *
+ * `autoResolveOnSessionEnd` isn't read by any `detect()` — it's consumed
+ * directly by the engine's auto-resolve sweep (`./engine.js`'s
+ * `autoResolveStaleObservations`), which decides whether a session-scoped
+ * practice's open Observations are ELIGIBLE to auto-close once their
+ * session ends, independent of whether the practice's own condition still
+ * holds (a session that's dead can't be compacted/cleared regardless). It
+ * does not control WHEN — that's `playbook_settings.auto_resolve_after_ms`,
+ * deliberately NOT a per-practice field: a single global window (how long
+ * to wait after a session ends before actually resolving its Observations;
+ * `0` disables the sweep entirely, not "resolve instantly") that applies to
+ * every opted-in practice uniformly, so shipping a new practice never
+ * requires touching it (see server/routes/playbook.js's GET/PUT /settings).
+ * A still-active session's Observation is never auto-resolved by time
+ * alone — the window only ever counts from session end, never from
+ * detection.
  *
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
@@ -48,7 +70,10 @@ const PRACTICES = [
     scope: "session",
     kind: "risk",
     defaultSeverity: "warning",
-    fields: [{ key: "thresholdTokens", type: "number", default: 100_000_000, min: 1_000_000 }],
+    fields: [
+      { key: "thresholdTokens", type: "number", default: 100_000_000, min: 1_000_000 },
+      { key: "autoResolveOnSessionEnd", type: "boolean", default: true },
+    ],
     /** ctx: { totalTokens: number } — the session's summed token_usage. */
     detect(ctx, config) {
       if (!(ctx.totalTokens >= config.thresholdTokens)) return null;
@@ -61,38 +86,56 @@ const PRACTICES = [
     scope: "global",
     kind: "info",
     defaultSeverity: "info",
-    fields: [{ key: "gapThresholdPct", type: "number", default: 25, min: 1 }],
+    // No editable fields of its own — this practice deliberately shares its
+    // one trigger threshold, `rotationSwitchPct` on `ctx`, with the Usage
+    // page's Rotation Plan card (`color_thresholds.rotation_switch_pct`)
+    // instead of carrying an independent field (the old `gapThresholdPct`),
+    // so the Coach's nudge and the Rotation Plan's own recommendation can
+    // never disagree about when it's time to switch. See
+    // `server/lib/playbook/engine.js`'s `evaluateGlobal`/ctx-building for
+    // where `rotationSwitchPct` and each account's `isActive` come from.
+    fields: [],
     /**
-     * ctx: { accounts: Array<{ id: string, label: string, weeklyUsedPct: number|null }> }
-     * — every enabled account's latest known weekly-quota-used percentage.
-     * Fires when at least two accounts still have headroom (weeklyUsedPct <
-     * 100) and the spread between the lowest- and highest-used of those
-     * accounts is at least `gapThresholdPct` points — the recommendation is
-     * always to rotate active work onto the lowest-used one, so a session
-     * window running out on the heavily-used account still has a fallback
-     * with weekly quota left.
+     * ctx: { accounts: Array<{ id, label, weeklyUsedPct: number|null,
+     * isActive: boolean }>, rotationSwitchPct: number } — every enabled
+     * account's latest known weekly-quota-used percentage plus whether it's
+     * the one actually being used right now (inferred the same way
+     * `server/lib/account-activity.js` does for the Usage page), and the
+     * shared switch threshold. Fires only when the ACTIVE account itself
+     * has crossed `rotationSwitchPct` AND at least one other enabled
+     * account still has headroom under that same threshold to rotate onto
+     * — deliberately NOT a raw gap between the highest- and lowest-used
+     * accounts (that was the old, since-replaced logic): a wide gap between
+     * two barely-used accounts is not actionable, and an active account
+     * over threshold with no eligible fallback has nothing useful to
+     * recommend either. The recommended target is whichever eligible
+     * account has the most headroom (lowest weeklyUsedPct) — the same
+     * "most runway if it became active" preference
+     * `computeRotationPlan`/`pickNext()` in client/src/pages/Usage.tsx uses,
+     * simplified to a single best pick since this is a one-shot nudge, not
+     * a multi-day schedule.
      */
     detect(ctx, config) {
-      const eligible = (ctx.accounts || []).filter(
-        (a) => typeof a.weeklyUsedPct === "number" && a.weeklyUsedPct < 100
-      );
-      if (eligible.length < 2) return null;
+      const switchPct = ctx.rotationSwitchPct;
+      if (typeof switchPct !== "number") return null;
 
-      const low = eligible.reduce((a, b) => (b.weeklyUsedPct < a.weeklyUsedPct ? b : a));
-      const high = eligible.reduce((a, b) => (b.weeklyUsedPct > a.weeklyUsedPct ? b : a));
-      const gapPct = high.weeklyUsedPct - low.weeklyUsedPct;
-      if (gapPct < config.gapThresholdPct) return null;
+      const accounts = (ctx.accounts || []).filter((a) => typeof a.weeklyUsedPct === "number");
+      const active = accounts.find((a) => a.isActive);
+      if (!active || active.weeklyUsedPct < switchPct) return null;
+
+      const candidates = accounts.filter((a) => a.id !== active.id && a.weeklyUsedPct < switchPct);
+      if (candidates.length === 0) return null;
+      const low = candidates.reduce((a, b) => (b.weeklyUsedPct < a.weeklyUsedPct ? b : a));
 
       return {
         values: {
-          gapPct: Math.round(gapPct),
-          gapThresholdPct: config.gapThresholdPct,
+          activeAccountId: active.id,
+          activeLabel: active.label,
+          activePct: Math.round(active.weeklyUsedPct),
           lowAccountId: low.id,
           lowLabel: low.label,
           lowPct: Math.round(low.weeklyUsedPct),
-          highAccountId: high.id,
-          highLabel: high.label,
-          highPct: Math.round(high.weeklyUsedPct),
+          rotationSwitchPct: switchPct,
         },
       };
     },
@@ -152,7 +195,9 @@ function resolvePracticeConfig(row, practice) {
   }
   for (const field of practice.fields) {
     const value = stored[field.key];
-    if (typeof value === "number" && Number.isFinite(value) && value >= field.min) {
+    if (field.type === "boolean") {
+      if (typeof value === "boolean") config[field.key] = value;
+    } else if (typeof value === "number" && Number.isFinite(value) && value >= field.min) {
       config[field.key] = value;
     }
   }

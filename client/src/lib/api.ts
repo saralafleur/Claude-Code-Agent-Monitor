@@ -432,6 +432,7 @@ import type {
   MonitorLayoutPayload,
   ColorThresholdsConfig,
   PlaybookPractice,
+  PlaybookSettings,
   ObservationKind,
   ObservationSeverity,
   CoachObservation,
@@ -2197,12 +2198,30 @@ export const api = {
       id: string,
       patch: {
         enabled?: boolean;
-        config?: Record<string, number>;
+        config?: Record<string, number | boolean>;
         kindOverride?: ObservationKind | null;
         severityOverride?: ObservationSeverity | null;
       }
     ) =>
       request<PlaybookPractice>(`/playbook/practices/${encodeURIComponent(id)}/config`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+    /**
+     * GET /api/playbook/settings — the Playbook's global settings (not
+     * scoped to any one practice — see {@link PlaybookSettings}).
+     * @returns The current settings.
+     */
+    getSettings: () => request<PlaybookSettings>("/playbook/settings"),
+    /**
+     * PUT /api/playbook/settings — patch `{ autoResolveAfterMs }`. Every
+     * other connected client picks up the change live over the
+     * `playbook_settings_updated` WebSocket push.
+     * @param patch `{ autoResolveAfterMs? }`.
+     * @returns The full resulting {@link PlaybookSettings}.
+     */
+    updateSettings: (patch: { autoResolveAfterMs?: number }) =>
+      request<PlaybookSettings>("/playbook/settings", {
         method: "PUT",
         body: JSON.stringify(patch),
       }),

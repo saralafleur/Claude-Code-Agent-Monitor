@@ -3,8 +3,13 @@
  * (session-token-ceiling firing, dedup against an already-open Observation,
  * and the enabled/disabled config gate), tick/evaluateGlobal
  * (account-weekly-balance firing off enabled accounts' latest weekly %s),
- * plus the /api/playbook/practices and /api/coach/observations routes
- * (CRUD + validation).
+ * tick/autoResolveStaleObservations (a still-active session's observation
+ * never auto-resolves; only once a session has been ended for at least
+ * `playbook_settings.auto_resolve_after_ms` does it resolve, gated by the
+ * per-practice `autoResolveOnSessionEnd`; `auto_resolve_after_ms = 0`
+ * disables the sweep entirely), plus the /api/playbook/practices,
+ * /api/playbook/settings, and /api/coach/observations routes (CRUD +
+ * validation).
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -26,6 +31,16 @@ describe("playbook engine", () => {
     delete require.cache[require.resolve("../db")];
     delete require.cache[require.resolve("../lib/playbook/engine")];
     delete require.cache[require.resolve("../lib/playbook/practices")];
+    // usage-captures-db.js and account-activity.js each cache a `db`
+    // reference (via `require("../db")`) at module-load time, same as
+    // every other server/lib module — without also busting these, they'd
+    // keep pointing at whichever test's temp DB first loaded them,
+    // silently leaking usage_captures rows across tests that reuse the
+    // same literal account id (e.g. "acct-a"), which is exactly what
+    // isAccountActive/computeLastUsedAt compares two rows to detect.
+    delete require.cache[require.resolve("../lib/usage-captures-db")];
+    delete require.cache[require.resolve("../lib/account-activity")];
+    delete require.cache[require.resolve("../lib/consumption-rate")];
     dbModule = require("../db");
     engine = require("../lib/playbook/engine");
   });
@@ -64,15 +79,56 @@ describe("playbook engine", () => {
 
   // Seeds one enabled account plus a usage_captures row carrying its latest
   // weekly-window pct — the shape evaluateGlobal's ctx assembly reads.
-  function seedAccount(id, label, weeklyUsedPct) {
+  // `active: true` seeds an earlier, lower-pct capture first so
+  // computeLastUsedAt/isAccountActive (server/lib/account-activity.js)
+  // infer real recent usage — the exact same inference routes/accounts.js's
+  // `is_active` field uses, now also driving account-weekly-balance's ctx.
+  // The earlier capture's `captured_at` is explicitly backdated by a few
+  // seconds (raw UPDATE — recordCapture always stamps "now") since two
+  // synchronous inserts can otherwise tie at millisecond resolution, which
+  // makes `ORDER BY captured_at DESC` (no id tiebreaker) return them in an
+  // unpredictable order and `pctIncreased`'s newer-vs-older comparison flaky.
+  function seedAccount(id, label, weeklyUsedPct, { active = false } = {}) {
     dbModule.stmts.insertAccount.run(id, label, `/tmp/${id}`, 1);
     const usageCapturesDb = require("../lib/usage-captures-db");
+    if (active) {
+      const earlier = usageCapturesDb.recordCapture({
+        cwd: `/tmp/${id}`,
+        status: "ok",
+        accountId: id,
+        weekWindowPct: Math.max(0, weeklyUsedPct - 5),
+      });
+      dbModule.db
+        .prepare("UPDATE usage_captures SET captured_at = ? WHERE id = ?")
+        .run(new Date(Date.now() - 5_000).toISOString(), earlier.id);
+    }
     usageCapturesDb.recordCapture({
       cwd: `/tmp/${id}`,
       status: "ok",
       accountId: id,
       weekWindowPct: weeklyUsedPct,
     });
+  }
+
+  // Sets the shared Rotation Plan switch threshold account-weekly-balance
+  // now reads from ctx (color_thresholds.rotation_switch_pct), leaving
+  // every other color-threshold column untouched.
+  function setRotationSwitchPct(pct) {
+    dbModule.stmts.updateColorThresholds.run(
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      pct
+    );
   }
 
   it("fires session-token-ceiling once a session's summed tokens cross the threshold", () => {
@@ -160,8 +216,118 @@ describe("playbook engine", () => {
     assert.equal(created.length, 0);
   });
 
-  it("fires account-weekly-balance once two accounts' weekly-used gap crosses the threshold", () => {
-    seedAccount("acct-a", "Personal", 80);
+  describe("autoResolveStaleObservations", () => {
+    function fireAndGetObservation() {
+      seedSession("sess-1");
+      seedTokens("sess-1", 150_000_000);
+      const [created] = engine.tick(dbModule);
+      return created;
+    }
+
+    // Ends sess-1 with its ended_at/updated_at backdated by msAgo, so the
+    // sweep's "session has been ended for at least the window" check has a
+    // real elapsed time to compare against — a plain updateSession() call
+    // would stamp "now", making every ended-session test racy against the
+    // window it's supposed to be testing.
+    function endSessionAgo(msAgo) {
+      const iso = new Date(Date.now() - msAgo).toISOString();
+      dbModule.db
+        .prepare(
+          "UPDATE sessions SET status = 'completed', ended_at = ?, updated_at = ? WHERE id = ?"
+        )
+        .run(iso, iso, "sess-1");
+    }
+
+    it("does not auto-resolve while the session is still active, no matter how long the observation has been open", () => {
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updatePlaybookSettings.run(1); // 1ms window — as permissive as possible
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(
+        updated.status,
+        "open",
+        "an active session's observation must never auto-resolve"
+      );
+    });
+
+    it("does not auto-resolve the instant a session ends — only once the configured window has elapsed since", () => {
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updatePlaybookSettings.run(60_000); // 1 minute window
+      endSessionAgo(0); // just ended, no time has elapsed yet
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(updated.status, "open", "must wait out the window, not resolve immediately");
+    });
+
+    it("auto-resolves once the session has been ended for at least the configured window (autoResolveOnSessionEnd defaults to true)", () => {
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updatePlaybookSettings.run(60_000); // 1 minute window
+      endSessionAgo(2 * 60_000); // ended 2 minutes ago — past the window
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(updated.status, "resolved");
+      assert.ok(updated.responded_at);
+    });
+
+    it("respects a per-practice autoResolveOnSessionEnd=false override — stays open no matter how long past the window", () => {
+      dbModule.stmts.upsertPlaybookPracticeConfig.run(
+        "session-token-ceiling",
+        1,
+        JSON.stringify({ thresholdTokens: 100_000_000, autoResolveOnSessionEnd: false })
+      );
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updatePlaybookSettings.run(60_000);
+      endSessionAgo(365 * 24 * 60 * 60_000); // ended a year ago
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(updated.status, "open");
+    });
+
+    it("does not auto-resolve at all when auto_resolve_after_ms is 0 (disabled), even long after the session ends", () => {
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updatePlaybookSettings.run(0);
+      endSessionAgo(365 * 24 * 60 * 60_000); // ended a year ago
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(updated.status, "open");
+    });
+
+    it("resolves immediately once the sweep runs if the session was deleted outright (no reference time to wait out)", () => {
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updatePlaybookSettings.run(60_000);
+      dbModule.db.prepare("DELETE FROM sessions WHERE id = ?").run("sess-1");
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(updated.status, "resolved");
+    });
+
+    it("never auto-resolves a dismissed observation a second time (idempotent — no-op on non-open rows)", () => {
+      const obs = fireAndGetObservation();
+      dbModule.stmts.updateCoachObservationStatus.run("dismissed", obs.id);
+      dbModule.stmts.updatePlaybookSettings.run(1000);
+      endSessionAgo(365 * 24 * 60 * 60_000);
+
+      engine.tick(dbModule);
+
+      const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+      assert.equal(updated.status, "dismissed", "an already-dismissed row must stay dismissed");
+    });
+  });
+
+  it("fires account-weekly-balance once the active account crosses the shared rotation switch threshold", () => {
+    seedAccount("acct-a", "Personal", 85, { active: true }); // over the 80 default
     seedAccount("acct-b", "Work", 40);
 
     const created = engine.tick(dbModule);
@@ -170,29 +336,39 @@ describe("playbook engine", () => {
     assert.equal(obs.scope_type, "global");
     assert.equal(obs.scope_id, null);
     const values = JSON.parse(obs.values_json);
-    assert.equal(values.gapPct, 40);
+    assert.equal(values.activeAccountId, "acct-a");
+    assert.equal(values.activePct, 85);
     assert.equal(values.lowAccountId, "acct-b");
-    assert.equal(values.highAccountId, "acct-a");
+    assert.equal(values.lowPct, 40);
+    assert.equal(values.rotationSwitchPct, 80);
   });
 
-  it("does not fire account-weekly-balance below the gap threshold", () => {
-    seedAccount("acct-a", "Personal", 55);
+  it("does not fire while the active account is still under the rotation switch threshold", () => {
+    seedAccount("acct-a", "Personal", 70, { active: true }); // under the 80 default
     seedAccount("acct-b", "Work", 40);
 
     const created = engine.tick(dbModule);
     assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
   });
 
-  it("does not fire account-weekly-balance with fewer than two accounts that still have headroom", () => {
-    seedAccount("acct-a", "Personal", 100);
+  it("does not fire when no account is currently active", () => {
+    seedAccount("acct-a", "Personal", 85); // over threshold, but never marked active
     seedAccount("acct-b", "Work", 40);
+
+    const created = engine.tick(dbModule);
+    assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
+  });
+
+  it("does not fire when no other account has headroom to switch to", () => {
+    seedAccount("acct-a", "Personal", 85, { active: true });
+    seedAccount("acct-b", "Work", 90); // also past the switch threshold — nothing to rotate onto
 
     const created = engine.tick(dbModule);
     assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
   });
 
   it("does not create a duplicate account-weekly-balance observation while one is still open", () => {
-    seedAccount("acct-a", "Personal", 80);
+    seedAccount("acct-a", "Personal", 85, { active: true });
     seedAccount("acct-b", "Work", 40);
 
     const first = engine.tick(dbModule).filter((o) => o.practice_id === "account-weekly-balance");
@@ -201,37 +377,58 @@ describe("playbook engine", () => {
     assert.equal(second.length, 0);
   });
 
-  it("respects a raised account-weekly-balance gap threshold override", () => {
-    seedAccount("acct-a", "Personal", 80);
+  it("respects a raised shared rotation switch threshold (color_thresholds.rotation_switch_pct)", () => {
+    seedAccount("acct-a", "Personal", 85, { active: true });
     seedAccount("acct-b", "Work", 40);
-    dbModule.stmts.upsertPlaybookPracticeConfig.run(
-      "account-weekly-balance",
-      1,
-      JSON.stringify({ gapThresholdPct: 50 })
-    );
+    setRotationSwitchPct(90); // 85 no longer crosses it
 
     const created = engine.tick(dbModule);
     assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
   });
 
   it("does not evaluate a disabled account-weekly-balance practice", () => {
-    seedAccount("acct-a", "Personal", 80);
+    seedAccount("acct-a", "Personal", 85, { active: true });
     seedAccount("acct-b", "Work", 40);
-    dbModule.stmts.upsertPlaybookPracticeConfig.run(
-      "account-weekly-balance",
-      0,
-      JSON.stringify({ gapThresholdPct: 25 })
-    );
+    dbModule.stmts.upsertPlaybookPracticeConfig.run("account-weekly-balance", 0, "{}");
 
     const created = engine.tick(dbModule);
     assert.ok(!created.some((o) => o.practice_id === "account-weekly-balance"));
   });
 
+  it("auto-resolves once the active account drops back under the rotation switch threshold", () => {
+    seedAccount("acct-a", "Personal", 85, { active: true });
+    seedAccount("acct-b", "Work", 40);
+    const [obs] = engine.tick(dbModule).filter((o) => o.practice_id === "account-weekly-balance");
+    assert.ok(obs, "expected account-weekly-balance to fire");
+
+    // Simulates the condition clearing (a weekly reset dropping acct-a's %,
+    // or the user actually rotating, would do the same to detect()'s
+    // inputs) — raising the shared threshold is the simplest way to prove
+    // the re-check sweep reacts to the condition no longer holding.
+    setRotationSwitchPct(95);
+
+    engine.tick(dbModule);
+
+    const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+    assert.equal(updated.status, "resolved");
+  });
+
+  it("leaves the observation open while the active account is still past the switch threshold", () => {
+    seedAccount("acct-a", "Personal", 85, { active: true });
+    seedAccount("acct-b", "Work", 40);
+    const [obs] = engine.tick(dbModule).filter((o) => o.practice_id === "account-weekly-balance");
+    assert.ok(obs, "expected account-weekly-balance to fire");
+
+    engine.tick(dbModule); // condition still holds — nothing changed
+
+    const updated = dbModule.stmts.getCoachObservation.get(obs.id);
+    assert.equal(updated.status, "open");
+  });
+
   // T2a — Frozen snapshot, global scope (account-weekly-balance)
   it("freezes kind/severity onto each Observation at fire time; a later override change never relabels an earlier row (account-weekly-balance, global scope)", async () => {
     // Step 1: No override → fire → first row has catalog values
-    // NOTE: account-weekly-balance.detect() requires at least 2 accounts with headroom
-    seedAccount("acct-1a", "Account 1A", 80);
+    seedAccount("acct-1a", "Account 1A", 85, { active: true });
     seedAccount("acct-1b", "Account 1B", 40);
     const created1 = engine.tick(dbModule);
     const first = created1.find((o) => o.practice_id === "account-weekly-balance");
@@ -248,9 +445,9 @@ describe("playbook engine", () => {
     dbModule.stmts.upsertPlaybookPracticeConfig.run(
       practiceId,
       1,
-      JSON.stringify({ gapThresholdPct: 25, kindOverride: "risk", severityOverride: "warning" })
+      JSON.stringify({ kindOverride: "risk", severityOverride: "warning" })
     );
-    seedAccount("acct-2a", "Account 2A", 80);
+    seedAccount("acct-2a", "Account 2A", 85, { active: true });
     seedAccount("acct-2b", "Account 2B", 40);
     const created2 = engine.tick(dbModule);
     const second = created2.find((o) => o.practice_id === "account-weekly-balance");
@@ -274,9 +471,9 @@ describe("playbook engine", () => {
     dbModule.stmts.upsertPlaybookPracticeConfig.run(
       practiceId,
       1,
-      JSON.stringify({ gapThresholdPct: 25, kindOverride: "good", severityOverride: "info" })
+      JSON.stringify({ kindOverride: "good", severityOverride: "info" })
     );
-    seedAccount("acct-3a", "Account 3A", 80);
+    seedAccount("acct-3a", "Account 3A", 85, { active: true });
     seedAccount("acct-3b", "Account 3B", 40);
     const created3 = engine.tick(dbModule);
     const third = created3.find((o) => o.practice_id === "account-weekly-balance");
@@ -450,13 +647,21 @@ describe("playbook + coach routes", () => {
 
       const tokenCeiling = byId.get("session-token-ceiling");
       assert.equal(tokenCeiling.enabled, true);
-      assert.deepEqual(tokenCeiling.config, { thresholdTokens: 100_000_000 });
+      assert.deepEqual(tokenCeiling.config, {
+        thresholdTokens: 100_000_000,
+        autoResolveOnSessionEnd: true,
+      });
 
       const accountBalance = byId.get("account-weekly-balance");
       assert.ok(accountBalance, "expected account-weekly-balance in the catalog");
       assert.equal(accountBalance.scope, "global");
       assert.equal(accountBalance.enabled, true);
-      assert.deepEqual(accountBalance.config, { gapThresholdPct: 25 });
+      assert.deepEqual(
+        accountBalance.fields,
+        [],
+        "no fields of its own — it shares rotation_switch_pct with the Usage page instead"
+      );
+      assert.deepEqual(accountBalance.config, {});
     });
   });
 
@@ -468,11 +673,17 @@ describe("playbook + coach routes", () => {
       });
       assert.equal(putRes.status, 200);
       assert.equal(putRes.body.enabled, false);
-      assert.deepEqual(putRes.body.config, { thresholdTokens: 50_000_000 });
+      assert.deepEqual(putRes.body.config, {
+        thresholdTokens: 50_000_000,
+        autoResolveOnSessionEnd: true,
+      });
 
       const getRes = await get("/api/playbook/practices");
       assert.equal(getRes.body.practices[0].enabled, false);
-      assert.deepEqual(getRes.body.practices[0].config, { thresholdTokens: 50_000_000 });
+      assert.deepEqual(getRes.body.practices[0].config, {
+        thresholdTokens: 50_000_000,
+        autoResolveOnSessionEnd: true,
+      });
 
       // restore for later tests
       await put("/api/playbook/practices/session-token-ceiling/config", {
@@ -503,17 +714,37 @@ describe("playbook + coach routes", () => {
       assert.equal(res.body.error.code, "INVALID_CONFIG");
     });
 
-    it("persists an account-weekly-balance gap-threshold override", async () => {
-      const putRes = await put("/api/playbook/practices/account-weekly-balance/config", {
-        config: { gapThresholdPct: 30 },
+    it("persists a boolean field (autoResolveOnSessionEnd) and a follow-up GET reflects it", async () => {
+      const putRes = await put("/api/playbook/practices/session-token-ceiling/config", {
+        config: { autoResolveOnSessionEnd: false },
       });
       assert.equal(putRes.status, 200);
-      assert.deepEqual(putRes.body.config, { gapThresholdPct: 30 });
+      assert.equal(putRes.body.config.autoResolveOnSessionEnd, false);
+
+      const getRes = await get("/api/playbook/practices");
+      const practice = getRes.body.practices.find((p) => p.id === "session-token-ceiling");
+      assert.equal(practice.config.autoResolveOnSessionEnd, false);
 
       // restore for later tests
-      await put("/api/playbook/practices/account-weekly-balance/config", {
-        config: { gapThresholdPct: 25 },
+      await put("/api/playbook/practices/session-token-ceiling/config", {
+        config: { autoResolveOnSessionEnd: true },
       });
+    });
+
+    it("400s on a non-boolean value for a boolean field", async () => {
+      const res = await put("/api/playbook/practices/session-token-ceiling/config", {
+        config: { autoResolveOnSessionEnd: "yes" },
+      });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, "INVALID_CONFIG");
+    });
+
+    it("400s on any config key for account-weekly-balance — it has no fields of its own", async () => {
+      const res = await put("/api/playbook/practices/account-weekly-balance/config", {
+        config: { gapThresholdPct: 30 },
+      });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, "INVALID_CONFIG");
     });
 
     // T5 — "saved but never applied" (load-bearing route test)
@@ -589,16 +820,19 @@ describe("playbook + coach routes", () => {
       assert.equal(sessionTokenAfter.resolvedKind, sessionTokenAfter.kind);
     });
 
-    // T6 — Numeric-only PUT preserves override
+    // T6 — Numeric-only PUT preserves override. Uses session-token-ceiling
+    // (not account-weekly-balance, which has no fields of its own to edit
+    // — see practices.js's file header) since this test's whole premise is
+    // editing a real numeric field alongside an override.
     it("a numeric-only config PUT does not clear an existing kind override (partial-patch discipline)", async () => {
       // Set an override first
-      await put("/api/playbook/practices/account-weekly-balance/config", {
+      await put("/api/playbook/practices/session-token-ceiling/config", {
         kindOverride: "risk",
       });
 
       // Then edit only a numeric field (the regression case)
-      const res = await put("/api/playbook/practices/account-weekly-balance/config", {
-        config: { gapThresholdPct: 30 },
+      const res = await put("/api/playbook/practices/session-token-ceiling/config", {
+        config: { thresholdTokens: 150_000_000 },
       });
 
       // Override must survive
@@ -611,26 +845,26 @@ describe("playbook + coach routes", () => {
 
       // Follow-up GET to prove it persisted
       const getRes = await get("/api/playbook/practices");
-      const practice = getRes.body.practices.find((p) => p.id === "account-weekly-balance");
+      const practice = getRes.body.practices.find((p) => p.id === "session-token-ceiling");
       assert.equal(practice.kindOverride, "risk", "override should persist across a second fetch");
 
       // Restore state
-      await put("/api/playbook/practices/account-weekly-balance/config", {
+      await put("/api/playbook/practices/session-token-ceiling/config", {
         kindOverride: null,
-        config: { gapThresholdPct: 25 },
+        config: { thresholdTokens: 100_000_000 },
       });
     });
 
     // T6b — Numeric-only PUT preserves severity override (twin of the kind case above)
     it("a numeric-only config PUT does not clear an existing severity override (partial-patch discipline)", async () => {
       // Set an override first
-      await put("/api/playbook/practices/account-weekly-balance/config", {
+      await put("/api/playbook/practices/session-token-ceiling/config", {
         severityOverride: "warning",
       });
 
       // Then edit only a numeric field (the regression case)
-      const res = await put("/api/playbook/practices/account-weekly-balance/config", {
-        config: { gapThresholdPct: 30 },
+      const res = await put("/api/playbook/practices/session-token-ceiling/config", {
+        config: { thresholdTokens: 150_000_000 },
       });
 
       // Override must survive
@@ -647,7 +881,7 @@ describe("playbook + coach routes", () => {
 
       // Follow-up GET to prove it persisted
       const getRes = await get("/api/playbook/practices");
-      const practice = getRes.body.practices.find((p) => p.id === "account-weekly-balance");
+      const practice = getRes.body.practices.find((p) => p.id === "session-token-ceiling");
       assert.equal(
         practice.severityOverride,
         "warning",
@@ -655,9 +889,9 @@ describe("playbook + coach routes", () => {
       );
 
       // Restore state
-      await put("/api/playbook/practices/account-weekly-balance/config", {
+      await put("/api/playbook/practices/session-token-ceiling/config", {
         severityOverride: null,
-        config: { gapThresholdPct: 25 },
+        config: { thresholdTokens: 100_000_000 },
       });
     });
   });
@@ -725,6 +959,54 @@ describe("playbook + coach routes", () => {
       const res = await get("/api/coach/observations?status=not-a-real-status");
       assert.equal(res.status, 400);
       assert.equal(res.body.error.code, "INVALID_STATUS");
+    });
+  });
+
+  describe("GET/PUT /api/playbook/settings", () => {
+    it("returns the catalog default (3h) on a fresh DB", async () => {
+      const res = await get("/api/playbook/settings");
+      assert.equal(res.status, 200);
+      assert.equal(res.body.autoResolveAfterMs, 3 * 60 * 60 * 1000);
+    });
+
+    it("persists a patch and a follow-up GET reflects it", async () => {
+      const putRes = await put("/api/playbook/settings", { autoResolveAfterMs: 60_000 });
+      assert.equal(putRes.status, 200);
+      assert.equal(putRes.body.autoResolveAfterMs, 60_000);
+
+      const getRes = await get("/api/playbook/settings");
+      assert.equal(getRes.body.autoResolveAfterMs, 60_000);
+
+      // restore for later tests
+      await put("/api/playbook/settings", { autoResolveAfterMs: 3 * 60 * 60 * 1000 });
+    });
+
+    it("allows 0 (disables the time-based backstop)", async () => {
+      const putRes = await put("/api/playbook/settings", { autoResolveAfterMs: 0 });
+      assert.equal(putRes.status, 200);
+      assert.equal(putRes.body.autoResolveAfterMs, 0);
+
+      // restore for later tests
+      await put("/api/playbook/settings", { autoResolveAfterMs: 3 * 60 * 60 * 1000 });
+    });
+
+    it("400s on a negative value", async () => {
+      const res = await put("/api/playbook/settings", { autoResolveAfterMs: -1 });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, "INVALID_SETTINGS");
+    });
+
+    it("400s on a non-numeric value", async () => {
+      const res = await put("/api/playbook/settings", { autoResolveAfterMs: "3h" });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, "INVALID_SETTINGS");
+    });
+
+    it("an empty PUT body is a no-op that returns the current value", async () => {
+      const before = await get("/api/playbook/settings");
+      const res = await put("/api/playbook/settings", {});
+      assert.equal(res.status, 200);
+      assert.equal(res.body.autoResolveAfterMs, before.body.autoResolveAfterMs);
     });
   });
 });

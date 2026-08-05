@@ -11,7 +11,8 @@
     "description": "教练正在后台持续观察你的会话。一旦出现值得关注的情况，会显示在这里。"
   },
   "feed": {
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "showFewer": "收起"
   },
   "kindLabel": {
     "risk": "警告",
@@ -50,7 +51,18 @@
     "parseError": "请输入数字，例如 500k 或 1.2m",
     "kindOverrideLabel": "类型",
     "severityOverrideLabel": "严重程度",
-    "useDefaultOption": "使用默认 ({{value}})"
+    "useDefaultOption": "使用默认 ({{value}})",
+    "settingsTitle": "自动解决",
+    "settingsDescription": "只要会话仍处于活跃状态，警告就绝不会自动关闭。会话结束后，这里设置的是打开的警告在自动关闭前需要等待多久——这样你就不用逐条手动忽略。这是一个统一的时限，适用于所有实践项——无需逐项配置。",
+    "settingsFieldLabel": "会话结束后自动解决",
+    "settingsUnit": "分钟",
+    "settingsParseError": "请输入一个数字（分钟），0 或更大",
+    "settingsDisabledHint": "设为 0 会关闭此功能——即使相关会话已经结束，警告也只会在你主动忽略时才会关闭。",
+    "sidecar": {
+      "label": "手册分区",
+      "settingsLabel": "设置",
+      "practicesLabel": "实践项"
+    }
   },
   "practices": {
     "sessionTokenCeiling": {
@@ -60,17 +72,19 @@
       "hint": "例如 500k 或 1.2m",
       "unit": "tokens",
       "message": "会话上下文正在变大（{{tokens}} tokens）",
-      "recommendation": "建议在继续之前先执行 /compact 或 /clear——请先复制保存当前上下文。"
+      "recommendation": "建议在继续之前先执行 /compact 或 /clear——请先复制保存当前上下文。",
+      "autoResolveOnSessionEndLabel": "会话结束后自动解决",
+      "autoResolveOnSessionEndHint": "一个已不再活跃的会话已经无法再执行 /compact 或 /clear。会话结束后，这条警告会在上方设置的自动解决时限后自动关闭——只要会话仍处于活跃状态，就绝不会关闭。"
     },
     "accountWeeklyBalance": {
       "name": "账户轮换",
-      "description": "当两个或更多已连接账户的每周用量差距过大时发出提示，以便将工作切换到额度更充裕的账户，而不是单独耗尽一个账户。",
-      "fieldLabel": "差距阈值",
-      "unit": "%",
+      "description": "当你正在实际使用的 Claude 账户已经超过 Usage 页面 Rotation Plan 的切换阈值、且另一个已连接账户仍有余量可以接管时发出提示。",
+      "thresholdInfo": "与 Usage 页面 Rotation Plan 共用同一个 {{value}}% 切换阈值——请在那里修改，而不是在这里。",
+      "autoResolveNote": "一旦当前活跃账户的用量降回阈值以下（无论是每周重置，还是你已经实际切换了账户），这条提示会自动关闭——无需任何配置。",
+      "previewActiveLabel": "个人账户",
       "previewLowLabel": "工作账户",
-      "previewHighLabel": "个人账户",
-      "message": "{{lowLabel}} 的每周额度比 {{highLabel}} 多剩 {{gapPct}}%（已用 {{lowPct}}% 对比 {{highPct}}%）",
-      "recommendation": "将当前工作切换到 {{lowLabel}}——轮换使用可以随时切换会话窗口，并保护两个账户的每周额度。"
+      "message": "{{activeLabel}} 已使用 {{activePct}}% 的每周额度——请在额度耗尽前切换到 {{lowLabel}}（已用 {{lowPct}}%）。",
+      "recommendation": "将当前工作切换到 {{lowLabel}}——Usage 页面的 Rotation Plan 也已经推荐这样做，同时还能保留 {{activeLabel}} 剩余的每周额度。"
     }
   }
 }

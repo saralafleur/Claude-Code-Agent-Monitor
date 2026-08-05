@@ -1,8 +1,14 @@
 /**
- * @file Tests for PlaybookPage: renders the v1 session-token-ceiling
- * practice from `api.playbook.listPractices`, toggling the switch + editing
- * the threshold and saving calls `api.playbook.updatePracticeConfig`, and
- * the live preview text reacts to the current (unsaved) field value.
+ * @file Tests for PlaybookPage: the sidecar/master-detail layout (Settings
+ * first, then one row per catalog practice; selecting a row swaps the body
+ * to that item's card and only that item's card), `GlobalSettingsCard` (the
+ * auto-resolve time window, hydrated from `api.playbook.getSettings`/saved
+ * via `updateSettings`, the default-selected body on first render), the
+ * session-token-ceiling practice card (`api.playbook.listPractices`,
+ * toggling the switch + editing the threshold and saving calls
+ * `api.playbook.updatePracticeConfig`, the live preview reacting to the
+ * current unsaved field value), and session-token-ceiling's
+ * `autoResolveOnSessionEnd` toggle.
  *
  * T7c: This page only ever shows the live RESOLVED value (draft or saved) — it
  * never renders a persisted coach_observations row's frozen kind/severity. Per
@@ -15,10 +21,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { PlaybookPage } from "../PlaybookPage";
 import { playbookStore } from "../../lib/playbookStore";
+import { playbookSettingsStore } from "../../lib/playbookSettingsStore";
 
 const PRACTICE = {
   id: "session-token-ceiling",
@@ -37,6 +44,10 @@ const PRACTICE = {
   config: { thresholdTokens: 100_000_000 },
 };
 
+// No fields of its own — its one trigger threshold, rotation_switch_pct, is
+// shared with the Usage page's Rotation Plan via useColorThresholds(),
+// which falls back to DEFAULT_ROTATION_SWITCH_PCT (80) in these tests since
+// the api mock below defines no `api.colorThresholds`.
 const ACCOUNT_BALANCE_PRACTICE = {
   id: "account-weekly-balance",
   category: "account-management",
@@ -47,19 +58,23 @@ const ACCOUNT_BALANCE_PRACTICE = {
   severityOverride: null,
   resolvedKind: "info" as const,
   resolvedSeverity: "info" as const,
-  fields: [{ key: "gapThresholdPct", type: "number" as const, default: 25, min: 1 }],
+  fields: [],
   enabled: true,
-  config: { gapThresholdPct: 25 },
+  config: {},
 };
 
 const listPractices = vi.fn();
 const updatePracticeConfig = vi.fn();
+const getSettings = vi.fn();
+const updateSettings = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
     playbook: {
       listPractices: (...args: unknown[]) => listPractices(...args),
       updatePracticeConfig: (...args: unknown[]) => updatePracticeConfig(...args),
+      getSettings: (...args: unknown[]) => getSettings(...args),
+      updateSettings: (...args: unknown[]) => updateSettings(...args),
     },
   },
 }));
@@ -72,10 +87,20 @@ function renderPage() {
   );
 }
 
+/** Clicks a practice's sidecar row by its display name, switching the body
+ *  to that practice's card — the page defaults to Settings, so every test
+ *  touching a practice's own fields must select it first. */
+async function selectPractice(user: UserEvent, name: string) {
+  await user.click(await screen.findByRole("button", { name }));
+}
+
 beforeEach(() => {
   playbookStore.__resetForTest();
+  playbookSettingsStore.__resetForTest();
   listPractices.mockResolvedValue({ practices: [PRACTICE] });
   updatePracticeConfig.mockResolvedValue({ ...PRACTICE, enabled: false });
+  getSettings.mockResolvedValue({ autoResolveAfterMs: 180 * 60 * 1000 }); // 180 min (3h)
+  updateSettings.mockResolvedValue({ autoResolveAfterMs: 90 * 60 * 1000 });
 });
 
 afterEach(() => {
@@ -83,15 +108,49 @@ afterEach(() => {
 });
 
 describe("PlaybookPage", () => {
-  it("renders the practice name and its comma-formatted current threshold", async () => {
+  it("defaults to the Settings body on first render", async () => {
     renderPage();
-    expect(await screen.findByText("Session Token Ceiling")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("180")).toBeInTheDocument();
+    // The sidecar row still names the practice ("Session Token Ceiling"
+    // appears as a nav label) — what must be absent is the practice CARD's
+    // own content, e.g. its threshold field.
+    expect(screen.queryByDisplayValue("100,000,000")).not.toBeInTheDocument();
+  });
+
+  it("sidecar lists Settings plus one row per catalog practice", async () => {
+    listPractices.mockResolvedValue({ practices: [PRACTICE, ACCOUNT_BALANCE_PRACTICE] });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Session Token Ceiling" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Account Rotation" })).toBeInTheDocument();
+  });
+
+  it("selecting a practice's sidecar row swaps the body to that practice's card only", async () => {
+    listPractices.mockResolvedValue({ practices: [PRACTICE, ACCOUNT_BALANCE_PRACTICE] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectPractice(user, "Session Token Ceiling");
+    expect(await screen.findByDisplayValue("100,000,000")).toBeInTheDocument();
+    expect(screen.queryByText(/switch threshold as the Usage page/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Auto-resolve after session ends")).not.toBeInTheDocument();
+
+    await selectPractice(user, "Account Rotation");
+    expect(await screen.findByText(/switch threshold as the Usage page/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("100,000,000")).not.toBeInTheDocument();
+  });
+
+  it("renders the practice name and its comma-formatted current threshold", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await selectPractice(user, "Session Token Ceiling");
     expect(await screen.findByDisplayValue("100,000,000")).toBeInTheDocument();
   });
 
   it("updates the live preview as the threshold field changes", async () => {
     const user = userEvent.setup();
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
     const input = await screen.findByDisplayValue("100,000,000");
     await user.clear(input);
     await user.type(input, "5000000");
@@ -103,6 +162,7 @@ describe("PlaybookPage", () => {
   it("accepts shorthand like 500k and reformats it with commas on blur", async () => {
     const user = userEvent.setup();
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
     const input = await screen.findByDisplayValue("100,000,000");
     await user.clear(input);
     await user.type(input, "500k");
@@ -116,6 +176,7 @@ describe("PlaybookPage", () => {
   it("flags unparseable threshold text instead of allowing save", async () => {
     const user = userEvent.setup();
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
     const input = await screen.findByDisplayValue("100,000,000");
     await user.clear(input);
     await user.type(input, "not a number");
@@ -126,6 +187,7 @@ describe("PlaybookPage", () => {
   it("applying a preset chip sets the threshold and is reflected on save", async () => {
     const user = userEvent.setup();
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
     await screen.findByDisplayValue("100,000,000");
 
     await user.click(screen.getByRole("button", { name: "5M" }));
@@ -143,7 +205,8 @@ describe("PlaybookPage", () => {
   it("saves an enabled/threshold change via api.playbook.updatePracticeConfig", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("Session Token Ceiling");
+    await selectPractice(user, "Session Token Ceiling");
+    await screen.findByText("Session Token Ceiling", { selector: "h2" });
 
     const toggle = screen.getByLabelText("Session Token Ceiling") as HTMLInputElement;
     await user.click(toggle);
@@ -160,50 +223,37 @@ describe("PlaybookPage", () => {
     expect(await screen.findByText("Saved")).toBeInTheDocument();
   });
 
-  it("renders one card per catalog practice", async () => {
-    listPractices.mockResolvedValue({ practices: [PRACTICE, ACCOUNT_BALANCE_PRACTICE] });
-    renderPage();
-    expect(await screen.findByText("Session Token Ceiling")).toBeInTheDocument();
-    expect(await screen.findByText("Account Rotation")).toBeInTheDocument();
-  });
-
-  it("renders account-weekly-balance's current gap threshold and live preview", async () => {
-    listPractices.mockResolvedValue({ practices: [ACCOUNT_BALANCE_PRACTICE] });
-    renderPage();
-    expect(await screen.findByDisplayValue("25")).toBeInTheDocument();
-    expect(await screen.findByText(/25% more weekly quota left/)).toBeInTheDocument();
-  });
-
-  it("updates account-weekly-balance's live preview as the gap field changes", async () => {
+  it("renders account-weekly-balance's shared rotation threshold (from useColorThresholds) and live preview", async () => {
     listPractices.mockResolvedValue({ practices: [ACCOUNT_BALANCE_PRACTICE] });
     const user = userEvent.setup();
     renderPage();
-    const input = await screen.findByDisplayValue("25");
-    await user.clear(input);
-    await user.type(input, "40");
-    await waitFor(() => {
-      expect(screen.getByText(/40% more weekly quota left/)).toBeInTheDocument();
-    });
+    await selectPractice(user, "Account Rotation");
+    // useColorThresholds() falls back to DEFAULT_ROTATION_SWITCH_PCT (80)
+    // since this file's api mock defines no `api.colorThresholds`.
+    expect(
+      await screen.findByText(
+        "Uses the same 80% switch threshold as the Usage page's Rotation Plan — edit it there, not here."
+      )
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/before it runs out\./)).toBeInTheDocument();
   });
 
-  it("saves an account-weekly-balance gap threshold change via api.playbook.updatePracticeConfig", async () => {
+  it("account-weekly-balance has no numeric field to edit — toggling enabled is the only way to dirty it", async () => {
     listPractices.mockResolvedValue({ practices: [ACCOUNT_BALANCE_PRACTICE] });
-    updatePracticeConfig.mockResolvedValue({
-      ...ACCOUNT_BALANCE_PRACTICE,
-      config: { gapThresholdPct: 30 },
-    });
+    updatePracticeConfig.mockResolvedValue({ ...ACCOUNT_BALANCE_PRACTICE, enabled: false });
     const user = userEvent.setup();
     renderPage();
-    const input = await screen.findByDisplayValue("25");
-    await user.clear(input);
-    await user.type(input, "30");
+    await selectPractice(user, "Account Rotation");
 
+    // No numeric input anywhere on this card.
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Account Rotation"));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(updatePracticeConfig).toHaveBeenCalledWith("account-weekly-balance", {
-        enabled: true,
-        config: { gapThresholdPct: 30 },
+        enabled: false,
       });
     });
   });
@@ -221,6 +271,7 @@ describe("PlaybookPage", () => {
       ],
     });
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
 
     // Find the kind selector (must await hydration)
     // The selector should start with the catalog value
@@ -250,6 +301,7 @@ describe("PlaybookPage", () => {
       ],
     });
     renderPage();
+    await selectPractice(user, "Account Rotation");
 
     // Find the kind selector (must await hydration)
     const kindSelector = await screen.findByLabelText(/kind/i);
@@ -267,7 +319,9 @@ describe("PlaybookPage", () => {
   // T7b — selector defaults to "use default" naming the catalog value
   it("kind selector defaults to 'use default' naming the catalog value", async () => {
     listPractices.mockResolvedValue({ practices: [PRACTICE] });
+    const user = userEvent.setup();
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
 
     // The selector should have a "use default" option
     // Must await hydration to ensure the kind selector is rendered
@@ -292,6 +346,7 @@ describe("PlaybookPage", () => {
       resolvedKind: "good",
     });
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
 
     const kindSelector = await screen.findByLabelText(/kind/i);
     await user.selectOptions(kindSelector, "good");
@@ -327,6 +382,7 @@ describe("PlaybookPage", () => {
       resolvedKind: "risk",
     });
     renderPage();
+    await selectPractice(user, "Session Token Ceiling");
 
     const kindSelector = await screen.findByLabelText(/kind/i);
     await user.selectOptions(kindSelector, ""); // empty string = use default
@@ -341,6 +397,121 @@ describe("PlaybookPage", () => {
           kindOverride: null,
         })
       );
+    });
+  });
+
+  describe("GlobalSettingsCard (auto-resolve time window)", () => {
+    it("renders the current setting in minutes from api.playbook.getSettings", async () => {
+      renderPage();
+      expect(await screen.findByDisplayValue("180")).toBeInTheDocument();
+    });
+
+    it("saves an edited minutes value converted to milliseconds", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      const input = await screen.findByDisplayValue("180");
+      await user.clear(input);
+      await user.type(input, "90");
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => {
+        expect(updateSettings).toHaveBeenCalledWith({ autoResolveAfterMs: 90 * 60 * 1000 });
+      });
+    });
+
+    it("allows 0 (disables the time-based backstop)", async () => {
+      const user = userEvent.setup();
+      updateSettings.mockResolvedValue({ autoResolveAfterMs: 0 });
+      renderPage();
+      const input = await screen.findByDisplayValue("180");
+      await user.clear(input);
+      await user.type(input, "0");
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => {
+        expect(updateSettings).toHaveBeenCalledWith({ autoResolveAfterMs: 0 });
+      });
+    });
+
+    it("flags a negative value and disables save instead of allowing it", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      const input = await screen.findByDisplayValue("180");
+      await user.clear(input);
+      await user.type(input, "-1");
+
+      expect(
+        await screen.findByText("Enter a number of minutes, 0 or greater")
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    });
+  });
+
+  describe("session-token-ceiling's autoResolveOnSessionEnd toggle", () => {
+    const PRACTICE_WITH_TOGGLE = {
+      ...PRACTICE,
+      fields: [
+        ...PRACTICE.fields,
+        { key: "autoResolveOnSessionEnd", type: "boolean" as const, default: true },
+      ],
+      config: { thresholdTokens: 100_000_000, autoResolveOnSessionEnd: true },
+    };
+
+    it("renders checked by default (catalog default is true)", async () => {
+      listPractices.mockResolvedValue({ practices: [PRACTICE_WITH_TOGGLE] });
+      const user = userEvent.setup();
+      renderPage();
+      await selectPractice(user, "Session Token Ceiling");
+      const toggle = (await screen.findByLabelText(
+        "Resolve automatically after the session ends"
+      )) as HTMLInputElement;
+      expect(toggle.checked).toBe(true);
+    });
+
+    it("unchecking and saving sends autoResolveOnSessionEnd: false alongside the threshold", async () => {
+      listPractices.mockResolvedValue({ practices: [PRACTICE_WITH_TOGGLE] });
+      updatePracticeConfig.mockResolvedValue({
+        ...PRACTICE_WITH_TOGGLE,
+        config: { thresholdTokens: 100_000_000, autoResolveOnSessionEnd: false },
+      });
+      const user = userEvent.setup();
+      renderPage();
+      await selectPractice(user, "Session Token Ceiling");
+
+      const toggle = await screen.findByLabelText("Resolve automatically after the session ends");
+      await user.click(toggle);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => {
+        expect(updatePracticeConfig).toHaveBeenCalledWith("session-token-ceiling", {
+          enabled: true,
+          config: { thresholdTokens: 100_000_000, autoResolveOnSessionEnd: false },
+        });
+      });
+    });
+
+    it("an untouched toggle is still sent at its current resolved value, not omitted", async () => {
+      // Regression guard: only the THRESHOLD field must always be sent
+      // (draftValue, not the possibly-empty draft object); the boolean
+      // toggle is correctly omitted when untouched — editing the threshold
+      // alone must not silently flip or drop the stored toggle value.
+      listPractices.mockResolvedValue({ practices: [PRACTICE_WITH_TOGGLE] });
+      const user = userEvent.setup();
+      renderPage();
+      await selectPractice(user, "Session Token Ceiling");
+      await screen.findByDisplayValue("100,000,000");
+
+      await user.click(screen.getByRole("button", { name: "5M" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => {
+        expect(updatePracticeConfig).toHaveBeenCalledWith("session-token-ceiling", {
+          enabled: true,
+          config: { thresholdTokens: 5_000_000 },
+        });
+      });
     });
   });
 });
