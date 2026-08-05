@@ -77,7 +77,8 @@
       "title": "每周重置倒计时",
       "subtitle": "距离每个账户的每周窗口重置还有多少天。",
       "totalRemaining": "剩余 {{pct}}%",
-      "totalRemainingHint": "所有账户剩余百分比的总和(100% 减去每个账户已用百分比,再相加)。"
+      "totalRemainingHint": "所有账户剩余百分比的总和(100% 减去每个账户已用百分比,再相加)。",
+      "paceHint": "相当于重置前剩余时间可持续速度的 {{pace}} 倍。"
     },
     "sessionTimeline": {
       "title": "会话重置时刻",

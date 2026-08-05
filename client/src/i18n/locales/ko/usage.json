@@ -77,7 +77,8 @@
       "title": "주간 리셋 카운트다운",
       "subtitle": "각 계정의 주간 윈도우가 리셋되기까지 남은 일수입니다.",
       "totalRemaining": "{{pct}}% 남음",
-      "totalRemainingHint": "모든 계정의 남은 비율을 합산한 값입니다 (100%에서 각 계정의 사용한 비율을 뺀 값의 총합)."
+      "totalRemainingHint": "모든 계정의 남은 비율을 합산한 값입니다 (100%에서 각 계정의 사용한 비율을 뺀 값의 총합).",
+      "paceHint": "리셋까지 남은 기간 기준 지속 가능한 속도의 {{pace}}배입니다."
     },
     "sessionTimeline": {
       "title": "세션 리셋 시각",

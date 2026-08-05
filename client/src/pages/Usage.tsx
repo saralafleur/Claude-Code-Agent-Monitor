@@ -910,11 +910,21 @@ function daysUntil(from: Date, to: Date): number {
  * purely forward-looking from the latest known capture - it does not
  * reconstruct past usage history. The visible day count is derived from the
  * accounts' own reset dates (see RESET_CALENDAR_MIN/MAX/BUFFER above), not a
- * fixed span.
+ * fixed span. Each bar also carries a pace strip along its bottom 30% -
+ * `computePaceRatio` (the SAME "times faster than sustainable" ratio the
+ * Consumption Rate card badges use) capped at 1 and rendered as a fraction
+ * of THIS bar's own width, so it directly answers "are we burning through
+ * what's left faster than the runway we have left to spend it in": a flat
+ * or comfortably-under-sustainable rate hugs the left edge (close to
+ * today), a rate right at the sustainable pace exactly fills the bar, and
+ * anything faster still fills the whole bar (clipped, not overflowing) -
+ * width alone can't tell "1x" from "3x" apart once both are capped, so the
+ * strip's color also grades through the same `weeklyRate` thresholds as
+ * the Consumption Rate card for that.
  */
 function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
   const { t } = useTranslation("usage");
-  const { weekly: thresholds } = useColorThresholds();
+  const { weekly: thresholds, weeklyRate: weeklyRateThresholds } = useColorThresholds();
   if (accounts.length === 0) return null;
 
   const today = new Date();
@@ -944,7 +954,17 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
     // matters once it's close.
     const countdown =
       pct != null && validReset ? formatMsLong(resetDate!.getTime() - today.getTime()) : null;
-    return { account, pct, spanDays, resetWhen, countdown };
+    // How many times faster the current weekly burn is than the sustainable
+    // pace for the runway that's left (see `computePaceRatio`) - null when
+    // there isn't a rate yet (falls back to no strip, same as "no data"
+    // elsewhere on this card) or the window is already past 100%/its reset.
+    const paceRatio = computePaceRatio(
+      account.week_burn_rate_pct_per_hour,
+      pct,
+      account.latest_week_reset_raw,
+      today.getTime()
+    );
+    return { account, pct, spanDays, resetWhen, countdown, paceRatio };
   });
 
   // Sum of each account's own remaining share (100% - its used pct), across
@@ -1005,7 +1025,7 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
             ))}
           </div>
         </div>
-        {rows.map(({ account, pct, spanDays, resetWhen, countdown }) => {
+        {rows.map(({ account, pct, spanDays, resetWhen, countdown, paceRatio }) => {
           // +1: spanDays counts whole days from today *to* the reset date
           // (e.g. 7 for "resets a week from today"), but column 0 is today,
           // so filling spanDays columns lands one column short of the reset
@@ -1038,10 +1058,18 @@ function AccountsResetCalendar({ accounts }: { accounts: Account[] }) {
                   ))}
                   {pct != null && spanDays != null && (
                     <div
-                      className={`absolute top-0.5 left-0 h-8 rounded ${weeklyPctColor(pct, thresholds)}`}
+                      className={`absolute top-0.5 left-0 h-8 rounded overflow-hidden ${weeklyPctColor(pct, thresholds)}`}
                       style={{ width: `calc(${(visibleDays / dayCount) * 100}% - 2px)` }}
                       title={resetWhen ? t("resets", { when: resetWhen }) : undefined}
-                    />
+                    >
+                      {paceRatio != null && (
+                        <div
+                          className={`absolute bottom-0 left-0 h-[30%] border-t-2 border-surface-1 ${pctBarColor(paceRatio, weeklyRateThresholds)}`}
+                          style={{ width: `${Math.min(100, Math.max(0, paceRatio) * 100)}%` }}
+                          title={t("accounts.calendar.paceHint", { pace: paceRatio.toFixed(1) })}
+                        />
+                      )}
+                    </div>
                   )}
                   {countdown && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-1">
