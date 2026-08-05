@@ -28,6 +28,11 @@
  * `LayoutMenu`) - a single icon opens a popover of visual tiles, one per
  * orientation+wrap combination, so picking a layout is one click to open and
  * one click to apply. Persisted in localStorage per view+status.
+ * The header also shows a compact "Concurrent agent sessions" stat card
+ * (today, all projects/sessions - the same default scope as FocusPage.tsx)
+ * to the left of the view toggle, reusing `ConcurrencyStatTile` in its
+ * `compact` rendering; it stays hidden until the first fetch resolves and
+ * simply disappears again on a failed fetch rather than showing an error.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 /* =============================================================================
@@ -127,10 +132,12 @@ import { PlanPanel } from "../components/PlanPanel";
 import { PlanModal } from "../components/PlanModal";
 import { FocusReportModal } from "../components/FocusReportModal";
 import { OpenTerminalModal } from "../components/OpenTerminalModal";
+import { ConcurrencyStatTile } from "../components/ConcurrencyStatTile";
 import { loadProjectOrder, persistProjectOrder, applyProjectOrder } from "../lib/projectOrder";
 import { buildCwdProjectIndex, projectForSession } from "../lib/projectLookup";
 import { useFocusMap } from "../lib/focusStore";
 import { monitorStore, useMonitorLayout, createMonitor } from "../lib/monitorGroups";
+import { DAY_MS, startOfDay } from "../lib/calendarWindow";
 import {
   STATUS_CONFIG,
   SESSION_STATUS_CONFIG,
@@ -145,6 +152,7 @@ import type {
   AgentStatus,
   EffectiveAgentStatus,
   EffectiveSessionStatus,
+  FocusReport,
   Plan,
   PlanUpdatedPayload,
   Project,
@@ -389,6 +397,13 @@ export function KanbanBoard() {
   const [unassignedBucket, setUnassignedBucket] =
     useState<UnassignedProjectBucket>(EMPTY_UNASSIGNED_BUCKET);
   const [plans, setPlans] = useState<Plan[]>([]);
+  // Today's cross-project concurrency figures for the header's compact stat
+  // card - independent of `view` (agents/sessions/projects) so it stays
+  // visible no matter which board is active. `null` until the first fetch
+  // resolves; the card itself just doesn't render while null (see Header
+  // below), so a slow or failed fetch degrades to "not shown" rather than a
+  // loading skeleton or error state.
+  const [concurrencyReport, setConcurrencyReport] = useState<FocusReport | null>(null);
   const focusMap = useFocusMap();
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, number>>({});
@@ -574,6 +589,46 @@ export function KanbanBoard() {
     setLoading(true);
     load();
   }, [load]);
+
+  // Today's (local midnight-to-midnight, all projects/sessions) concurrency
+  // report for the header's compact stat card - same "today, everything"
+  // default scope FocusPage.tsx uses on first load. Fetched once on mount,
+  // then re-fetched (debounced) on the same session/agent websocket events
+  // the board's own agent/session loads react to, rather than a poll timer -
+  // matching this file's no-periodic-polling convention.
+  const loadConcurrency = useCallback(async () => {
+    const start = startOfDay(new Date());
+    const report = await api.focusReport({
+      from: start.toISOString(),
+      to: new Date(start.getTime() + DAY_MS).toISOString(),
+    });
+    setConcurrencyReport(report);
+  }, []);
+
+  useEffect(() => {
+    loadConcurrency().catch(() => {
+      /* non-critical - the header card just stays hidden */
+    });
+  }, [loadConcurrency]);
+
+  useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    return eventBus.subscribe((msg: WSMessage) => {
+      if (
+        msg.type === "session_created" ||
+        msg.type === "session_updated" ||
+        msg.type === "session_deleted" ||
+        msg.type === "agent_updated"
+      ) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          loadConcurrency().catch(() => {
+            /* non-critical - keep showing the last good figures */
+          });
+        }, 300);
+      }
+    });
+  }, [loadConcurrency]);
 
   useEffect(() => {
     if (!filtersOpen) return;
@@ -1029,6 +1084,16 @@ export function KanbanBoard() {
         </div>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
+        {concurrencyReport && (
+          <ConcurrencyStatTile
+            compact
+            label={t("plan:report.board.concurrentSessions")}
+            concurrencyRatio={concurrencyReport.concurrency_ratio}
+            activeConcurrencyRatio={concurrencyReport.active_concurrency_ratio ?? null}
+            wallClockMs={concurrencyReport.wall_clock_ms}
+            activeWallClockMs={concurrencyReport.active_wall_clock_ms}
+          />
+        )}
         <ViewToggle view={view} onChange={setView} />
         {view === "projects" && (
           <button

@@ -1,15 +1,17 @@
 /**
  * @file ConcurrencyStatTile.tsx
  * @description The Concurrency stat tile shared by `FocusReportBody` (the
- * per-project modal and the cross-project Calendar board) and `FocusPage` —
- * extracted so the primary/secondary ratio swap below lives in exactly one
- * place instead of three call sites. Renders BOTH concurrency figures at
- * once: one as the tile's big value — with its own denominator total right
- * beneath it ("of X active time" / "of X open-session time", the total the
- * big ratio is actually a ratio OF) — and the other ratio as a second
- * sub-line ("Nx while active" / "Nx across open sessions"), with a small
- * swap button on the label row that inverts which is which. The tooltip
- * always describes whichever ratio is currently primary.
+ * per-project modal and the cross-project Calendar board), `FocusPage`, and
+ * `KanbanBoard`'s header (a `compact` standalone rendering, today/all-sessions
+ * scope) — extracted so the primary/secondary ratio swap below lives in
+ * exactly one place instead of one call site per consumer. Renders BOTH
+ * concurrency figures at once: one as the tile's big value — with its own
+ * denominator total right beneath it ("of X active time" / "of X
+ * open-session time", the total the big ratio is actually a ratio OF) — and
+ * the other ratio as a second sub-line ("Nx while active" / "Nx across open
+ * sessions"), with a small swap button on the label row that inverts which
+ * is which. The tooltip always describes whichever ratio is currently
+ * primary.
  *
  * The chosen primary ("active" — the default — or "open") persists in
  * `localStorage` under `agent-monitor-concurrency-primary` (same
@@ -64,6 +66,10 @@ export interface ConcurrencyStatTileProps {
    *  relabel. Omitted, the standard "Concurrency" label renders. The label
    *  never changes with the swap; the value/sub/tooltip carry the semantics. */
   label?: string;
+  /** Forwarded to the underlying `StatTile` — renders as a small,
+   *  self-bordered standalone card instead of a flush grid tile. See
+   *  `StatTile`'s own `compact` doc. */
+  compact?: boolean;
 }
 
 /** The Concurrency stat tile with its persistent primary-ratio swap — see
@@ -74,6 +80,7 @@ export function ConcurrencyStatTile({
   wallClockMs,
   activeWallClockMs,
   label,
+  compact,
 }: ConcurrencyStatTileProps) {
   const { t } = useTranslation("plan");
   const [primary, setPrimary] = useState<ConcurrencyPrimary>(loadPrimary);
@@ -116,6 +123,7 @@ export function ConcurrencyStatTile({
           : undefined
       }
       title={activeIsPrimary ? t("report.activeConcurrencyTitle") : t("report.concurrencyTitle")}
+      compact={compact}
       action={
         <button
           type="button"
