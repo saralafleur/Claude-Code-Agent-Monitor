@@ -456,6 +456,18 @@ function startBackgroundServices() {
   } catch (err) {
     console.warn("reconciliation failed to start:", err.message);
   }
+  // Sweeps projects in least-recently-swept rotation to drain PROJECT/
+  // STAKEHOLDER altitude overflow the request path's 40-unit-per-visit cap
+  // could not reach (server/lib/value-summary-tick.js). The request path
+  // itself is unchanged by this — it stays synchronous and capped; this tick
+  // finishes a large pool unattended over later cycles. Disable with
+  // DASHBOARD_VALUE_SUMMARY_TICK_MODE=off or DASHBOARD_VALUE_SUMMARY_TICK_MS=0.
+  try {
+    const { startValueSummaryTick } = require("./lib/value-summary-tick");
+    startValueSummaryTick(broadcast);
+  } catch (err) {
+    console.warn("value summary tick failed to start:", err.message);
+  }
   // The Coach engine: evaluates the Playbook's enabled practices on a tick
   // and records Observations (server/lib/playbook/engine.js). Disable with
   // DASHBOARD_PLAYBOOK_MODE=off or DASHBOARD_PLAYBOOK_MS=0.

@@ -447,4 +447,75 @@ describe("PlanLedgerPanel", () => {
     await waitFor(() => expect(screen.getByText("P")).toBeInTheDocument());
     expect(mockAltitudesMock).toHaveBeenCalledTimes(1);
   });
+
+  it("a 45-unit pool renders Queued and Not available distinguishably in the same render (AC-2, T-D)", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const units = Array.from({ length: 45 }, (_, i) => makeUnit({ id: `unit-${i}` }));
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units, identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: Object.fromEntries(
+        units.slice(0, 39).map((u) => [u.id, { project: "P", stakeholder: "S" }])
+      ),
+      states: {
+        [units[39].id]: "unavailable",
+        ...Object.fromEntries(units.slice(40, 45).map((u) => [u.id, "queued"])),
+      },
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getAllByText(/Queued/i).length).toBe(10)); // 5 units × 2 rows
+    expect(screen.getAllByText(/Not available/i).length).toBe(2); // 1 unit × 2 rows
+    expect(screen.getAllByText("P")[0]).toBeInTheDocument(); // at least 1 resolved unit present
+  });
+
+  it("45 unavailable units (LLM off, T-B) render distinctly from queued", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const units = Array.from({ length: 45 }, (_, i) => makeUnit({ id: `unit-${i}` }));
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units, identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {},
+      states: Object.fromEntries(units.map((u) => [u.id, "unavailable"])),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getAllByText(/Not available/i).length).toBe(90)); // 45 units × 2 rows
+    expect(screen.queryAllByText(/Queued/i).length).toBe(0);
+  });
+
+  it("an out-of-registry states value warns and does not masquerade as an old-server absence (T-E)", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {},
+      states: { [unit.id]: "bogus" },
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getAllByText(/Not available/i).length).toBe(2)); // safe fallback
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]!.join(" ")).toContain("bogus");
+    expect(warnSpy.mock.calls[0]!.join(" ")).toContain(unit.id);
+
+    warnSpy.mockRestore();
+  });
 });

@@ -551,6 +551,10 @@
  *  - `workflow_upserted` ............................ {@link WorkflowRun}
  *  - `plan_updated` ................................. {@link PlanUpdatedPayload}
  *  - `session_focus` ................................ {@link SessionFocus}
+ *  - `value_altitudes_updated` ....................... {@link ValueAltitudesUpdatedPayload}
+ *    (no subscriber in v1 — OPEN-3)
+ *  - `project_plan_updated` .......................... {@link ProjectPlanUpdatedPayload}
+ *  - `value_claim_updated` ........................... {@link ValueClaimUpdatedPayload}
  *
  * ### Where these types are consumed
  *
@@ -2739,6 +2743,47 @@ export interface PlanUpdatedPayload {
   items: PlanItem[];
 }
 
+/** Payload for `value_altitudes_updated` WebSocket messages, broadcast by
+ *  `server/lib/value-summary-tick.js` at the end of a sweep that generated
+ *  at least one PROJECT/STAKEHOLDER altitude (never broadcast on an
+ *  all-cached or LLM-unavailable sweep — zero units generated means zero
+ *  broadcasts). **v1 ships no client subscriber for this message** (OPEN-3,
+ *  intake/2026-08-04-value-summary-tick/decisions.md) — do not assume a
+ *  live-update behavior exists from this type alone; `PlanLedgerPanel.tsx`
+ *  only re-fetches altitudes on mount/unit-set change, not on receipt of
+ *  this broadcast. */
+export interface ValueAltitudesUpdatedPayload {
+  /** The project this sweep covered. */
+  project_id: string;
+  /** unitKeys newly resolved this sweep (a subset of the swept pool — never
+   *  every unit in the pool, since cache hits and still-unresolved misses
+   *  are excluded). */
+  unit_keys: string[];
+  /** Units still unresolved after this sweep (`queued` + `unavailable`),
+   *  re-derived live each sweep — never a decremented counter. */
+  pending: number;
+}
+
+/** Payload for `project_plan_updated` WebSocket messages, broadcast by
+ *  `server/routes/project-plans.js` (plan create/update/close/reopen and
+ *  item create/update/delete — see the route's own broadcast call sites). */
+export interface ProjectPlanUpdatedPayload {
+  /** The affected plan, or `null` if the broadcast concerns a deletion with
+   *  no surviving row to describe. */
+  plan: ProjectPlan | null;
+}
+
+/** Payload for `value_claim_updated` WebSocket messages, broadcast by
+ *  `server/routes/project-plans.js` (claim create/delete). */
+export interface ValueClaimUpdatedPayload {
+  /** The affected claim row; absent when `deleted` is true. */
+  claim?: ValueClaim;
+  /** The affected claim's id — present on both create and delete. */
+  claim_id?: number;
+  /** True when this broadcast represents a claim deletion (unclaim). */
+  deleted?: boolean;
+}
+
 /** A named "Monitor" swimlane on the Kanban Board's Projects view (mirrors a
  *  physical display) that project columns can be dragged into. Global and
  *  server-shared — see {@link MonitorLayoutPayload}. */
@@ -2917,7 +2962,10 @@ export interface WSMessage {
    *  MonitorLayoutPayload; color_thresholds_updated → ColorThresholdsConfig;
    *  decision_queue_updated → DecisionQueueItem; detour_disposition →
    *  DetourDisposition; playbook_practice_config_updated → PlaybookPractice;
-   *  coach_observation_created/coach_observation_updated → CoachObservation. */
+   *  coach_observation_created/coach_observation_updated → CoachObservation;
+   *  value_altitudes_updated → ValueAltitudesUpdatedPayload (no subscriber in
+   *  v1, OPEN-3); project_plan_updated → ProjectPlanUpdatedPayload;
+   *  value_claim_updated → ValueClaimUpdatedPayload. */
   type:
     | "session_created"
     | "session_updated"
@@ -2943,7 +2991,10 @@ export interface WSMessage {
     | "detour_disposition"
     | "playbook_practice_config_updated"
     | "coach_observation_created"
-    | "coach_observation_updated";
+    | "coach_observation_updated"
+    | "value_altitudes_updated"
+    | "project_plan_updated"
+    | "value_claim_updated";
   /** The message body, whose concrete shape is selected by `type` above. */
   data:
     | Session
@@ -2966,7 +3017,10 @@ export interface WSMessage {
     | DecisionQueueItem
     | DetourDisposition
     | PlaybookPractice
-    | CoachObservation;
+    | CoachObservation
+    | ValueAltitudesUpdatedPayload
+    | ProjectPlanUpdatedPayload
+    | ValueClaimUpdatedPayload;
   /** ISO timestamp the server broadcast this message (not necessarily the
    *  same instant the underlying event occurred). */
   timestamp: string;

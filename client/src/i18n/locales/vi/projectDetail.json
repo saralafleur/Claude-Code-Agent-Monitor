@@ -153,7 +153,8 @@
       },
       "altitudes": {
         "generating": "Đang tạo…",
-        "unavailable": "Chưa có sẵn"
+        "unavailable": "Chưa có sẵn",
+        "queued": "Đang chờ"
       }
     },
     "health": {

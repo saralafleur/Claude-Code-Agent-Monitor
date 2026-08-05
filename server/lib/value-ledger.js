@@ -54,7 +54,11 @@ const ATTRIBUTION_TIERS = ["mechanical", "correlational", "judgment"];
 // re-deriving these numbers on its own. Grow this list ONLY when the new
 // consumer reads computePlanHealth/assembleValuePool/summarizeDeliveredValue
 // directly, never re-implements a piece of them.
-const CONSUMERS = ["server/routes/project-plans.js", "bin/ccam.js (cmdLedger)"];
+const CONSUMERS = [
+  "server/routes/project-plans.js",
+  "bin/ccam.js (cmdLedger)",
+  "server/lib/value-summary-tick.js",
+];
 
 // DEC-6: bounded default lookback (trunk-drift's own env-tunable window) plus
 // an explicit backfill request for a deep walk — no persisted per-project

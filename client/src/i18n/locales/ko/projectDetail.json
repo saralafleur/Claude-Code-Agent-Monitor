@@ -153,7 +153,8 @@
       },
       "altitudes": {
         "generating": "생성 중…",
-        "unavailable": "아직 없음"
+        "unavailable": "아직 없음",
+        "queued": "대기 중"
       }
     },
     "health": {
