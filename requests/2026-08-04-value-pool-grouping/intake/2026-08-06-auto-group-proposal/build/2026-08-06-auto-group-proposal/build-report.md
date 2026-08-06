@@ -270,7 +270,13 @@ left in place. T3/T4/T6 are byte-identical to `master`, grep-confirmed.
 
 ## Shipped commit
 
-**Not yet committed — stopped at green.** `git log master..HEAD` is empty.
+**`44720c3`** — committed and pushed to `origin/effort/2026-08-06-auto-group-proposal`
+by the orchestrating session, after independently re-verifying the C-5 fix
+and confirming production DB isolation held (0 rows) one final time. One
+commit, not split per logical unit as the task list's Tasks 2/3 preference
+named (a ship-step decision, not a correctness issue — see the note below).
+Not merged to `master` — see the `PROJECT-CONTEXT.md` concurrent-edit watch
+item below, which must be resolved before that merge.
 
 ## Residual risk & back-out
 
