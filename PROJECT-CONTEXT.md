@@ -358,6 +358,37 @@ Three things generalize:
    shape and watching it fail. The registry converts a silent gap into a listed
    one, and the "exactly" assertion stops the list growing quietly.
 
+**QA-pass note (2026-08-05, `team-qa` strategist,
+`intake/2026-08-05-coverage-on-demand/` — count unchanged at 7; this is a
+POST-merge assessment of `4c2e931`, not a pre-build one).** Two results worth
+carrying, one good and one open.
+
+**Good, and it should be read as such:** the MANDATORY deliverable
+(`value-coverage-parity.test.js`) that was *itself* this entry's vacuity (BL-1,
+§9.3's 2026-08-05 note) is **confirmed genuinely repaired** by direct read — it
+forces a real `passive → requested` transition across two real tick calls,
+captures the actual broadcast payload through a real callback, and deep-equals it
+field-by-field against the real route response. The `if (artifact) {…} else
+{self-computed}` shape is gone; it now fails outright if the tick never
+broadcasts. The repair held through merge.
+
+**Open: SF-4, the composition layer, which is this entry's own "scan for copies
+of its *helpers* too" recurring one frame further out.** The 4-step probe
+composition (assemble → `enrichPoolAltitudes({probe:true})` → sweep-state read →
+`coverageSnapshot`) is written **twice**, once per route handler
+(`routes/project-plans.js` `POST /coverage-request` and `GET /coverage`), and the
+two copies **have already diverged once** on `requestedAt`. Nothing compares
+them: the parity guard compares the *route* against the *tick*, so **route↔route
+has no home** — per-module specs exist for the module, the routes, and
+route↔broadcast, and the one shape nobody named is the one with no guard. That
+is this entry's four-times-recorded diagnosis (*test scope is per-module, not
+per-shape*) reproducing exactly. Recommended now, ahead of Slice 3's third
+consumer: a structural guard asserting both handler bodies compose
+`coverageSnapshot` from an identical sorted key set **and** that
+`draining: isDrainingProject(projectId)` appears in both (which also
+regression-proofs the SF-3 fix). Extract `buildProbeCoverage` when Slice 3's
+consumer lands, and replace the guard then — do not keep both.
+
 ### 9.2 row-id-as-chronology-proxy
 
 A query or aggregation over a table with an auto-increment `id` assumes
@@ -875,6 +906,31 @@ first time (a) a second test file is found doing this, or (b) it actually fires.
 Cheapest cure if it comes up again: a global test-runner setup file that asserts
 the variable is set and points somewhere under a temp dir.
 
+**QA-pass note (2026-08-05, `team-qa` strategist, same intake, post-merge —
+count unchanged; the mitigation claim was CHECKED, and it HELD).** SF-7 (event 4
+above) shipped with a stated mitigation: *"the real AC-2/AC-3 proofs live
+elsewhere."* This entry's whole history says such a claim is exactly what should
+not be taken on faith, so it was traced case-by-case. **It is true.** All seven
+existence-only / near-vacuous cases in `coverage-smoke.test.js` map to real
+behavioral proofs that exist and are load-bearing: `project-plans-api.test.js` T3
+(flag stamps, 202, idempotent), `value-summary-tick.test.js`'s TTL-expiry block
+and six-exit-condition matrix (the clear path), `value-coverage.test.js`'s
+arithmetic / three-demand-bucket / per-state ETA blocks, and
+`value-coverage-parity.test.js` G2 (the field populated on a real broadcast).
+**AC-2/AC-3 are genuinely proven; the conditional escalation the risk pass
+named — "if the claim is thinner than stated, this is Critical" — did not
+fire.** SF-7 is therefore purely a false-confidence hazard, not a coverage hole,
+and its fix is hygiene: replace the four `assert.ok(stmts.X)` cases with the one
+real round-trip they should have been, and delete the rest in favour of pointer
+comments naming the file and describe block that actually proves each one.
+
+**The generalizable half, and it is the cheap part:** *a verified pointer is
+worth more than a deleted test.* When a vacuous case is removed because the real
+proof lives elsewhere, leave the pointer behind in a comment — otherwise the next
+author re-adds an existence check to "cover" the surface, and the cycle restarts.
+And the verification itself is ~20 minutes of tracing, which is the entire cost
+of turning "the build says it's covered" into "it is covered."
+
 ### 9.4 FIX-ROUND-REGRESSION (the fix round is a build round)
 
 A round of blocker fixes on the dispositional/queue surface introduces new
@@ -956,6 +1012,82 @@ recurrence are worth keeping:
   unfixed finding, grep the decision log for the feature's name before
   assigning severity — an item that some earlier decision cited as *its own*
   mitigation is never a should-fix.
+
+**2026-08-06, `intake/2026-08-05-coverage-on-demand/` (QA-fix build,
+`2026-08-05-coverage-on-demand-qa-fix`) — the strongest confirmation yet, and
+the shape is new: the QA fixes were themselves half-fixed, and the half that
+was missing was in each case the half nobody had thought to mutate.** A
+`team-qa` post-merge pass returned BLIND with three live defects (SF-6/8/9).
+The fix build closed all three, `build-verifier` round 1 independently
+mutation-proved every one of them and returned GREEN-WITH-CAVEATS — and
+`build-reviewer` then returned **4 blockers, 2 of them proven live by its own
+probes, against fixes two prior passes had certified**:
+
+- **B1** — SF-8's fix (`useEffect(() => setCoverage(null), [projectId])`) cured
+  the *already-landed* case and left the *in-flight* case live: switch A→B while
+  A's `load()` is outstanding, A resolves late with a newer `computed_at`, the
+  monotonic merge hands the header to A **permanently**. The exact leak SF-8
+  names, with the more likely production trigger. Textbook §9.4 "correct for
+  the caller that motivated it."
+- **B2** — a parity guard's blind spot that generalizes. See the detector below.
+
+**NEW DETECTOR — PARITY-WITHOUT-ANCHOR (cheap, run it on every parity guard).**
+A guard asserting `deepEqual(sideA, sideB)` is **structurally incapable** of
+detecting a drift applied identically to both sides. T7 (the SF-4 route↔route
+composition guard) shipped with only `assert.deepEqual(postKeys, getKeys)`; the
+task list had mandated a *second*, anchoring assertion against a literal closed
+set, and only the first shipped. Both prior red-proofs (implementer and
+verifier) mutated **one route at a time**, which the parity check does catch —
+so both correctly reported red, and both were proving the wrong thing. The
+reviewer added `bogusExtraKey` to *both* routes: **T7 stayed green.** Deleted
+`requestedAt` from *both*: **T7 stayed green.** This extends §9.3's existing
+"red-prove from BOTH sides" bullet, which is about mutating A and B
+*separately*; the missing case is mutating A and B *simultaneously and
+identically*. **Rule: every parity assertion needs an anchor** — `deepEqual(A,
+B)` plus `deepEqual(A, <literal reviewed closed set>)` — and the red-proof set
+for a parity guard is three mutations, not two: side A only, side B only, and
+the matched pair. A parity guard with no anchor is a §9.3 vacuity waiting for
+its first symmetric refactor.
+
+**Second detector, reinforcing §9.3's "probe-mode fixtures narrow what a
+mutation can distinguish": a fixture's *synchronization* narrows it too.** The
+shipped SF-8 test fully `await`s project A before `rerender`ing to B, so it
+cannot observe an in-flight response at all. The fix looked complete because
+the test's timing had already excluded the failing state space. When a guard
+covers an entity switch, a cache invalidation, or anything else where "when"
+matters, **at least one case must hold a response open across the transition**
+(manually-resolved deferred promises), or the guard only proves the quiescent
+half.
+
+**The headcount argument is now three-for-three, and this run makes it
+strongest.** §9.3's 2026-08-05 note already recorded the standing
+recommendation — *do not trim `build-reviewer` on this file family* — after two
+consecutive efforts. This is the third, and the first where the reviewer's
+catch was against a **fix round**, not an implementation round: the round that
+is most often reviewed as a touch-up is the one where a careful, honest,
+correctly-executed verifier pass proved insufficient twice over. `auto direct`
+mode kept both `build-planner` and `build-reviewer` IN; four internal loop-backs
+(implementer → test-author → verifier r1 → reviewer → test-author + implementer
+→ verifier r2) were needed to reach real green. **Trusting round 1 would have
+shipped a live cross-project data leak and a parity guard that cannot fail.**
+
+**One thing this build got right that is worth copying: `build-implementer`
+refused to touch two broken tests it found** (SF-6 case 2's fixture, which
+resolved synchronously so its "not complete" precondition could never hold; and
+a T7 guard that did not fire) and reported them instead of adjusting assertions
+until they passed. Under §9.3 that adjustment is the tempting move and it is
+how vacuities are born. Refusing is the correct behavior, and it cost one
+loop-back to do properly — cheap.
+
+**Residual, recorded because it is the same shape one level up:** B1's fix
+(`currentProjectIdRef` request-generation guard) shipped **with no standing
+test** — the reviewer's and verifier's proofs were both throwaway probes,
+deleted after use, and the reviewer's explicit "add the missing test case"
+instruction was not carried out. Disposed as test-debt in that intake's
+`qa/decisions.md` §6.6 rather than dropped. **Add to how-to-comply:** when a
+review blocker is proven with a throwaway probe, the probe is the test — the
+disposition is "promote the probe," not "the fix is in." A deleted probe leaves
+a fix nobody can regress against.
 
 ### 9.5 FRESH-DB-BLIND SCHEMA CHANGE
 
@@ -1326,6 +1458,28 @@ own import specifier and fail on any importer missing from the map, exactly as
 recommended at occurrence 6 remains half-built, and this is what the unbuilt
 half costs.
 
+**2026-08-05, same build, same axis, one layer down — N2, still OPEN (count
+unchanged at 7; recorded by `team-qa` strategist post-merge because it is the
+*same* defect as occurrence 7 in the *same* change set, not a new one).**
+`value-coverage.test.js`'s i18n guard derives its scope correctly from the real
+exported `DEMAND_STATES` / `ETA_STATES` registries — and then maps them through a
+**hand-typed** `STATE_TO_LOCALE_KEY`, whose miss branch is `if (!key) continue;`.
+So the derived axis makes the guard read as registry-complete while the
+hand-typed axis fails **open**: a 4th `demand` or `eta.state` value (Slice 3
+growth, WATCH-S2-F's literal trigger) ships with no locale key in any of the four
+files and the suite stays green. One build, two instances, two layers: SF-5 on
+`assertSingleHome`'s consumer axis (fixed), N2 on the locale-key axis (open).
+
+**The sharper statement of this entry, earned here:** it is not enough for a
+scan's *scope* to be derived — its **miss branch must fail closed**. A derived
+enumeration that `continue`s past an unhandled member is a hand-typed scan
+wearing a derived scan's clothes. Fix shape is already proven in this file
+(§9.1's `UNCOMPARED_FIELD_GUARANTORS`, 2026-08-05): assert the exempt set is
+**exactly** the reviewed list — `assert.deepEqual(exemptDemand, ["passive"])`,
+`assert.deepEqual(exemptEta, ["none"])` — so registry growth breaks the test at
+the point of growth until someone dispositions the new member. Two lines. Worth
+landing before Slice 3 touches either registry rather than after.
+
 ### 9.8 OVERLOADED-ABSENCE (distinguishable outcomes collapsed into one absent value)
 
 **PROMOTED from candidate to a numbered entry 2026-08-04** by `team-qa`
@@ -1541,6 +1695,52 @@ have concluded "immutable."
 
 ---
 
+**QA-pass note (2026-08-05, `team-qa` strategist,
+`intake/2026-08-05-coverage-on-demand/` — the very next build on this surface;
+count unchanged, this is the same family closing one half and leaving the
+other).** Slice 2 built two closed, server-authored registries specifically to
+satisfy this entry — `demand` (`passive`/`requested`/`draining`) and `eta.state`
+(`measured`/`estimating`/`none`) — and the **state-shape** half held: SF-3 (the
+`draining` value being unreachable from either HTTP route) was found in review
+and **fixed**, `isDrainingProject` is threaded into both handlers.
+
+**What did not hold is one layer over, at the BROADCAST-TRIGGER, and it is this
+entry's own "never zero" direction: SF-6, still open at `4c2e931`.**
+`shouldBroadcastCoverage(projectId, generated, demand, complete)` computes
+`const transitioned = !!prior && (prior.demand !== demand || prior.complete !==
+complete)`, so a project's **first observation in a process lifetime is
+structurally incapable of being a transition** — and with `generated > 0` as the
+only other trigger, a first-observed terminal `complete` (post-restart drain
+resume, or a pool completed by `POST /altitudes` between ticks) is **silently
+dropped from the wire**. An open tab freezes at its last percentage forever: no
+error, no retry, no signal. That is precisely a distinguishable outcome
+("finished") collapsed into the same absence as "nothing happened," and it
+directly undermines AC-5, the acceptance criterion the whole slice exists for.
+Every existing broadcast-widening test seeds `lastBroadcastState` via a prior
+tick first, so **the suite structurally cannot observe the case**.
+
+**Two things generalize:**
+
+1. **A registry closes the state *shape*; it does not close the *delivery* of a
+   state.** This entry's tests have all lived at the layer that computes the
+   buckets. SF-6 lives at the layer that decides whether to *send* one. Extend the
+   "never zero" question to every gate between the computation and the consumer —
+   the trigger predicate, the transport, the client's merge rule — not just the
+   producer. (The 2026-08-04 build's own lesson said this about layers that *add
+   or drop items*; add: layers that decide whether to *emit*.)
+2. **The tell was in the comment again, and it is checkable again.**
+   `shouldBroadcastCoverage`'s header claims it *"can only ever SUPPRESS, never
+   fabricate."* That is false as written — suppressing a terminal transition is
+   the whole defect. Per §9.1's standing check (*"when a cure's header says
+   'cannot,' find the loop that proves it or downgrade the comment"*), this is the
+   third consecutive build in which an unevidenced invariant claim in a header
+   comment marked the exact spot where the invariant fails. **Standing check,
+   now cheap enough to be routine: grep new/changed headers for "never", "can
+   only", "impossible", "always" — each is a test someone has not written yet.**
+   Required assertion here: `shouldBroadcastCoverage(pid, 0, "passive", true)`
+   with `lastBroadcastState` empty must return `true`, plus the negative case
+   (first observation, not complete → no broadcast) to bound the fix.
+
 ### Candidate new pattern, NOT yet catalogued — CWD-IDENTITY-FANOUT
 
 Recorded with an explicit promotion trigger so it is not re-argued from scratch (same
@@ -1730,6 +1930,88 @@ StrictMode-only defect is found in any client component, or (b) a
 double-invoke bug reaches Sara's running dashboard.** Until then, anyone
 touching `useRef`/`useEffect` in `client/src/components/` should read this and
 check the setup body re-arms whatever the cleanup tears down.
+
+---
+
+### Candidate new pattern, NOT yet catalogued — MONOTONIC-GUARD-ACROSS-ENTITY-SWITCH
+
+Recorded 2026-08-05 by `team-qa` `qa-strategist` during
+`intake/2026-08-05-coverage-on-demand/` (Value Pool Slice 2), with an explicit
+promotion trigger — same convention as CWD-IDENTITY-FANOUT / CONTRACT-SPEC-DRIFT /
+STRICTMODE-BLIND above. **First occurrence, and it fired: the defect is live on
+`master` at `4c2e931` (SF-8), with both suites 100% green over it.** Registered
+because the risk pass correctly flagged that no existing id owns this shape:
+§9.1 is about two *computations* of one value; §9.8 is about one *value*
+overloading several outcomes; this is about one value being compared against a
+value from a **different logical entity**.
+
+**The shape:** a component (or cache, or reducer) holds state for one entity,
+guards that state with a **monotonicity / staleness rule** — *accept `next` only
+if it is newer than `prev`* — and is then reused for a **different entity**
+without the state being reset, because the identity it is scoped to is a prop or
+key the guard never reads. The comparison silently changes meaning from *"is this
+a fresher view of the same thing?"* to *"is this thing newer than that unrelated
+thing?"*, and the correct answer to the second question is meaningless. **The
+correctness guard becomes the leak mechanism**, and it leaks in the worst
+direction: it can *permanently* reject the new entity's legitimate data, so the
+defect does not self-heal and shows no error.
+
+**Live evidence (verified by direct read, 2026-08-05):**
+- `client/src/components/PlanLedgerPanel.tsx:71-78` — `mergeCoverage(prev, next)`
+  returns `next.computed_at > prev.computed_at ? next : prev`. It compares
+  `computed_at` and **nothing else**; `CoverageSnapshot` carries a `project_id`
+  the merge never reads.
+- The rule is *correct for its stated purpose* and is mutation-proven for it (R4:
+  an out-of-order HTTP/WS delivery must not visibly regress progress). It is not
+  a sloppy guard — it is a good guard with an unstated precondition.
+- `client/src/pages/ProjectDetail.tsx:1292` renders `{id && <PlanLedgerPanel
+  projectId={id} />}` — **unkeyed**. React reuses the instance and its state
+  across a project switch. There is no `useEffect(() => setCoverage(null),
+  [projectId])`, and `load()` itself routes the *new* project's fresh HTTP
+  response through `mergeCoverage`.
+- Net effect: switch from project A to project B where A's snapshot happens to
+  have a later `computed_at`, and B's real snapshot is rejected — by the initial
+  fetch **and** by every subsequent broadcast until one arrives with a later
+  timestamp than A's. **Project A's "N of M described" renders under project B's
+  pool**, indefinitely, with no error state. A user can click "prioritize now" or
+  trust a completion percentage on another project's numbers.
+
+**Why it will repeat rather than being one bug:** the precondition is a
+*convention*, not a mechanism. Nothing in this repo asserts "a component's state
+belongs to the entity it was mounted for" at any layer — no test anywhere mounts
+a component, changes its entity-id prop, and asserts the state followed. So
+**every future field `PlanLedgerPanel` gains inherits the same leak** (its
+`altitudes` and `requestedAltitudesRef` already do), and any other component
+taking an entity id inherits it on the day it gains its first cross-render guard.
+The two ingredients are individually normal and individually reviewed as
+correct — an unkeyed child, and a staleness comparison — which is why review
+caught this one only by tracing them together.
+
+**Discrimination test (do not file the next instance under §9.1 or §9.8):** ask
+what the comparison's operands are. Two derivations of one value → §9.1. One
+value standing for several distinguishable outcomes → §9.8. Two values that are
+each correct for a *different entity*, compared as if they were the same
+entity's → **this pattern**.
+
+**Cures, cheapest first:** (a) reset entity-scoped state on the id change
+(`useEffect(() => setX(null), [entityId])`) — preferred over keying the component,
+because keying also discards unrelated caches and does not stop the *next* state
+field from inheriting the bug; (b) make the guard itself identity-aware —
+`mergeCoverage` accepts unconditionally when `next.project_id !==
+prev.project_id`, which fails safe by construction; (c) the durable one — a
+shared `useEntityScopedState(entityId, initial)` hook, or a structural/lint guard
+rejecting a `useState` holding entity-scoped data in a component that takes an
+entity-id prop with no matching reset effect; (d) the cheapest first step, worth
+adopting regardless of promotion: a **standing test convention** that any spec
+file for a component taking an entity-id prop must carry one *"switch the id,
+assert the state followed and the old entity's values are gone"* case.
+
+**Promote to a real catalog entry the first time either (a) a second
+entity-scoped state leak is found in any component or server-side cache, or (b)
+this one is shown to have misled a real decision in Sara's running dashboard.**
+Until then, anyone adding a cross-render comparison (`>`, `newer`, `Math.max`,
+"only accept if changed") to component state should read this and check what
+identity the two operands belong to.
 
 ---
 
