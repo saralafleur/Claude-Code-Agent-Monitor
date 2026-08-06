@@ -2251,9 +2251,19 @@ sweep's own `queued + unavailable` counts every time, never decremented) and
 `cache_hits`, `generated`, `queued`, `unavailable`, `model`, `duration_ms`;
 the four counted columns always sum to `pool_size`). A sweep broadcasts
 `value_altitudes_updated` (`{project_id, unit_keys, pending, coverage}`)
-whenever it generated at least one unit, OR (Value Pool Slice 2, below)
-whenever `coverage.demand`/`coverage.complete` transitioned since the last
-broadcast for that project. **`PlanLedgerPanel` subscribes to this message
+under any of three conditions: it generated at least one unit; OR (Value
+Pool Slice 2, below) `coverage.demand`/`coverage.complete` transitioned
+since the last broadcast recorded for that project; OR (SF-6) it is that
+project's FIRST-EVER observed sweep in this process's lifetime (no prior
+broadcast recorded) and the pool is already `complete` — otherwise a pool
+that was already fully described before its very first sweep in a
+freshly-started process would never emit its terminal state at all (a first
+observation that is NOT yet complete still does not spuriously broadcast).
+This third condition also fires for a genuinely empty pool (`pool_size: 0`,
+`unit_keys: []`) on its first observation, since `complete` (`pending === 0`)
+is trivially true for zero units — a deliberate, pinned side effect
+(`server/__tests__/value-summary-tick.test.js`'s `S2` case), not a bug.
+**`PlanLedgerPanel` subscribes to this message
 and updates in place** — its first-ever `eventBus` subscription, superseding
 the original "v1 ships no client subscriber" design. One project failing
 never stops the sweep or starves the rotation (its `last_swept_at` still

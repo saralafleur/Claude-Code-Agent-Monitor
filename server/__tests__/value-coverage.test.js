@@ -294,6 +294,18 @@ describe("i18n registry → locale (WATCH-S2-F, G6): every DEMAND_STATES/ETA_STA
     },
   };
 
+  it("N2: the STATE_TO_LOCALE_KEY exemption set (registry members with NO locale key) is exactly the reviewed closed set, not silently permissive", () => {
+    const exemptDemand = DEMAND_STATES.filter((s) => !STATE_TO_LOCALE_KEY.demand[s]);
+    assert.deepEqual(
+      exemptDemand,
+      ["passive"],
+      "DEMAND_STATES exemption set must be exactly ['passive']"
+    );
+
+    const exemptEta = ETA_STATES.filter((s) => !STATE_TO_LOCALE_KEY.eta[s]);
+    assert.deepEqual(exemptEta, ["none"], "ETA_STATES exemption set must be exactly ['none']");
+  });
+
   for (const locale of ["en", "ko", "vi", "zh"]) {
     it(`${locale}/projectDetail.json has every mapped DEMAND_STATES/ETA_STATES key under planLedger.pool.coverage`, () => {
       const localeJson = JSON.parse(

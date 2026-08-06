@@ -6719,6 +6719,569 @@ exports[`screen snapshots > Project Manager 1`] = `
 </div>
 `;
 
+exports[`screen snapshots > Project detail (coverage in progress) 1`] = `
+<div>
+  <div
+    class="p-6 space-y-6"
+  >
+    <div>
+      <a
+        class="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-accent mb-2"
+        href="/projects"
+      >
+        <svg
+          class="lucide lucide-arrow-left w-3.5 h-3.5"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m12 19-7-7 7-7"
+          />
+          <path
+            d="M19 12H5"
+          />
+        </svg>
+         
+        Back to Projects
+      </a>
+      <div
+        class="flex items-center justify-between gap-2.5"
+      >
+        <div
+          class="flex items-center gap-2.5 min-w-0"
+        >
+          <div
+            class="w-9 h-9 rounded-lg bg-accent-muted flex items-center justify-center flex-shrink-0"
+          >
+            <svg
+              class="lucide lucide-folder-kanban w-4 h-4 text-accent"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
+              />
+              <path
+                d="M8 10v4"
+              />
+              <path
+                d="M12 10v2"
+              />
+              <path
+                d="M16 10v6"
+              />
+            </svg>
+          </div>
+          <h1
+            class="text-lg font-semibold text-gray-100 truncate"
+          >
+            Agent Monitor
+          </h1>
+        </div>
+        <button
+          class="btn-ghost text-xs disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0"
+          title="Refresh"
+          type="button"
+        >
+          <svg
+            class="lucide lucide-refresh-cw w-3.5 h-3.5"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"
+            />
+            <path
+              d="M21 3v5h-5"
+            />
+            <path
+              d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"
+            />
+            <path
+              d="M8 16H3v5"
+            />
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+    <section
+      class="space-y-2"
+    >
+      <h2
+        class="text-sm font-semibold text-gray-300"
+      >
+        Plan
+      </h2>
+      <p
+        class="text-xs text-gray-500 italic"
+      >
+        No AGENT-PLAN.md found in this project's folders yet.
+      </p>
+    </section>
+    <section
+      class="card"
+      data-test="plan-ledger-panel"
+    >
+      <div
+        class="flex items-center justify-between gap-3 px-4 py-3 border-b border-border"
+      >
+        <h2
+          class="text-sm font-semibold text-gray-200"
+        >
+          Plan Lifecycle & Value Ledger
+        </h2>
+        <button
+          aria-label="About the value pool"
+          class="text-gray-500 hover:text-accent p-1 rounded-md flex-shrink-0"
+          title="About the value pool"
+          type="button"
+        >
+          <svg
+            class="lucide lucide-info w-4 h-4"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+            />
+            <path
+              d="M12 16v-4"
+            />
+            <path
+              d="M12 8h.01"
+            />
+          </svg>
+        </button>
+      </div>
+      <div
+        class="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-b border-border text-[11px] text-gray-400"
+        data-test="plan-ledger-health"
+      >
+        <span>
+          Unclaimed units
+          :
+           
+          <strong
+            class="text-gray-200"
+          >
+            0
+          </strong>
+        </span>
+        <span>
+          Open plans
+          :
+           
+          <strong
+            class="text-gray-200"
+          >
+            0
+          </strong>
+        </span>
+        <span>
+          Last closure
+          :
+           
+          <strong
+            class="text-gray-200"
+          >
+            No closures yet
+          </strong>
+        </span>
+      </div>
+      <div
+        class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4"
+      >
+        <div
+          data-test="open-plans-pane"
+        >
+          <h3
+            class="text-xs font-semibold text-gray-300 mb-2"
+          >
+            Open Plans
+          </h3>
+          <p
+            class="text-xs text-gray-500 italic mb-3"
+          >
+            No open plans yet.
+          </p>
+          <div
+            class="pt-2 border-t border-border"
+            data-test="closed-plans-history"
+          >
+            <div
+              class="flex items-center justify-between gap-2 mb-2"
+            >
+              <h3
+                class="text-xs font-semibold text-gray-400"
+              >
+                History
+              </h3>
+              <button
+                aria-expanded="true"
+                class="text-[11px] text-gray-500 hover:text-gray-300"
+                type="button"
+              >
+                Collapse
+              </button>
+            </div>
+            <p
+              class="text-xs text-gray-500 italic"
+            >
+              No closed generations yet.
+            </p>
+          </div>
+        </div>
+        <div
+          data-test="value-pool-pane"
+        >
+          <div
+            class="flex items-center justify-between mb-2 gap-2 flex-wrap"
+          >
+            <h3
+              class="text-xs font-semibold text-gray-300"
+            >
+              Value Pool
+            </h3>
+            <div
+              class="flex items-center gap-2 text-[11px] text-gray-400"
+              data-test="coverage-header"
+            >
+              <span>
+                4 of 10 described
+                 · 
+                Estimating…
+              </span>
+              <button
+                class="text-[11px] text-accent hover:underline disabled:opacity-50"
+                data-test="prioritize-now-button"
+                type="button"
+              >
+                Prioritize now
+              </button>
+            </div>
+          </div>
+          <div
+            class="rounded-lg border border-border bg-surface-1/60 px-3 py-2.5 mb-2"
+            data-test="pool-unit"
+          >
+            <div
+              class="flex gap-3"
+            >
+              <div
+                class="flex flex-col items-center w-3 flex-shrink-0 pt-1"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full bg-surface-5 border border-border-light flex-shrink-0"
+                />
+                <span
+                  class="w-px flex-1 bg-border-light my-0.5"
+                />
+                <span
+                  class="w-2 h-2 rounded-full bg-surface-5 border border-border-light flex-shrink-0"
+                />
+                <span
+                  class="w-px flex-1 bg-border-light my-0.5"
+                />
+                <span
+                  class="w-2.5 h-2.5 rounded-full bg-accent ring-[3px] ring-accent-muted flex-shrink-0"
+                />
+              </div>
+              <div
+                class="min-w-0 flex-1 space-y-1.5"
+              >
+                <div
+                  class="flex items-baseline gap-2"
+                >
+                  <span
+                    class="w-16 flex-shrink-0 text-[9px] font-mono uppercase tracking-wide text-gray-600"
+                  >
+                    Ground
+                  </span>
+                  <div
+                    class="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap"
+                  >
+                    <span
+                      class="text-xs font-mono text-gray-300"
+                    >
+                      trunk_commit
+                    </span>
+                    <span
+                      class="badge flex-shrink-0 bg-sky-500/10 border-sky-500/30 text-sky-400"
+                    >
+                      Mechanical
+                    </span>
+                  </div>
+                </div>
+                <div
+                  class="flex items-baseline gap-2"
+                >
+                  <span
+                    class="w-16 flex-shrink-0 text-[9px] font-mono uppercase tracking-wide text-gray-600"
+                  >
+                    Project
+                  </span>
+                  <div
+                    class="min-w-0 flex-1 text-[12px] text-gray-400"
+                  >
+                    <span
+                      class="italic text-gray-600"
+                    >
+                      Not available
+                    </span>
+                  </div>
+                </div>
+                <div
+                  class="flex items-baseline gap-2"
+                >
+                  <span
+                    class="w-16 flex-shrink-0 text-[9px] font-mono uppercase tracking-wide text-accent-hover"
+                  >
+                    Stakeholder
+                  </span>
+                  <div
+                    class="min-w-0 flex-1 text-[13px] font-medium text-gray-100"
+                  >
+                    <span
+                      class="italic text-gray-600"
+                    >
+                      Not available
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section
+      class="card"
+    >
+      <div
+        class="flex items-center justify-between gap-3 px-4 py-3 border-b border-border"
+      >
+        <button
+          aria-expanded="true"
+          class="flex items-center gap-2 min-w-0 text-left"
+          title="Collapse"
+          type="button"
+        >
+          <svg
+            class="lucide lucide-chevron-down w-4 h-4 text-gray-500 flex-shrink-0"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="m6 9 6 6 6-6"
+            />
+          </svg>
+          <svg
+            class="lucide lucide-git-fork w-4 h-4 text-gray-400 flex-shrink-0"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle
+              cx="12"
+              cy="18"
+              r="3"
+            />
+            <circle
+              cx="6"
+              cy="6"
+              r="3"
+            />
+            <circle
+              cx="18"
+              cy="6"
+              r="3"
+            />
+            <path
+              d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"
+            />
+            <path
+              d="M12 12v3"
+            />
+          </svg>
+          <h2
+            class="text-sm font-semibold text-gray-200"
+          >
+            Repos
+          </h2>
+        </button>
+        <div
+          class="flex items-center gap-2 flex-shrink-0"
+        >
+          <div
+            aria-label="Repos card view mode"
+            class="flex items-center rounded-md border border-border overflow-hidden text-[11px] font-medium"
+            role="group"
+          >
+            <button
+              aria-pressed="false"
+              class="px-2 py-1 transition-colors bg-transparent text-gray-500 hover:text-gray-300"
+              title="Compact view — hides Remove/Add/Ignore/Unignore actions, information only."
+              type="button"
+            >
+              Compact
+            </button>
+            <button
+              aria-pressed="true"
+              class="px-2 py-1 border-l border-border transition-colors bg-accent/20 text-accent"
+              title="Full view — shows every action (Remove, Add to project, Ignore, Unignore)."
+              type="button"
+            >
+              Full
+            </button>
+          </div>
+        </div>
+      </div>
+      <div
+        class="p-4 space-y-3"
+      >
+        <p
+          class="text-xs text-gray-500 italic"
+        >
+          None of this project's mapped folders are git repos yet.
+        </p>
+      </div>
+      <div
+        class="px-4 py-3 border-t border-border space-y-2"
+      >
+        <div
+          class="flex items-start justify-between gap-3"
+        >
+          <div>
+            <h3
+              class="text-xs font-semibold text-gray-300"
+            >
+              Suggested repos
+            </h3>
+            <p
+              class="text-[11px] text-gray-500"
+            >
+              Related repos found on disk or named in a mapped repo's PROJECT-CONTEXT.md, not yet part of this project.
+            </p>
+          </div>
+          <button
+            aria-checked="false"
+            class="group inline-flex items-center gap-2 text-left "
+            role="checkbox"
+            type="button"
+          >
+            <span
+              class="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[5px] border transition-colors bg-surface-2 border-border group-hover:border-border-light"
+            />
+            <span
+              class="text-[11px] text-gray-400 group-hover:text-gray-300"
+            >
+              Scan for sibling repos
+            </span>
+          </button>
+        </div>
+        <p
+          class="text-[11px] text-gray-500"
+        >
+          Off by default. Scans this project's parent folder for other git repos sitting next to it — useful when related repos live side by side, but noisy in a flat workspace folder with many unrelated repos.
+        </p>
+        <p
+          class="text-[11px] text-gray-500 italic"
+        >
+          No suggestions right now.
+        </p>
+      </div>
+    </section>
+    <section
+      class="space-y-2"
+    >
+      <h2
+        class="text-sm font-semibold text-gray-300 flex items-center gap-1.5"
+      >
+        <svg
+          class="lucide lucide-list-checks w-3.5 h-3.5 text-accent"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m3 17 2 2 4-4"
+          />
+          <path
+            d="m3 7 2 2 4-4"
+          />
+          <path
+            d="M13 6h8"
+          />
+          <path
+            d="M13 12h8"
+          />
+          <path
+            d="M13 18h8"
+          />
+        </svg>
+         
+        Team-Intake Initiatives
+      </h2>
+      <p
+        class="text-xs text-gray-500 italic"
+      >
+        No intake/ folders found in this project's mapped folders yet.
+      </p>
+    </section>
+  </div>
+</div>
+`;
+
 exports[`screen snapshots > Project detail 1`] = `
 <div>
   <div

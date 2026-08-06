@@ -22,25 +22,18 @@ const dbModule = require("../db");
 
 describe("Smoke tests for coverage-on-demand (AC-2, AC-3, AC-5)", () => {
   describe("AC-2: Coverage Request Mechanism and Snapshot Structure", () => {
-    it("requestValueCoverage statement should exist in db module", () => {
-      // Smoke test: verify the DB statement exists
-      // This proves AC-2's core mechanism (flagging a project) exists at the DB layer
+    // SF-7 (§9.3 VACUOUS-GUARD): the two cases this replaced only asserted
+    // `stmts.requestValueCoverage`/`stmts.clearValueCoverageRequest` EXIST —
+    // true even if the SQL behind them were a no-op. This is a real
+    // round-trip: write via the actual statement, read back via the actual
+    // statement, assert the exact value survived. The real AC-2 mechanism
+    // (the full request -> drain -> HTTP/WS flow) is proven end-to-end in
+    // `project-plans-api.test.js` T3.
+    it("requestValueCoverage round-trip: written value is read back exactly", () => {
       const { stmts } = dbModule;
-
-      assert.ok(
-        stmts.requestValueCoverage,
-        "stmts.requestValueCoverage should exist (SQL INSERT…ON CONFLICT for coverage flag)"
-      );
-    });
-
-    it("clearValueCoverageRequest statement should exist in db module", () => {
-      // Smoke test: verify the TTL/cleanup statement exists
-      const { stmts } = dbModule;
-
-      assert.ok(
-        stmts.clearValueCoverageRequest,
-        "stmts.clearValueCoverageRequest should exist (SQL UPDATE to NULL the flag)"
-      );
+      stmts.requestValueCoverage.run("test-proj-123", "2026-08-05T14:32:00.000Z");
+      const row = stmts.getValueSweepState.get("test-proj-123");
+      assert.equal(row.coverage_requested_at, "2026-08-05T14:32:00.000Z");
     });
   });
 
@@ -90,29 +83,21 @@ describe("Smoke tests for coverage-on-demand (AC-2, AC-3, AC-5)", () => {
       assert.strictEqual(snapshot.complete, false, "complete should be false when pending > 0");
     });
 
-    it("coverageSnapshot should include demand field (closed registry)", () => {
-      // Smoke test: verify demand field exists and is one of the valid states
-      const { coverageSnapshot } = require("../lib/value-coverage");
+    // SF-7 (§9.3 VACUOUS-GUARD): the "demand field (closed registry)" case
+    // this replaced only asserted `snapshot.demand` was in a HAND-TYPED
+    // three-value list — a copy of the registry, not a read of it. The real,
+    // exact-exemption-closed guard against the actual `DEMAND_STATES`/
+    // `ETA_STATES` registries lives in `value-coverage.test.js`'s G1b block
+    // (and N2's exact-exemption assertion for the locale-key side of it).
 
-      const counts = { pool_size: 5, queued: 1, unavailable: 1, cache_hits: 3 };
-
-      const snapshot = coverageSnapshot(dbModule, {
-        projectId: "test-project",
-        counts,
-        requestedAt: null,
-        draining: false,
-        computedAt: new Date().toISOString(),
-      });
-
-      assert.ok(snapshot.demand !== undefined, "snapshot should have demand field");
-      assert.ok(
-        ["passive", "requested", "draining"].includes(snapshot.demand),
-        `demand must be one of ['passive','requested','draining'], got ${snapshot.demand}`
-      );
-    });
-
-    it("estimateEta should return object with state field supporting cold-start 'estimating'", () => {
-      // Smoke test: verify ETA cold-start state exists (no log rows → estimating)
+    // SF-7: replaced the CONDITIONAL form ("if (eta.state === 'estimating')
+    // ...") with the unconditional form the case's own title already
+    // promised — a conditional assertion inside an `if` that might never
+    // run is a silent pass, not a guard (§9.3). This fixture (pending > 0,
+    // zero qualifying log rows for a fresh project id) deterministically
+    // produces `estimating`, so asserting it unconditionally is honest, not
+    // fragile.
+    it("estimateEta ETA state when pending > 0 but zero qualifying log rows", () => {
       const { estimateEta } = require("../lib/value-coverage");
 
       const eta = estimateEta(dbModule, {
@@ -120,19 +105,8 @@ describe("Smoke tests for coverage-on-demand (AC-2, AC-3, AC-5)", () => {
         pending: 5,
       });
 
-      assert.ok(eta, "estimateEta should return an object");
-      assert.ok(eta.state !== undefined, "ETA should have a state field");
-      assert.ok(
-        ["measured", "estimating", "none"].includes(eta.state),
-        `eta.state must be one of ['measured','estimating','none'], got ${eta.state}`
-      );
-      // Cold start (no log rows for this project) should return estimating
-      if (eta.state === "estimating") {
-        assert.ok(
-          !eta.ms_remaining,
-          "estimating state should NOT have a fabricated ms_remaining number"
-        );
-      }
+      assert.equal(eta.state, "estimating");
+      assert.equal(eta.ms_remaining, undefined);
     });
   });
 
@@ -172,15 +146,11 @@ describe("Smoke tests for coverage-on-demand (AC-2, AC-3, AC-5)", () => {
       );
     });
 
-    it("listRecentValueGenerationDurations statement should exist for ETA computation", () => {
-      // Smoke test: verify the statement that feeds ETA calculation exists
-      // This is required for WS payload's eta field
-      const { stmts } = dbModule;
-
-      assert.ok(
-        stmts.listRecentValueGenerationDurations,
-        "stmts.listRecentValueGenerationDurations should exist (feeds ETA computation for WS)"
-      );
-    });
+    // SF-7 (§9.3 VACUOUS-GUARD): the "listRecentValueGenerationDurations
+    // statement should exist" case this replaced only asserted the
+    // statement object was truthy — true even if its SQL never returned a
+    // usable row. The real ETA-arithmetic proof (that this statement's
+    // output actually drives `estimateEta`'s `measured`/`estimating`
+    // branches) lives in `value-coverage.test.js`'s `estimateEta` block.
   });
 });

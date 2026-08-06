@@ -1253,4 +1253,270 @@ describe("PlanLedgerPanel: Value Pool Slice 2 coverage header (DEC-1, DEC-5, R4)
     // was never called again as a result of this WS message.
     expect(mockCoverageMock.mock.calls.length).toBe(coverageCallCountAfterMount);
   });
+
+  // Helper: reusable assertion for SF-9 durable cure and all future legs added to Promise.all.
+  // Takes no coverage-specific arguments; asserts core content presence only.
+  //
+  // B3 (build-reviewer): the previous version of this helper's third check
+  // (`screen.queryByRole("alert")`) could never match anything —
+  // `PlanLedgerPanel.tsx`'s error banner had no ARIA role, so the guarded
+  // branch below it was dead code re-asserting what was already asserted
+  // two lines up. The banner now carries `role="alert"`
+  // (`PlanLedgerPanel.tsx`, the `{error && (...)}` block), so this is a
+  // genuinely reachable assertion: for a caller invoking this helper in a
+  // pure-degradation scenario (a leg failed but was isolated, `error`
+  // itself was never set), there must be NO full-panel error banner
+  // present at all — a future leg that re-introduces the SF-9 bug (folding
+  // its failure back into the blocking `Promise.all`/`catch`) would set
+  // `error` and populate this banner, and this assertion would then
+  // genuinely fail.
+  function expectPanelCoreIntact(screen: typeof import("@testing-library/react").screen) {
+    // Plan title must be present
+    expect(screen.getByText("Phase 1: Intake")).toBeInTheDocument();
+    // Pool unit must be present
+    expect(document.querySelector('[data-test="pool-unit"]')).toBeInTheDocument();
+    // No full-panel error banner is present, replacing core content.
+    expect(screen.queryByRole("alert")).toBeNull();
+  }
+
+  it("SF-9: a failing GET /coverage degrades gracefully — plans and pool still render, not blanked behind an error banner", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    // Coverage fetch fails
+    mockCoverageMock.mockRejectedValue(new Error("coverage endpoint 500"));
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    // Wait for core content to render
+    await waitFor(() => {
+      expectPanelCoreIntact(screen);
+    });
+
+    // Coverage header is absent (honest degradation)
+    expect(document.querySelector('[data-test="coverage-header"]')).not.toBeInTheDocument();
+  });
+
+  it("SF-8: switching projectId does not leak the previous project's coverage snapshot under the new project's pool", async () => {
+    const plan1 = makePlan({ title: "Project A Plan" });
+    plan1.items = [];
+    const unit1 = makeUnit();
+
+    const plan2 = makePlan({ title: "Project B Plan" });
+    plan2.items = [];
+    const unit2 = makeUnit({ sourceRef: "diff-unit" });
+
+    // Mock coverage keyed by projectId
+    mockCoverageMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return Promise.resolve({
+          coverage: makeCoverage({
+            project_id: "proj-A",
+            described: 10,
+            pool_size: 10,
+            pending: 0,
+            complete: true,
+            computed_at: "2026-06-10T12:00:00.000Z", // NEWER (prevents merge on old)
+          }),
+        });
+      } else if (projectId === "proj-B") {
+        return Promise.resolve({
+          coverage: makeCoverage({
+            project_id: "proj-B",
+            described: 3,
+            pool_size: 20,
+            pending: 17,
+            complete: false,
+            computed_at: "2026-06-01T09:00:00.000Z", // OLDER
+          }),
+        });
+      }
+      return Promise.resolve({ coverage: makeCoverage() });
+    });
+
+    // Mock list/pool/health keyed by projectId
+    mockListMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return Promise.resolve({ plans: [plan1] });
+      } else if (projectId === "proj-B") {
+        return Promise.resolve({ plans: [plan2] });
+      }
+      return Promise.resolve({ plans: [] });
+    });
+
+    mockPoolMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return Promise.resolve({ units: [unit1], identityWarnings: [] });
+      } else if (projectId === "proj-B") {
+        return Promise.resolve({ units: [unit2], identityWarnings: [] });
+      }
+      return Promise.resolve({ units: [], identityWarnings: [] });
+    });
+
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    // Initial render with proj-A
+    const { rerender } = render(<PlanLedgerPanel projectId="proj-A" />);
+
+    // Wait for proj-A's header "10 of 10 described"
+    await waitFor(() => {
+      const header = document.querySelector('[data-test="coverage-header"]');
+      expect(header?.textContent).toContain("10 of 10 described");
+    });
+
+    // Verify A's pool_size is in the header
+    const headerA = document.querySelector('[data-test="coverage-header"]')!.textContent || "";
+    expect(headerA).toContain("10 of 10");
+
+    // Rerender same instance with proj-B (simulates ProjectDetail.tsx:1292's unkeyed render)
+    rerender(<PlanLedgerPanel projectId="proj-B" />);
+
+    // Wait for proj-B's header "3 of 20 described"
+    await waitFor(() => {
+      const header = document.querySelector('[data-test="coverage-header"]');
+      expect(header?.textContent).toContain("3 of 20 described");
+    });
+
+    // Verify B's header is present
+    const headerB = document.querySelector('[data-test="coverage-header"]')!.textContent || "";
+    expect(headerB).toContain("3 of 20");
+    // Verify A's old value is gone
+    expect(headerB).not.toContain("10 of 10");
+  });
+
+  it("SF-8 (in-flight): a response for a project no longer mounted must not land — guards against race when project A's fetch is still in flight when switching to project B", async () => {
+    const plan1 = makePlan({ title: "Project A Plan" });
+    plan1.items = [];
+    const unit1 = makeUnit();
+
+    const plan2 = makePlan({ title: "Project B Plan" });
+    plan2.items = [];
+    const unit2 = makeUnit({ sourceRef: "diff-unit" });
+
+    // Deferred promises for proj-A — we control when these resolve
+    let resolveACoverage: any;
+    const aCoveragePromise = new Promise((resolve) => {
+      resolveACoverage = resolve;
+    });
+
+    let resolveAList: any;
+    const aListPromise = new Promise((resolve) => {
+      resolveAList = resolve;
+    });
+
+    let resolveAPool: any;
+    const aPoolPromise = new Promise((resolve) => {
+      resolveAPool = resolve;
+    });
+
+    let resolveAHealth: any;
+    const aHealthPromise = new Promise((resolve) => {
+      resolveAHealth = resolve;
+    });
+
+    // Immediate promises for proj-B
+    const bCoveragePromise = Promise.resolve({
+      coverage: makeCoverage({
+        project_id: "proj-B",
+        described: 3,
+        pool_size: 20,
+        pending: 17,
+        complete: false,
+        computed_at: "2026-06-01T09:00:00.000Z", // OLDER than A's
+      }),
+    });
+
+    const bListPromise = Promise.resolve({ plans: [plan2] });
+    const bPoolPromise = Promise.resolve({ units: [unit2], identityWarnings: [] });
+    const bHealthPromise = Promise.resolve(makeHealth());
+
+    // Mock coverage keyed by projectId — A returns deferred, B returns immediate
+    mockCoverageMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return aCoveragePromise;
+      } else if (projectId === "proj-B") {
+        return bCoveragePromise;
+      }
+      return Promise.resolve({ coverage: makeCoverage() });
+    });
+
+    // Mock list/pool/health keyed by projectId — A returns deferred, B returns immediate
+    mockListMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return aListPromise;
+      } else if (projectId === "proj-B") {
+        return bListPromise;
+      }
+      return Promise.resolve({ plans: [] });
+    });
+
+    mockPoolMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return aPoolPromise;
+      } else if (projectId === "proj-B") {
+        return bPoolPromise;
+      }
+      return Promise.resolve({ units: [], identityWarnings: [] });
+    });
+
+    mockHealthMock.mockImplementation((projectId: string) => {
+      if (projectId === "proj-A") {
+        return aHealthPromise;
+      } else if (projectId === "proj-B") {
+        return bHealthPromise;
+      }
+      return Promise.resolve(makeHealth());
+    });
+
+    // Initial render with proj-A
+    const { rerender } = render(<PlanLedgerPanel projectId="proj-A" />);
+
+    // DO NOT WAIT for proj-A to resolve. Immediately switch to proj-B.
+    // This simulates a user clicking from project A's detail to project B's
+    // while A's /coverage (and other legs) are still in flight.
+    rerender(<PlanLedgerPanel projectId="proj-B" />);
+
+    // Now wait for proj-B's content to render (B's promises are immediate)
+    await waitFor(() => {
+      const header = document.querySelector('[data-test="coverage-header"]');
+      expect(header?.textContent).toContain("3 of 20 described");
+    });
+
+    // Verify B's header is present
+    const headerB = document.querySelector('[data-test="coverage-header"]')!.textContent || "";
+    expect(headerB).toContain("3 of 20");
+
+    // NOW resolve proj-A's deferred promises with NEWER computed_at timestamps
+    // (so the merge would prefer A if the guard were disabled).
+    resolveAList({ plans: [plan1] });
+    resolveAPool({ units: [unit1], identityWarnings: [] });
+    resolveAHealth(makeHealth());
+    resolveACoverage({
+      coverage: makeCoverage({
+        project_id: "proj-A",
+        described: 10,
+        pool_size: 10,
+        pending: 0,
+        complete: true,
+        computed_at: "2026-06-10T12:00:00.000Z", // NEWER — would win the merge if not guarded
+      }),
+    });
+
+    // Let microtasks drain
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Assert that B's honest, older data is still rendered — A's stale-but-newer
+    // response must have been dropped by the currentProjectIdRef guard.
+    const headerBAfter = document.querySelector('[data-test="coverage-header"]')!.textContent || "";
+    expect(headerBAfter).toContain("3 of 20");
+    expect(headerBAfter).not.toContain("10 of 10");
+
+    // Also verify the plan title is still "Project B Plan", not "Project A Plan"
+    expect(screen.getByText("Project B Plan")).toBeInTheDocument();
+    expect(screen.queryByText("Project A Plan")).not.toBeInTheDocument();
+  });
 });

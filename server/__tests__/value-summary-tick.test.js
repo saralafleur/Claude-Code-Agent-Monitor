@@ -942,7 +942,17 @@ describe("value-summary-tick: partition counting (L1–L4)", () => {
     let result = await runValueSummaryTickOnce(dbModule, {});
     let logRow = lastLogRow(projectId);
     assert.equal(logRow.generated, 0, "tick 1: zero generated");
-    assert.equal(result.broadcast.length, 0, "tick 1: zero broadcasts");
+    // SF-6 fix (2026-08-05, §9.8 OVERLOADED-ABSENCE): this is a project's
+    // first-ever observed sweep in this process AND it is already complete
+    // (all 10 units cached, zero generated/queued/unavailable) — this is
+    // exactly the shape `shouldBroadcastCoverage`'s fix now broadcasts on
+    // (previously this assertion pinned the defect: a terminal snapshot on
+    // a first observation was silently dropped). One broadcast is correct.
+    assert.equal(
+      result.broadcast.length,
+      1,
+      "tick 1: one broadcast — first observation is already complete"
+    );
 
     // Tick 2: mutate one unit's stage to make it stale
     const mutatedPool = allCachedPool.map((u, i) => (i === 0 ? { ...u, stage: "shipped" } : u));
@@ -1387,5 +1397,212 @@ describe("Broadcast widening (DEC-6): terminal iteration with generated===0 stil
     assert.equal(terminal.coverage.complete, true);
     assert.equal(terminal.coverage.demand, "passive");
     assert.ok(Array.isArray(terminal.unit_keys));
+  });
+
+  it("S3: a demand transition (without complete change) still broadcasts even when generated===0", async () => {
+    const projectId = await makeSweptProject("s3-demand-transition");
+    const pool = makeUnits(2);
+
+    // Set up: one unit cached upfront, one will remain unavailable
+    stmts.upsertValueUnitSummary.run(
+      pool[0].unitKey,
+      `P-${pool[0].value_ref}`,
+      `S-${pool[0].value_ref}`,
+      "haiku",
+      null,
+      pool[0].label,
+      null,
+      "initial",
+      null
+    );
+
+    // Use heuristic mode to keep the second unit unavailable
+    process.env.DASHBOARD_FOCUS_INFER_MODE = "heuristic";
+
+    __injectPoolAssemblerForTest(async () => {
+      return { units: pool, identityWarnings: [] };
+    });
+    __injectSpawnForTest(() => {
+      throw new Error("should not spawn");
+    });
+
+    // Iteration 1: one cached, one unavailable → generated===0, complete===false, demand===passive
+    // No broadcast because first observation with incomplete pool
+    let broadcasts = [];
+    let result = await runValueSummaryTickOnce(dbModule, {
+      broadcast: (type, payload) => broadcasts.push({ type, payload }),
+    });
+
+    const hasIncomplete = result.projects[0]?.queued > 0 || result.projects[0]?.unavailable > 0;
+    assert.ok(hasIncomplete, "pool is incomplete (has unavailable unit)");
+    assert.equal(broadcasts.length, 0, "first observation with incomplete pool does not broadcast");
+
+    // Now request coverage - changes demand from passive to requested
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    // Iteration 2: request coverage changes demand to requested, but pool still incomplete
+    // Should broadcast due to DEMAND TRANSITION ALONE (prior.demand!==demand),
+    // even though generated===0 and complete===false
+    broadcasts = [];
+    result = await runValueSummaryTickOnce(dbModule, {
+      broadcast: (type, payload) => broadcasts.push({ type, payload }),
+    });
+    delete process.env.DASHBOARD_FOCUS_INFER_MODE;
+
+    // If project wasn't in rotation, use drain to force evaluation
+    if (broadcasts.length === 0) {
+      broadcasts = [];
+      result = await runCoverageDrain(dbModule, projectId, {
+        broadcast: (type, payload) => broadcasts.push({ type, payload }),
+      });
+    }
+
+    // Main test: demand transition triggers broadcast even with generated===0
+    assert.equal(
+      broadcasts.length,
+      1,
+      "demand transition (passive→requested) triggers broadcast despite generated===0 and incomplete pool"
+    );
+    const payload = broadcasts[0].payload;
+    assert.equal(payload.coverage.demand, "requested", "demand transitioned to requested");
+    assert.equal(payload.coverage.complete, false, "complete unchanged (still false/incomplete)");
+  });
+});
+
+describe("SF-6: shouldBroadcastCoverage on a project's FIRST observation in a process lifetime", () => {
+  it("a project whose first-ever observed sweep is already complete (generated===0) still broadcasts the terminal snapshot", async () => {
+    __resetTickStateForTest();
+    const projectId = await makeSweptProject("sf6-case1-first-complete");
+
+    // Seed a pool where all units are already cached (so generated will be 0)
+    const pool = makeUnits(3);
+    __injectPoolAssemblerForTest(async () => {
+      // Pre-populate the cache for all units so first sweep reports generated===0
+      pool.forEach((u) => {
+        stmts.upsertValueUnitSummary.run(
+          u.unitKey,
+          `P-${u.value_ref}`,
+          `S-${u.value_ref}`,
+          "haiku",
+          null,
+          u.label,
+          null,
+          "initial",
+          null
+        );
+      });
+      return { units: pool, identityWarnings: [] };
+    });
+
+    // No spawn needed since all are cached
+    __injectSpawnForTest(() => {
+      throw new Error("should not spawn with fully cached pool");
+    });
+
+    const broadcasts = [];
+    const result = await runValueSummaryTickOnce(dbModule, {
+      broadcast: (type, payload) => broadcasts.push({ type, payload }),
+    });
+
+    // Verify precondition: first observation with generated===0 and pool is complete
+    assert.equal(result.swept, 1);
+    assert.equal(result.projects[0].generated, 0, "precondition: all units were cached");
+    assert.equal(result.projects[0].queued, 0, "precondition: pool is complete (no queued)");
+    assert.equal(
+      result.projects[0].unavailable,
+      0,
+      "precondition: pool is complete (no unavailable)"
+    );
+
+    // RED assertion (this is what fails before the fix): first complete observation must broadcast
+    assert.equal(
+      broadcasts.length,
+      1,
+      "a project's first observation that is already complete MUST broadcast once"
+    );
+
+    const payload = broadcasts[0].payload;
+    assert.equal(payload.coverage.complete, true);
+    assert.equal(payload.coverage.demand, "passive");
+  });
+
+  it("a project's first-ever observed sweep that is NOT complete does not spuriously broadcast (no false-positive from the fix)", async () => {
+    __resetTickStateForTest();
+    const projectId = await makeSweptProject("sf6-case2-first-incomplete");
+    process.env.DASHBOARD_FOCUS_INFER_MODE = "heuristic"; // forces "unavailable", never "queued"
+
+    // Seed a pool with units that will remain unavailable (no spawn)
+    const pool = makeUnits(2);
+    __injectPoolAssemblerForTest(async () => {
+      // One unit is already cached, one is not — so generated > 0 and pool will be incomplete
+      stmts.upsertValueUnitSummary.run(
+        pool[0].unitKey,
+        "P-cached",
+        "S-cached",
+        "haiku",
+        null,
+        pool[0].label,
+        null,
+        "initial",
+        null
+      );
+      // pool[1] is left unresolved (no cache entry) — it will be unavailable with heuristic mode
+      return { units: pool, identityWarnings: [] };
+    });
+
+    const broadcasts = [];
+    const result = await runValueSummaryTickOnce(dbModule, {
+      broadcast: (type, payload) => broadcasts.push({ type, payload }),
+    });
+    delete process.env.DASHBOARD_FOCUS_INFER_MODE;
+
+    // Verify: first observation that is NOT complete (has queued or unavailable units)
+    assert.equal(result.swept, 1);
+    const hasIncomplete = result.projects[0].queued > 0 || result.projects[0].unavailable > 0;
+    assert.ok(hasIncomplete, "precondition: pool is NOT complete (has unresolved units)");
+
+    // GREEN assertion (bounding the fix): first incomplete observation must NOT broadcast
+    // (otherwise every cold-start passive sweep becomes noisy)
+    assert.equal(
+      broadcasts.length,
+      0,
+      "a project's first observation that is NOT complete should not spuriously broadcast"
+    );
+  });
+
+  it("S2: an empty-pool project emits a terminal broadcast on its first observation (complete === true trivially)", async () => {
+    __resetTickStateForTest();
+    const projectId = await makeSweptProject("s2-empty-pool-first-observation");
+
+    // Inject an empty pool (zero units)
+    __injectPoolAssemblerForTest(async () => {
+      return { units: [], identityWarnings: [] };
+    });
+
+    // No spawn needed
+    __injectSpawnForTest(() => {
+      throw new Error("should not spawn with empty pool");
+    });
+
+    const broadcasts = [];
+    const result = await runValueSummaryTickOnce(dbModule, {
+      broadcast: (type, payload) => broadcasts.push({ type, payload }),
+    });
+
+    // Empty pool: pending === 0, so complete === true trivially
+    assert.equal(result.swept, 1);
+    assert.equal(result.projects[0].generated, 0, "empty pool generates 0 units");
+
+    // Actual behavior pinned: empty pool on first observation broadcasts
+    // because complete === true (pending === 0 is always true for zero-unit pool)
+    assert.equal(
+      broadcasts.length,
+      1,
+      "empty-pool project's first observation broadcasts once (complete === true trivially from pending === 0)"
+    );
+    const payload = broadcasts[0].payload;
+    assert.equal(payload.coverage.pool_size, 0, "payload shows empty pool");
+    assert.equal(payload.coverage.complete, true, "empty pool is trivially complete");
+    assert.equal(payload.coverage.demand, "passive");
   });
 });

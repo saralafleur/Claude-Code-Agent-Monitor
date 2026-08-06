@@ -872,4 +872,56 @@ describe("ProjectDetail page", () => {
     expect(screen.getByText("Agent Monitor")).toBeInTheDocument();
     expect(screen.getAllByText("repo/agent-monitor").length).toBeGreaterThan(0);
   });
+
+  // P2 hygiene (screens-snapshot blind spot): this behavioral anchor must
+  // land BEFORE any `.snap` baseline is generated for an in-progress
+  // coverage state, or the baseline would bless whatever currently renders
+  // (or doesn't) without proving it's the real coverage header.
+  it("renders the coverage header and 'prioritize now' control when the pool is in-progress", async () => {
+    projectPlansCoverageMock.mockResolvedValue({
+      coverage: {
+        project_id: "proj-1",
+        described: 4,
+        pool_size: 10,
+        pending: 6,
+        complete: false,
+        demand: "passive",
+        requested_at: null,
+        eta: { state: "estimating" },
+        computed_at: "2026-06-10T13:00:00.000Z",
+      },
+    });
+    // The header's own render gate is `coverage.pool_size > 0` — needs at
+    // least one real pool unit for the panel to have something to pair the
+    // header with.
+    projectPlansPoolMock.mockResolvedValue({
+      units: [
+        {
+          id: "trunk_commit:abc123",
+          source: "trunk_commit",
+          sourceRef: "abc123",
+          attribution: "mechanical",
+          discoveredAt: "2026-06-01T00:00:00.000Z",
+        },
+      ],
+      identityWarnings: [],
+    });
+
+    renderPage();
+    await screen.findByText("Agent Monitor");
+
+    // This panel marks its test hooks with `data-test` (not RTL's default
+    // `data-testid`), matching the F2 case above (`open-plans-pane`,
+    // `plan-ledger-health`) — query the same way.
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="coverage-header"]')).toBeTruthy();
+    });
+    const coverageHeader = document.querySelector('[data-test="coverage-header"]') as HTMLElement;
+    expect(coverageHeader).toHaveTextContent("4 of 10 described");
+    // Same i18n key/copy the PlanLedgerPanel.test.tsx cold-start case
+    // asserts — do not invent a second phrasing.
+    expect(coverageHeader).toHaveTextContent("Estimating");
+
+    expect(document.querySelector('[data-test="prioritize-now-button"]')).toBeInTheDocument();
+  });
 });

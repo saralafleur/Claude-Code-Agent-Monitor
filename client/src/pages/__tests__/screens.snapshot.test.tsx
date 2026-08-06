@@ -542,6 +542,18 @@ vi.mock("../../lib/api", async (importOriginal) => {
         }),
         claim: r({ claim: {} }),
         close: r({ plan: {} }),
+        // Value Pool Slice 2 (SF-9/coverage-on-demand QA-fix): any new API
+        // method a page calls must be added to this shared mock — without
+        // these, any page mounting PlanLedgerPanel throws straight into
+        // SF-9's per-leg `.catch`, which is dishonest coverage for a
+        // snapshot (looks green, never actually rendered the header).
+        coverage: r({ coverage: null }),
+        requestCoverage: r({ coverage: null }),
+        // Reachable only once a snapshot case supplies a non-empty pool
+        // (every other case here keeps `pool: { units: [] }`, so this was
+        // never previously exercised) — the "Project detail (coverage in
+        // progress)" case below does, so this must exist too.
+        altitudes: r({ altitudes: {}, states: {} }),
       },
       // Layer-7 Project Manager page (build task 6) - GET /api/portfolio/summary
       // and the layer-6 decision queue, both deterministically empty here.
@@ -571,6 +583,7 @@ vi.mock("../../lib/push", () => ({
 }));
 
 // Page components (imported after the mocks above; vi.mock is hoisted).
+import { api } from "../../lib/api";
 import { Dashboard } from "../Dashboard";
 import { Projects } from "../Projects";
 import { ProjectDetail } from "../ProjectDetail";
@@ -677,6 +690,65 @@ describe("screen snapshots", () => {
   // path (plan, repos, worktrees, suggested siblings, intake initiatives)
   // is covered by ProjectDetail.test.tsx instead.
   it("Project detail", async () => {
+    await snapshot(
+      <Routes>
+        <Route path="/projects/:id" element={<ProjectDetail />} />
+      </Routes>,
+      "/projects/proj-1"
+    );
+  });
+  // P2 hygiene (screens-snapshot blind spot): the case above deliberately
+  // takes the "not found" branch (no project in the shared empty fixture
+  // matches "proj-1"), so it never actually mounts PlanLedgerPanel — a live
+  // demonstration of SF-9's own shape (a page silently short-circuiting past
+  // the panel entirely). This ADDITIVE case supplies a real matching
+  // project + one pool unit + an in-progress coverage snapshot so the panel
+  // genuinely renders, proving the coverage header and "prioritize now"
+  // control actually appear in a full-page snapshot. Does not touch the
+  // "Project detail" case above or its baseline.
+  it("Project detail (coverage in progress)", async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce({
+      projects: [
+        {
+          id: "proj-1",
+          name: "Agent Monitor",
+          paths: [{ id: 1, cwd: "/repo/agent-monitor" }],
+          session_count: 1,
+          active_count: 1,
+          last_activity: "2026-06-10T12:00:00.000Z",
+          created_at: "2026-06-01T00:00:00.000Z",
+          updated_at: "2026-06-10T12:00:00.000Z",
+          pinned: false,
+          siblingScanEnabled: false,
+        },
+      ],
+      unassigned: { cwds: [], session_count: 0, active_count: 0, last_activity: null },
+    });
+    vi.mocked(api.projectPlans.pool).mockResolvedValueOnce({
+      units: [
+        {
+          id: "trunk_commit:abc123",
+          source: "trunk_commit",
+          sourceRef: "abc123",
+          attribution: "mechanical",
+          discoveredAt: "2026-06-01T00:00:00.000Z",
+        },
+      ],
+      identityWarnings: [],
+    });
+    vi.mocked(api.projectPlans.coverage).mockResolvedValueOnce({
+      coverage: {
+        project_id: "proj-1",
+        described: 4,
+        pool_size: 10,
+        pending: 6,
+        complete: false,
+        demand: "passive",
+        requested_at: null,
+        eta: { state: "estimating" },
+        computed_at: "2026-06-10T13:00:00.000Z",
+      },
+    });
     await snapshot(
       <Routes>
         <Route path="/projects/:id" element={<ProjectDetail />} />

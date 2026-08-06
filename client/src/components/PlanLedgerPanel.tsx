@@ -688,22 +688,59 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
       mountedRef.current = false;
     };
   }, []);
+  // B1 (build-reviewer, SF-8 residual): tracks the CURRENTLY MOUNTED
+  // `projectId`, assigned directly in the render body (not via `useEffect`,
+  // which would still lag one commit behind an async response that resolves
+  // mid-render) so it is always the freshest value by the time any
+  // in-flight promise below settles. A `useCallback`'s own closed-over
+  // `projectId` is pinned to whichever project was live when that
+  // particular call was KICKED OFF — comparing against THIS ref lets every
+  // async continuation detect "the panel has since moved on to a different
+  // project" and drop its response outright instead of writing stale data
+  // into the new project's state. The `setCoverage(null)` reset effect
+  // below only cures the case where the previous project's response had
+  // ALREADY LANDED before the switch; this ref-guard is what closes the
+  // in-flight case the reset alone cannot see.
+  const currentProjectIdRef = useRef(projectId);
+  currentProjectIdRef.current = projectId;
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    const requestedProjectId = projectId;
     setError(null);
     try {
+      // SF-9 (§9.1-adjacent no-veto invariant): `coverage` is a progressive
+      // enhancement — its own leg is isolated with a local `.catch` so a
+      // rejection there can never veto `list`/`pool`/`health`, which are
+      // this panel's CORE content. Without this, a single failing
+      // `GET /coverage` blanks the whole panel behind an error banner
+      // instead of degrading (no coverage header, everything else intact).
+      // S1: the catch is not a fully silent swallow — it warns, matching
+      // this file's own `fetchAltitudesFor`/T-E-trap convention of never
+      // letting a real failure look identical to legitimate absence in dev.
       const [plansRes, poolRes, healthRes, coverageRes] = await Promise.all([
         api.projectPlans.list(projectId),
         api.projectPlans.pool(projectId),
         api.projectPlans.health(projectId),
-        api.projectPlans.coverage(projectId),
+        api.projectPlans.coverage(projectId).catch((err) => {
+          console.warn(
+            `GET /coverage failed for project ${projectId} — coverage header degraded to absent:`,
+            err
+          );
+          return { coverage: null };
+        }),
       ]);
+      // B1: this project may no longer be the one mounted by the time the
+      // above resolves — drop the ENTIRE response (all four legs, not just
+      // `coverage`) rather than let a stale project's data land under the
+      // now-current project's render.
+      if (requestedProjectId !== currentProjectIdRef.current) return;
       setPlans(plansRes.plans);
       setUnits(poolRes.units);
       setHealth(healthRes);
       setCoverage((prev) => mergeCoverage(prev, coverageRes.coverage));
     } catch (err) {
+      if (requestedProjectId !== currentProjectIdRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [projectId]);
@@ -711,6 +748,31 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // SF-8 (MONOTONIC-GUARD-ACROSS-ENTITY-SWITCH): `coverage` is entity-scoped
+  // state — it belongs to whichever `projectId` this panel is currently
+  // mounted for. `ProjectDetail.tsx` renders this panel unkeyed, so without
+  // an explicit reset here, `mergeCoverage`'s monotonic `computed_at`
+  // comparison (which has no notion of "this is a different project now")
+  // can permanently reject the new project's honest, older snapshot in
+  // favor of the previous project's newer-but-now-stale one. Reset
+  // structurally on every `projectId` change rather than patching the
+  // comparison — a comparison tweak only fixes `coverage`; this reset
+  // pattern is the one to repeat for the next entity-scoped field this
+  // component gains.
+  //
+  // B1 (build-reviewer): this reset alone only covers the case where the
+  // PREVIOUS project's response had already landed and been rendered
+  // before the switch. It does nothing for a previous project's request
+  // that is still IN FLIGHT across the switch — that case is closed by the
+  // `currentProjectIdRef` guard in `load()`/`handlePrioritizeNow` above,
+  // which drops a stale response outright rather than letting it merge in
+  // after this reset has already run. The two are complementary, not
+  // redundant: this effect clears what already landed; the ref guard stops
+  // what has not landed yet from landing at all.
+  useEffect(() => {
+    setCoverage(null);
+  }, [projectId]);
 
   // Shared altitude-fetch body — called both for genuinely-new pool units
   // (the effect below) and for the eventBus handler's WATCH-S2-B refetch of
@@ -827,14 +889,23 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
 
   const handlePrioritizeNow = useCallback(async () => {
     if (!projectId) return;
+    const requestedProjectId = projectId;
     setRequestingCoverage(true);
     try {
       const res = await api.projectPlans.requestCoverage(projectId);
+      // B1: same in-flight race as `load()` — if the panel has since moved
+      // on to a different project, this response belongs to a project that
+      // is no longer mounted and must not write into the new one's state.
+      if (requestedProjectId !== currentProjectIdRef.current) return;
       setCoverage((prev) => mergeCoverage(prev, res.coverage));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (requestedProjectId === currentProjectIdRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      if (mountedRef.current) setRequestingCoverage(false);
+      if (mountedRef.current && requestedProjectId === currentProjectIdRef.current) {
+        setRequestingCoverage(false);
+      }
     }
   }, [projectId]);
 
@@ -918,7 +989,16 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
       <ValuePoolInfoModal open={infoOpen} onClose={() => setInfoOpen(false)} t={t} />
 
       {error && (
-        <div className="mx-4 mt-3 badge bg-red-500/10 border-red-500/30 text-red-400">{error}</div>
+        // B3 (build-reviewer): `role="alert"` makes this banner genuinely
+        // queryable (`screen.queryByRole("alert")`), matching the same
+        // convention already used for error text elsewhere in this app
+        // (`UpdateNotifier.tsx`) — without it, no test can distinguish "no
+        // error banner present" from "an error banner present with no
+        // detectable role," which is exactly the dead-assertion gap that
+        // let `expectPanelCoreIntact`'s error-banner check be unreachable.
+        <div role="alert" className="mx-4 mt-3 badge bg-red-500/10 border-red-500/30 text-red-400">
+          {error}
+        </div>
       )}
 
       {health && <HealthStrip health={health} t={t} />}

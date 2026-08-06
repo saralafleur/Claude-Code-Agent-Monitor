@@ -112,10 +112,14 @@ let drainingProjectId = null;
 // last actually broadcast, so {@link shouldBroadcastCoverage} can detect a
 // TRANSITION (not just "generated > 0"). Deliberately in-memory only (never
 // persisted) — a process restart simply treats the next observation for
-// every project as "no prior broadcast," which is always safe: it can only
-// ever SUPPRESS one redundant early broadcast, never fabricate a false one,
-// since `generated > 0` alone still forces a broadcast regardless of this
-// map's state.
+// every project as "no prior broadcast." (SF-6 fix, §9.8 OVERLOADED-ABSENCE:
+// this used to be described as a state that "can only ever SUPPRESS one
+// redundant early broadcast, never fabricate a false one" — that claim was
+// false whenever the first-ever observation was already `complete` with
+// `generated === 0`, which silently dropped the terminal broadcast entirely.
+// The real rule: a first observation (no prior in this map) broadcasts iff
+// the pool is already `complete`; otherwise `generated > 0` alone governs
+// it, identical to the pre-Slice-2 behavior.)
 let lastBroadcastState = new Map();
 
 function numEnv(name, fallback) {
@@ -177,10 +181,16 @@ function sweepExpiredCoverageRequests(dbModule, nowIso) {
  * otherwise a terminal iteration that reaches 100% with zero units generated
  * THIS iteration (every remaining miss resolved on a PRIOR iteration, this
  * one's only job was re-deriving `pending` down to 0) would silently never
- * tell an open tab coverage finished. A project with no prior recorded
- * broadcast is treated as "unchanged" (never fabricates a transition out of
- * nothing) — `generated > 0` alone still governs that first observation,
- * identical to the pre-Slice-2 behavior.
+ * tell an open tab coverage finished. (SF-6 fix, §9.8 OVERLOADED-ABSENCE: a
+ * project with no prior recorded broadcast used to be treated unconditionally
+ * as "unchanged," which collapsed two genuinely distinguishable outcomes —
+ * "never observed" and "first observation, already complete" — into the same
+ * silent absence, and dropped the terminal broadcast whenever a pool was
+ * already fully described before its first-ever sweep in this process
+ * (`generated === 0`). The real rule: a first observation broadcasts iff the
+ * pool is already `complete`; otherwise `generated > 0` alone governs it,
+ * identical to the pre-Slice-2 behavior — so a first observation that is
+ * NOT yet complete still does not spuriously broadcast.)
  * @param {string} projectId
  * @param {number} generated
  * @param {"passive"|"requested"|"draining"} demand
@@ -189,7 +199,9 @@ function sweepExpiredCoverageRequests(dbModule, nowIso) {
  */
 function shouldBroadcastCoverage(projectId, generated, demand, complete) {
   const prior = lastBroadcastState.get(projectId);
-  const transitioned = !!prior && (prior.demand !== demand || prior.complete !== complete);
+  const transitioned = prior
+    ? prior.demand !== demand || prior.complete !== complete
+    : complete === true;
   lastBroadcastState.set(projectId, { demand, complete });
   return generated > 0 || transitioned;
 }
