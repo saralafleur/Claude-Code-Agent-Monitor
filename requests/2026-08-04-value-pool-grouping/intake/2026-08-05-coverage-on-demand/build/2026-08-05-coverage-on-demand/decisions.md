@@ -59,10 +59,14 @@ locale copy review) so a later `team-status` pass recommends the follow-up
 
 ---
 
-## DEC-2 — Task 12 (calibration + pinned per-stage defaults, AC-6) deferred, not done
+## DEC-2 — Task 12 (calibration + pinned per-stage defaults, AC-6) deferred, not done — **RESOLVED 2026-08-06**
 - **Item / area:** MANDATORY build-task-list Task 12 / technical-plan §3.7 / AC-6 / intake DEC-10
-- **Status:** DECIDED-AUTO (deferred — needs Sara's confirmation if it must close before Slice 3)
-- **Raised:** 2026-08-05 (verifier §8, reviewer SF-11) · **Decided:** 2026-08-05 · **Decided by:** `build-lead` under auto-pilot
+- **Status:** RESOLVED — closed 2026-08-06 per intake `decisions.md` DEC-10's resolution. Sara chose sonnet for
+  both the `unit` and `grouping` stages after reviewing a real 40-unit
+  calibration batch (sonnet showed cross-unit relational reasoning haiku
+  didn't). Pinned via env vars in `.env`/`.env.example`, no product code
+  changed. The Slice-3 gate this row named is now open.
+- **Raised:** 2026-08-05 (verifier §8, reviewer SF-11) · **Decided:** 2026-08-05, deferred · **Resolved:** 2026-08-06 · **Decided by:** `build-lead` under auto-pilot, then Sara directly
 - **Recurring-issue link:** `PROJECT-CONTEXT.md` §9.4 — *"an unfixed item with no disposition row is how this project loses them."* This row exists so it is not lost.
 
 ### The question

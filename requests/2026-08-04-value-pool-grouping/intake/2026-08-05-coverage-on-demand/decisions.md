@@ -253,7 +253,7 @@ miss to `queued`, never spawn). Nothing was generated, and logging probes would
 pollute the ETA's own input. Asserted by test: a probe run leaves the log
 row-count unchanged.
 
-### DEC-10 — Calibration runs before the per-stage defaults are pinned (open point G / acceptance signal 6) — DECIDED-AUTO
+### DEC-10 — Calibration runs before the per-stage defaults are pinned (open point G / acceptance signal 6) — DECIDED-AUTO, **RESOLVED 2026-08-06**
 
 One real 40-unit batch through `buildPrompt` + `runClaudePromptJson` twice
 (`haiku`, `sonnet`) from a throwaway scratchpad script — **not committed
@@ -261,6 +261,21 @@ product code**. Durable outputs: the side-by-side artifact attached to this row
 at build time, plus the chosen per-stage defaults in DEC-7. Cost is explicitly
 not the driver (~$0.001/unit); quality-per-tier is. Sara reversible by env var
 alone, no code change.
+
+**Ran 2026-08-06, real batch, this repo's own live Value Pool (102 real units,
+40 used, project id `c9ff0e07-7184-4523-8b70-d85a2cddaa75`).** Both models
+returned valid, fully-parsed JSON for all 40 units (sonnet 94.5s first try;
+haiku failed at a 120s timeout on its first attempt, succeeded in 102.8s on a
+retry — a reliability data point in its own right). Sonnet showed real
+relational reasoning the prompt explicitly asks for and haiku did not:
+correctly cross-referencing paired units ("paired with its merge (unit 4)" /
+"(unit 3)") and using the "stands alone" framing for unrelated units; haiku
+produced topically correct but relationally flat output with no cross-unit
+awareness anywhere in the 40-unit sample. Sara's call: **sonnet for both
+stages.** Pinned via `DASHBOARD_VALUE_SUMMARY_UNIT_MODEL=sonnet` and
+`DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL=sonnet` in `.env` (documented in
+`.env.example`) — no product code changed, per the reversibility promise
+above. **AC-6 is now met.**
 
 ### DEC-11 — `PROJECT-CONTEXT.md` planning note is applied on the effort branch, not now (PM-5) — DECIDED-AUTO
 

@@ -5,6 +5,14 @@
 > The document the user reads. This build **stopped at green** — it did not
 > commit, push, or open a PR.
 
+> **RESOLVED 2026-08-06:** every mention of "AC-6 unmet" / "Task 12 never ran"
+> below was true as of this report's writing (2026-08-05) and is a point-in-time
+> record, kept as-is rather than rewritten. The calibration ran for real on
+> 2026-08-06 against this repo's own live Value Pool; Sara reviewed the
+> side-by-side output and pinned sonnet for both stages. See intake
+> `decisions.md` DEC-10 and this folder's own `decisions.md` DEC-2 for the
+> resolution. **AC-6 is now met; the Slice-3 gate is open.**
+
 ---
 
 ## ⚠️ FAST — QA debt
