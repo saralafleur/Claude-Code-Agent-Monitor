@@ -1949,6 +1949,78 @@ db.exec(`
     ON value_summary_generation_log(project_id, created_at);
 `);
 
+// Value Pool Slice 3 (auto-group proposal engine) — three brand-new tables,
+// plain CREATE TABLE IF NOT EXISTS (§9.6: no ALTER, no REBUILD_CASES/
+// UPGRADE_CASES entry — there is no column being added to an existing
+// table). See technical-plan.md §4 for the full design rationale.
+db.exec(`
+  -- One row per grouping attempt. Direct structural analogue of
+  -- value_summary_sweep_state: it exists so that "no groups" can be told
+  -- apart from "never tried" (§9.8 live instance #1). 'not_attempted' is the
+  -- ABSENCE of a row here and is never written (server/lib/value-groups.js's
+  -- GROUP_RUN_STATES / GROUP_RUN_ROW_STATES registries).
+  CREATE TABLE IF NOT EXISTS value_group_runs (
+    id TEXT PRIMARY KEY,                     -- \`\${projectId}::\${startedAt}::\${rand}\`
+    project_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN
+      ('in_progress','completed','completed_zero_groups','failed')),
+    input_digest TEXT,                       -- PM-4 cache key; NULL only while in_progress
+    model TEXT,                              -- summaryModel("grouping")'s resolved value
+    batch_count INTEGER NOT NULL DEFAULT 0,
+    oversized_batch_count INTEGER NOT NULL DEFAULT 0,  -- a single cluster over budget is
+                                                       -- NEVER split; it becomes its own
+                                                       -- batch and is disclosed here
+    group_count INTEGER NOT NULL DEFAULT 0,
+    ungrouped_no_signal INTEGER NOT NULL DEFAULT 0,        -- UNGROUPED_REASONS, AC-3
+    ungrouped_not_selected INTEGER NOT NULL DEFAULT 0,
+    error_reason TEXT,                       -- non-NULL iff state='failed'
+    started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    completed_at TEXT                        -- NULL iff state='in_progress'
+  );
+  CREATE INDEX IF NOT EXISTS idx_value_group_runs_project
+    ON value_group_runs(project_id, started_at, id);   -- §9.2: time key, id tiebreak
+
+  -- One row per proposed group. NOTE: no project_id column — it is reachable
+  -- through run_id and copying it would be §9.1's write-sequence form.
+  CREATE TABLE IF NOT EXISTS value_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES value_group_runs(id),
+    name TEXT,                               -- NULL unless refinement_state='refined'
+    summary_sentence TEXT,                   -- NULL unless refinement_state='refined'
+    rationale TEXT,                          -- NULL unless refinement_state='refined'
+    pregroup_signal TEXT NOT NULL CHECK(pregroup_signal IN
+      ('slug','time','surface','mixed')),
+    refinement_state TEXT NOT NULL DEFAULT 'pending' CHECK(refinement_state IN
+      ('pending','refined','zero_members','failed')),
+    review_status TEXT NOT NULL DEFAULT 'proposed' CHECK(review_status IN
+      ('proposed','approved','dismissed','claimed')),
+    -- 'claimed' is RESERVED for Slice 4 (a CHECK is rebuild-to-widen, WATCH-4)
+    -- and is UNREACHABLE in Slice 3 — proven by a structural scan, not by prose.
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    refined_at TEXT,
+    reviewed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_value_groups_run ON value_groups(run_id, created_at, id);
+
+  -- Membership is ROWS, mirroring value_claims (there is no precedent in this
+  -- schema for a queryable set stored as a JSON array). Deliberately carries
+  -- NO availability column: that is derived at read time (§3.4,
+  -- resolveMemberAvailability) — never persisted, staleness made structurally
+  -- impossible rather than guarded.
+  CREATE TABLE IF NOT EXISTS value_group_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES value_groups(id),
+    value_source TEXT NOT NULL CHECK(value_source IN
+      ('trunk_commit','merge_commit','intake_initiative','detour','focus_segment')),
+    value_ref TEXT NOT NULL,
+    source_cwd TEXT NOT NULL DEFAULT ''      -- '' not NULL so the UNIQUE index bites
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_value_group_members_unit_group
+    ON value_group_members(group_id, value_source, value_ref, source_cwd);
+  CREATE INDEX IF NOT EXISTS idx_value_group_members_group
+    ON value_group_members(group_id);
+`);
+
 // Migrate webhook_targets for first-class providers. Earlier installs created
 // the table with a 4-value `type` CHECK (slack/discord/teams/generic) and no
 // `config` column. SQLite can't drop a CHECK in place, so rebuild the table
@@ -3521,6 +3593,73 @@ const stmts = {
     `INSERT INTO value_summary_generation_log
        (project_id, source, outcome, pool_size, cache_hits, generated, queued, unavailable, model, duration_ms, stale_regenerated)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+
+  // Value Pool Slice 3 — value_group_runs. Sole writer: runGroupingPass /
+  // reconcileInterruptedGroupRuns (server/lib/value-groups.js).
+  insertValueGroupRun: db.prepare(
+    `INSERT INTO value_group_runs (id, project_id, state, model, started_at)
+     VALUES (?, ?, 'in_progress', ?, ?)`
+  ),
+  updateValueGroupRunState: db.prepare(
+    `UPDATE value_group_runs SET
+       state = ?,
+       input_digest = COALESCE(?, input_digest),
+       batch_count = ?,
+       oversized_batch_count = ?,
+       group_count = ?,
+       ungrouped_no_signal = ?,
+       ungrouped_not_selected = ?,
+       error_reason = ?,
+       completed_at = ?
+     WHERE id = ?`
+  ),
+  getLatestValueGroupRun: db.prepare(
+    `SELECT * FROM value_group_runs WHERE project_id = ?
+     ORDER BY started_at DESC, id DESC LIMIT 1`
+  ),
+  getValueGroupRun: db.prepare(`SELECT * FROM value_group_runs WHERE id = ?`),
+  listValueGroupRunsForProject: db.prepare(
+    `SELECT * FROM value_group_runs WHERE project_id = ? ORDER BY started_at ASC, id ASC`
+  ),
+  // reconcileInterruptedGroupRuns's own read (boot hook, §5.6) — every
+  // surviving in_progress row across every project, flipped to failed.
+  markInterruptedValueGroupRuns: db.prepare(
+    `UPDATE value_group_runs
+     SET state = 'failed', error_reason = 'interrupted_restart', completed_at = ?
+     WHERE state = 'in_progress'`
+  ),
+
+  // value_groups — sole writer: runGroupingPass (group rows) and
+  // setValueGroupReviewStatus (review_status/reviewed_at only, the approve/
+  // dismiss routes).
+  insertValueGroup: db.prepare(
+    `INSERT INTO value_groups
+       (run_id, name, summary_sentence, rationale, pregroup_signal, refinement_state, refined_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ),
+  listValueGroupsForRun: db.prepare(
+    `SELECT * FROM value_groups WHERE run_id = ? ORDER BY created_at ASC, id ASC`
+  ),
+  getValueGroup: db.prepare(`SELECT * FROM value_groups WHERE id = ?`),
+  // Pure bookkeeping — the ONLY writer of review_status/reviewed_at (approve/
+  // dismiss route handlers, DEC-S3-9: two named routes, never a body-supplied
+  // status). Never touches name/summary_sentence/rationale/refinement_state.
+  setValueGroupReviewStatus: db.prepare(
+    `UPDATE value_groups SET review_status = ?, reviewed_at = ? WHERE id = ?`
+  ),
+
+  // value_group_members — sole writer: runGroupingPass.
+  insertValueGroupMember: db.prepare(
+    `INSERT INTO value_group_members (group_id, value_source, value_ref, source_cwd)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(group_id, value_source, value_ref, source_cwd) DO NOTHING`
+  ),
+  listValueGroupMembersForRun: db.prepare(
+    `SELECT m.* FROM value_group_members m
+     JOIN value_groups g ON g.id = m.group_id
+     WHERE g.run_id = ?
+     ORDER BY m.id ASC`
   ),
 };
 

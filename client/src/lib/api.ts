@@ -421,6 +421,8 @@ import type {
   CoverageSnapshot,
   MarkAltitudeSeenRequest,
   MarkAltitudeSeenResponse,
+  ValueGroupsResponse,
+  ValueGroupsProposeResponse,
   DecisionQueueItem,
   DecisionQueueKind,
   DetourDisposition,
@@ -2815,6 +2817,60 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ project_id: projectId }),
       }),
+    /**
+     * GET /api/project-plans/:projectId/groups — Value Pool Slice 3: the
+     * current grouping run (or `state: "not_attempted"` when none exists
+     * yet), every proposed group, the gate, and the coverage snapshot —
+     * verbatim. Render every field as-is; member availability and its
+     * counts are computed server-side at READ time and must never be
+     * re-derived client-side (§9.1).
+     * @param projectId The project id.
+     * @returns {@link ValueGroupsResponse}.
+     */
+    groups: (projectId: string) =>
+      request<ValueGroupsResponse>(`/project-plans/${encodeURIComponent(projectId)}/groups`),
+    /**
+     * POST /api/project-plans/:projectId/groups/propose {} — the auto-group
+     * action. Server-side gated on `coverage.complete` (409
+     * `blocked_coverage_incomplete` when not) — this call never bypasses
+     * that gate; the client's own disabled-button affordance mirrors it,
+     * never replaces it.
+     * @param projectId The project id.
+     * @returns {@link ValueGroupsProposeResponse}.
+     */
+    proposeGroups: (projectId: string) =>
+      request<ValueGroupsProposeResponse>(
+        `/project-plans/${encodeURIComponent(projectId)}/groups/propose`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        }
+      ),
+    /**
+     * POST /api/project-plans/:projectId/groups/:groupId/approve — pure
+     * bookkeeping (review_status + reviewed_at only). Never claims a unit,
+     * never creates/edits a plan item (AC-5, PO §7/§8 fence).
+     * @param projectId The project id.
+     * @param groupId The value_groups.id to approve.
+     * @returns `{ review_status, reviewed_at }`.
+     */
+    approveGroup: (projectId: string, groupId: number) =>
+      request<{ review_status: "approved"; reviewed_at: string }>(
+        `/project-plans/${encodeURIComponent(projectId)}/groups/${groupId}/approve`,
+        { method: "POST", body: JSON.stringify({}) }
+      ),
+    /**
+     * POST /api/project-plans/:projectId/groups/:groupId/dismiss — the
+     * approve sibling; same pure-bookkeeping contract.
+     * @param projectId The project id.
+     * @param groupId The value_groups.id to dismiss.
+     * @returns `{ review_status, reviewed_at }`.
+     */
+    dismissGroup: (projectId: string, groupId: number) =>
+      request<{ review_status: "dismissed"; reviewed_at: string }>(
+        `/project-plans/${encodeURIComponent(projectId)}/groups/${groupId}/dismiss`,
+        { method: "POST", body: JSON.stringify({}) }
+      ),
     /**
      * GET /api/project-plans/health?project_id= — `computePlanHealth`'s
      * exact shape, verbatim. Render every field as-is; never re-derive

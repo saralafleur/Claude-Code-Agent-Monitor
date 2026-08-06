@@ -279,7 +279,7 @@ describe("ledger metrics parity (C2 / T6)", () => {
     );
   });
 
-  it("C2.4: consumer registry marker — CONSUMERS names exactly the route, the CLI, and the tick (DEC-16)", () => {
+  it("C2.4: consumer registry marker — CONSUMERS names exactly the route, the CLI, the tick, and the Slice-3 grouping engine (DEC-16, BO-3/BO-4)", () => {
     assert.ok(Array.isArray(valueLedger.CONSUMERS));
     assert.deepEqual(
       valueLedger.CONSUMERS.slice().sort(),
@@ -287,9 +287,14 @@ describe("ledger metrics parity (C2 / T6)", () => {
         "bin/ccam.js (cmdLedger)",
         "server/routes/project-plans.js",
         "server/lib/value-summary-tick.js",
+        "server/lib/value-groups.js (derived-values reader: pre-grouping + member availability)",
       ].sort(),
-      "a fourth consumer (MCP tools, an AGENT-PLAN.md export, a reconcile page — DEC-16) " +
-        "must be a deliberate, reviewed addition to this list, never silent"
+      "a fifth consumer (MCP tools, an AGENT-PLAN.md export, a reconcile page — DEC-16) " +
+        "must be a deliberate, reviewed addition to this list, never silent — the 4th entry " +
+        "(value-groups.js, Value Pool Slice 3) is exactly such an addition, qualifying under " +
+        "the widened growth rule (BO-3, value-ledger.js CONSUMERS' own declaring comment): it " +
+        "reads this module's derived `unitKey` without re-implementing it, and never calls " +
+        "assembleValuePool directly (O-8)"
     );
   });
 });

@@ -64,13 +64,18 @@ const MUTABLE_VALUE_SOURCES = ["intake_initiative", "detour", "merge_commit"];
 // DEC-16 tripwire: every known reader of this module's derived values, so a
 // new one (MCP tools, an AGENT-PLAN.md export, a dedicated reconcile page)
 // is a reviewed, deliberate addition — never a silent third consumer
-// re-deriving these numbers on its own. Grow this list ONLY when the new
+// re-deriving these numbers on its own. Grow this list when the new
 // consumer reads computePlanHealth/assembleValuePool/summarizeDeliveredValue
-// directly, never re-implements a piece of them.
+// directly, OR reads this module's derived values — e.g. `unitKey` — without
+// re-implementing them (BO-3, Value Pool Slice 3: widened so a derived-value
+// reader that deliberately never calls `assembleValuePool` itself — see
+// value-groups.js's O-8 posture — still qualifies for registration here
+// rather than being left an under-registered gap, §9.7).
 const CONSUMERS = [
   "server/routes/project-plans.js",
   "bin/ccam.js (cmdLedger)",
   "server/lib/value-summary-tick.js",
+  "server/lib/value-groups.js (derived-values reader: pre-grouping + member availability)",
 ];
 
 // DEC-6: bounded default lookback (trunk-drift's own env-tunable window) plus

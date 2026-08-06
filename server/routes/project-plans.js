@@ -27,8 +27,15 @@ const { broadcast } = require("../websocket");
 const planLifecycle = require("../lib/plan-lifecycle");
 const valueLedger = require("../lib/value-ledger");
 const { enrichPoolAltitudes } = require("../lib/value-summary");
-const { coverageSnapshot } = require("../lib/value-coverage");
-const { runCoverageDrain, isDrainingProject } = require("../lib/value-summary-tick");
+const { runCoverageDrain } = require("../lib/value-summary-tick");
+const { buildProbeCoverage } = require("../lib/value-coverage-probe");
+const {
+  mechanicalPreGroup,
+  groupingFacts,
+  computeGroupingDigest,
+  runGroupingPass,
+  resolveMemberAvailability,
+} = require("../lib/value-groups");
 const cwdIdentity = require("../lib/cwd-identity");
 
 const { VALUE_SOURCES, ATTRIBUTION_TIERS } = valueLedger;
@@ -315,8 +322,6 @@ router.post("/coverage-request", async (req, res) => {
   // (build-reviewer SF-3).
   runCoverageDrain(dbModule, projectId, { broadcast }).catch(() => {});
 
-  const { units } = await valueLedger.assembleValuePool(dbModule, { id: projectId });
-  const { counts } = await enrichPoolAltitudes(dbModule, units, { probe: true });
   // `requestValueCoverage` above is an unconditional upsert
   // (`coverage_requested_at = excluded.coverage_requested_at`), so `nowIso`
   // IS the value now on the row — re-reading it back via
@@ -324,14 +329,10 @@ router.post("/coverage-request", async (req, res) => {
   // (which can clear the flag on its own first iteration before this read
   // runs) and could answer `demand: "passive"` for a request this same
   // handler just accepted (build-reviewer SF-2). Pass the value this
-  // handler itself just wrote instead.
-  const snapshot = coverageSnapshot(dbModule, {
-    projectId,
-    counts,
-    requestedAt: nowIso,
-    draining: isDrainingProject(projectId),
-    computedAt: new Date().toISOString(),
-  });
+  // handler itself just wrote instead — SF-4: composed via the single
+  // `buildProbeCoverage` extraction (server/lib/value-coverage-probe.js),
+  // never a hand-copy of assembleValuePool + enrichPoolAltitudes here.
+  const snapshot = await buildProbeCoverage(dbModule, projectId, { requestedAt: nowIso });
   res.status(202).json({ coverage: snapshot });
 });
 
@@ -348,22 +349,182 @@ router.get("/coverage", async (req, res) => {
       .status(400)
       .json({ error: { code: "INVALID_INPUT", message: "project_id is required" } });
   }
-  const { units } = await valueLedger.assembleValuePool(dbModule, { id: projectId });
-  const { counts } = await enrichPoolAltitudes(dbModule, units, { probe: true });
-  const state = dbModule.stmts.getValueSweepState.get(projectId);
-  const snapshot = coverageSnapshot(dbModule, {
-    projectId,
-    counts,
-    requestedAt: state ? state.coverage_requested_at : null,
-    // Real drain-state accessor (build-reviewer SF-3) — was hardcoded
-    // `false`, which meant this route could never report `demand:
-    // "draining"` even while a `runCoverageDrain` iteration was actively in
-    // flight for this exact project, disagreeing with a concurrent WS
-    // broadcast for the same instant.
-    draining: isDrainingProject(projectId),
-    computedAt: new Date().toISOString(),
-  });
+  // SF-4: composed via the single buildProbeCoverage extraction — no opts
+  // means "no fresher value than sweep state," which is exactly this
+  // route's own posture (it never just wrote coverage_requested_at itself).
+  const snapshot = await buildProbeCoverage(dbModule, projectId);
   res.json({ coverage: snapshot });
+});
+
+// ── Value Pool Slice 3 — auto-group proposal engine (technical-plan.md §7) ─
+// Four handlers: propose / list / approve / dismiss. Every derived number
+// (clusters, digest, member availability) is computed by
+// server/lib/value-groups.js — this router never re-derives any of it
+// (§9.1). The gate is a pure read of buildProbeCoverage(...).complete —
+// server-side and non-negotiable; a client-side mirror never replaces it.
+
+async function resolveGroupingFactsByKey(units) {
+  const factsByKey = {};
+  for (const unit of units) {
+    const cachedRow = dbModule.stmts.getValueUnitSummary.get(unit.unitKey);
+    const cachedAltitude = cachedRow
+      ? { project: cachedRow.project_level, stakeholder: cachedRow.stakeholder_level }
+      : null;
+    factsByKey[unit.unitKey] = groupingFacts(unit, cachedAltitude);
+  }
+  return factsByKey;
+}
+
+// POST /api/project-plans/:projectId/groups/propose {} - §9.8 truth table:
+// gate (coverage complete) beats in_progress beats digest-match, in that
+// order (TT-i / TT-g). A digest match against the latest completed/
+// completed_zero_groups run reuses its groups with NO spawn (PM-4); a prior
+// `failed` run is NEVER reused, even on a digest match (TT-c).
+//
+// BL-1: none of the three success outcomes below carries a `groups` key.
+// Composing `members`/`member_availability_counts` for a group is
+// `GET /groups`'s own `resolveMemberAvailability` composition (:453-479
+// below) — duplicating it here would be a second copy of that composition
+// (§9.1), and the CLIENT was previously reading `group.members` off this
+// response's un-enriched raw rows and crashing. `GET /groups` is the single
+// read surface for group content; the client re-fetches it after every
+// propose response instead.
+//
+// BL-13: the LLM pipeline (N batches + a rollup) is NOT awaited inside this
+// request — `runGroupingPass` writes its run row `in_progress`
+// SYNCHRONOUSLY before its first `await` (a plain JS guarantee: an async
+// function body runs synchronously up to its first `await`), so re-reading
+// the row immediately after kicking the promise (fire-and-forget, matching
+// this same file's own `runCoverageDrain(...).catch(() => {})` precedent at
+// the coverage-request handler above) already reflects the freshly-inserted
+// `in_progress` row. `GET /groups` is the poll surface the design, the run
+// states, and the client's `runState` labels were always written for.
+router.post("/:projectId/groups/propose", async (req, res) => {
+  const projectId = req.params.projectId;
+  if (!projectId) {
+    return res
+      .status(400)
+      .json({ error: { code: "INVALID_INPUT", message: "project_id is required" } });
+  }
+
+  const coverage = await buildProbeCoverage(dbModule, projectId);
+  if (!coverage.complete) {
+    return res.status(409).json({
+      outcome: "blocked_coverage_incomplete",
+      gate: "blocked_coverage_incomplete",
+      coverage,
+      error: {
+        code: "COVERAGE_INCOMPLETE",
+        message: "altitude coverage is not yet complete for this project",
+      },
+    });
+  }
+
+  const latestRun = dbModule.stmts.getLatestValueGroupRun.get(projectId);
+  if (latestRun && latestRun.state === "in_progress") {
+    return res.status(200).json({
+      outcome: "already_running",
+      run: latestRun,
+      gate: "ready",
+      coverage,
+    });
+  }
+
+  const { units } = await valueLedger.assembleValuePool(dbModule, { id: projectId });
+  const pre = mechanicalPreGroup(units);
+  const factsByKey = await resolveGroupingFactsByKey(units);
+  const digest = computeGroupingDigest(Object.values(factsByKey), pre.clusters);
+
+  if (
+    latestRun &&
+    (latestRun.state === "completed" || latestRun.state === "completed_zero_groups") &&
+    latestRun.input_digest === digest
+  ) {
+    return res.status(200).json({
+      outcome: "reused_unchanged",
+      run: latestRun,
+      gate: "ready",
+      coverage,
+    });
+  }
+
+  // Fire-and-forget (BL-13): never awaited here. `runGroupingPass`'s own
+  // synchronous prefix (before its first `await`) has already inserted the
+  // `in_progress` run row by the time this call returns its Promise, so
+  // re-reading it below is safe and current — see the handler-level comment
+  // above.
+  runGroupingPass(dbModule, projectId, units, factsByKey, { digest }).catch(() => {});
+  const run = dbModule.stmts.getLatestValueGroupRun.get(projectId);
+  res.status(202).json({ outcome: "started", run, gate: "ready", coverage });
+});
+
+// GET /api/project-plans/:projectId/groups?project_id= - run.state is
+// 'not_attempted' when no row exists yet (never inferred from an empty
+// list). Each group carries members with a per-member availability chip
+// computed server-side at READ time (§3.4) — never persisted, never
+// recomputed client-side.
+router.get("/:projectId/groups", async (req, res) => {
+  const projectId = req.params.projectId;
+  if (!projectId) {
+    return res
+      .status(400)
+      .json({ error: { code: "INVALID_INPUT", message: "project_id is required" } });
+  }
+
+  const coverage = await buildProbeCoverage(dbModule, projectId);
+  const gate = coverage.complete ? "ready" : "blocked_coverage_incomplete";
+
+  const runRow = dbModule.stmts.getLatestValueGroupRun.get(projectId);
+  const run = runRow || { state: "not_attempted", project_id: projectId };
+  const groupRows = runRow ? dbModule.stmts.listValueGroupsForRun.all(runRow.id) : [];
+  const allMemberRows = runRow ? dbModule.stmts.listValueGroupMembersForRun.all(runRow.id) : [];
+
+  const { units: liveUnits } = await valueLedger.assembleValuePool(dbModule, { id: projectId });
+  const claims = dbModule.stmts.listClaimsForProject.all(projectId);
+  const { byGroupId, countsByGroupId } = resolveMemberAvailability(
+    allMemberRows,
+    liveUnits,
+    claims
+  );
+
+  const groups = groupRows.map((group) => ({
+    ...group,
+    members: byGroupId[group.id] || [],
+    member_availability_counts: countsByGroupId[group.id] || {
+      already_claimed: 0,
+      available: 0,
+      no_longer_in_pool: 0,
+    },
+  }));
+
+  res.json({ run, groups, gate, coverage });
+});
+
+// POST /api/project-plans/:projectId/groups/:groupId/approve - pure
+// review_status + reviewed_at update. Never touches a plan item, milestone,
+// or claim (AC-5, the negative-proof suite's N-1…N-4).
+router.post("/:projectId/groups/:groupId(\\d+)/approve", (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const group = dbModule.stmts.getValueGroup.get(groupId);
+  if (!group)
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "no such group" } });
+  const reviewedAt = new Date().toISOString();
+  dbModule.stmts.setValueGroupReviewStatus.run("approved", reviewedAt, groupId);
+  res.json({ review_status: "approved", reviewed_at: reviewedAt });
+});
+
+// POST /api/project-plans/:projectId/groups/:groupId/dismiss - the sibling
+// of approve, two named routes rather than one body-supplied-status route
+// (DEC-S3-9) — a body-supplied status is a hole through which 'claimed'
+// could reach the DB; two verbs close it structurally.
+router.post("/:projectId/groups/:groupId(\\d+)/dismiss", (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const group = dbModule.stmts.getValueGroup.get(groupId);
+  if (!group)
+    return res.status(404).json({ error: { code: "NOT_FOUND", message: "no such group" } });
+  const reviewedAt = new Date().toISOString();
+  dbModule.stmts.setValueGroupReviewStatus.run("dismissed", reviewedAt, groupId);
+  res.json({ review_status: "dismissed", reviewed_at: reviewedAt });
 });
 
 // POST /api/project-plans/import {project_id, cwd} - DEC-P2 generation-1

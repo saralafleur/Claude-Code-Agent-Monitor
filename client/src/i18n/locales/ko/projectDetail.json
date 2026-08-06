@@ -225,6 +225,51 @@
         "lastClosure": "마지막으로 계획이 실제로 종료된 지 얼마나 지났는지."
       },
       "closing": "진짜 기준은 작업이 끝났는지가 아니라 그것이 종료되었는지입니다. 가치 풀이 줄어든다는 것은 팀이 일을 실제로 마무리하고 있다는 뜻이지, 단순히 쌓아두고 있다는 뜻이 아닙니다."
+    },
+    "autoGroupButton": "자동 그룹화",
+    "ungroupedUnitCount_one": "{{count}}개 단위가 아직 그룹화되지 않음",
+    "ungroupedUnitCount_other": "{{count}}개 단위가 아직 그룹화되지 않음",
+    "runState": {
+      "not_attempted": "아직 실행되지 않음",
+      "in_progress": "그룹화 진행 중…",
+      "completed": "그룹화 완료",
+      "completed_zero_groups": "그룹을 찾지 못함",
+      "failed": "그룹화 실패"
+    },
+    "refinementState": {
+      "pending": "대기 중",
+      "refined": "정제됨",
+      "zero_members": "구성원 없음",
+      "failed": "정제 실패"
+    },
+    "reviewStatus": {
+      "proposed": "제안됨",
+      "approved": "승인됨",
+      "dismissed": "기각됨",
+      "claimed": "청구됨"
+    },
+    "memberAvailability": {
+      "already_claimed": "이미 청구됨",
+      "available": "사용 가능",
+      "no_longer_in_pool": "풀에서 제외됨"
+    },
+    "proposeOutcome": {
+      "started": "시작됨",
+      "reused_unchanged": "이전 실행과 동일",
+      "already_running": "이미 실행 중",
+      "blocked_coverage_incomplete": "커버리지 미완료"
+    },
+    "gateState": {
+      "ready": "준비됨",
+      "blocked_coverage_incomplete": "커버리지 대기 중"
+    },
+    "groups": {
+      "sectionLabel": "그룹",
+      "proposing": "제안 중…",
+      "approve": "승인",
+      "dismiss": "기각",
+      "membersLabel": "구성원",
+      "empty": "아직 제안된 그룹이 없습니다."
     }
   }
 }

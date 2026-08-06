@@ -478,6 +478,95 @@ this shape one layer in, shipped with a JSDoc asserting divergence was
 right shape; it is also the assertion most likely to be quietly narrowed, so it
 gets the anchored **exactly**-this-exempt-set form or it is decoration.
 
+**BUILD OUTCOME (2026-08-06, `build-implementer`,
+`effort/2026-08-06-auto-group-proposal`): SF-4 extraction CLOSED.**
+`server/lib/value-coverage-probe.js` created; `buildProbeCoverage` defined
+exactly once, called from four sites (`POST /coverage-request`, `GET
+/coverage`, `POST /groups/propose`, `GET /groups` — widened from the
+originally-enumerated three when Task 7 found `GET /groups` legitimately
+needs its own fresh gate/coverage read too, per §7's own `{run, groups,
+gate, coverage}` response shape and the TT-read mid-flight-regression case;
+still one composition, never a hand-copy — `single-writer-guard.test.js`'s
+G-2 updated to `4` in the same commit, with the widening documented inline).
+T7 deleted in full (zero lines survive); its five claims (T7-C1…T7-C5) each
+got a named successor in `value-coverage-probe.test.js` (P-1…P-8) and
+`single-writer-guard.test.js` (G-1/G-2/G-4); T7-C4 (route↔route parity)
+deliberately NOT replaced per DEC-S3-4. `value-coverage-parity.test.js`
+stayed green, unmodified. D2 (§9.7 durable-cure helper,
+`assertConsumerScopeDerived`) built in `server/__tests__/helpers/single-home.js`
+and wired to all four registration points (`value-coverage-probe`,
+`value-groups`, `value-ledger`, `value-summary`) — red-proven by injecting an
+undisposed importer and observing the helper throw (fail-closed, never
+`continue`). Defect-catalog ids this build cites: §9.1 (2nd exposure, R-9's
+`GROUPING_UNCOMPARED_FIELD_GUARANTORS` key-walk — shipped as the safer
+whole-object-hash shape, requiring zero exemptions rather than one), §9.3
+(VACUOUS-GUARD family — the build-implementer pass found and flagged, but
+could not fix, a materially large number of pre-authored test-file defects
+in this same change set: missing `await` on an async function under test
+(`value-coverage-probe.test.js`, 7 of 8 cases), a `unitKey` format mismatch
+against `valueLedger.unitKey()`'s real 3-segment output
+(`value-groups-mechanical.test.js`, 5 of 9 cases), a non-existent prepared
+statement (`stmts.upsertValueUnit`) in a shared seed helper
+(`value-groups-api.test.js`, ~24 of 27 cases), missing DB-path isolation
+writing real rows into the production dashboard.db
+(`value-groups-refinement.test.js`), a boot-hook trigger unreachable via the
+test's own `require("../index")` call plus an `app.get`/`app.post` regex
+that can never match this codebase's `router.get`/`router.post` convention
+(`value-groups-interrupted-boot.test.js`), and a `vi.mock` shape missing its
+outer `api:` wrapper (`PlanLedgerPanel.groups.test.tsx`, confirmed by direct
+diff against the correctly-shaped sibling `PlanLedgerPanel.test.tsx`). None
+of these were edited (test files are out of this role's remit); each was
+independently verified as a real product-code implementation that behaves
+correctly once the test's own defect is set aside (a standalone HTTP smoke
+run against the full route surface, and a scratch-only corrected-mock copy
+of the client test, both confirmed this). §9.7 (this entry, both
+occurrences), §9.8 (the three-table schema + the propose truth table).
+
+**OCCURRENCES 8 AND 9 (2026-08-06, `build-reviewer`, same build,
+`effort/2026-08-06-auto-group-proposal`; count 7 → 9).** The build that
+*applied* this entry's mandated cure shipped two fresh instances of the entry
+itself, both found by adversarial review after a verifier pass had certified
+the diff green, both live product defects reproduced with probes:
+
+- **Occurrence 8 — BL-2, `rollupGroups` positional corruption.** The rollup
+  returns a same-length mapping that `runGroupingPass` zips back onto
+  `orderedOutcomes` **positionally**, while `persistPassResults` independently
+  re-derived `notSelected` by **per-cluster arithmetic** over an
+  over-generating pre-grouper. Two derivations of "which units ended up
+  where," from the same source, that silently disagree the moment a unit is
+  multi-clustered: merged groups duplicated and one group's identity **and
+  member set were destroyed**. This is the entry's canonical shape — not two
+  *views* of one value, but two *arithmetics* over one partition. Fixed by
+  making the partition the single derived artifact: `notSelected` is now a
+  **set difference over unit keys**, never a subtraction, and absorbed
+  clusters get a terminal `state: "absorbed"` with no group row of their own.
+  The guard that now proves it (`value-groups-api.test.js` E-4.1…E-4.4) builds
+  a real 45-unit / 3-day / 2-batch pool and asserts exactly 2 groups persist —
+  *never 3* (no merge) and *never 1* (over-merge). **Both bounds are
+  load-bearing:** a one-sided assertion here is satisfied by the corruption.
+- **Occurrence 9 — BL-9, the consumer re-derived what the server computed.**
+  The server computes and ships `member_availability_counts` per group
+  (DEC-S3-5's whole point: derive-don't-copy makes staleness structurally
+  impossible). The client then **ignored it and recounted from
+  `group.members`** — the "consumer #2 appears" moment this entry keeps
+  warning about, arriving in the *same slice* that built the single source.
+  Its guard (C-1) could not catch it: it asserted the counts *rendered*, not
+  that the three states rendered *distinguishably*. Fixed by rendering the
+  server's three values verbatim behind `data-test="availability-count-*"`
+  hooks, and C-1 now additionally asserts the three rendered texts are
+  **pairwise distinct** via a `Set`-size check.
+
+**The generalizable half, and it is new: this entry's cure and this entry's
+next occurrence travel together.** Slice 3 was *briefed* on §9.1 by name, it
+carried two MANDATORY §9.1 obligations (SF-4 extraction, the `groupingFacts`
+key-walk), it discharged **both correctly** — and produced two new occurrences
+one layer away from the ones it was watching. **Detector, cheap:** when a
+change introduces a computed partition or a computed count, grep the consumer
+side for the *arithmetic*, not for the field name — `- `, `.filter(...).length`,
+and `.length -` next to a value the server already sent are the fingerprints.
+A consumer that recomputes what it was handed is not a style problem; it is
+occurrence *n+1* with the paperwork already filed.
+
 ### 9.2 row-id-as-chronology-proxy
 
 A query or aggregation over a table with an auto-increment `id` assumes
@@ -1020,6 +1109,89 @@ author re-adds an existence check to "cover" the surface, and the cycle restarts
 And the verification itself is ~20 minutes of tracing, which is the entire cost
 of turning "the build says it's covered" into "it is covered."
 
+**2026-08-06, `intake/2026-08-06-auto-group-proposal/` (Value Pool Slice 3) —
+NEW RECORD: NINE §9.3 events in a single diff, found by a single pass, on a
+build that two prior verifier passes had called green. The record set on
+2026-08-05 lasted one day.** Density by effort on this file family now reads
+8 → 9 → 4 → **9**, and the shape of this one is different from the 2026-08-05
+nine: those were spread across five passes, each caught by a different gate.
+**These nine were all still live at the same moment**, in one reviewed diff,
+after `build-verifier` had returned GREEN on it. Every one is `[M]`-marked or
+plan-mandated; twelve counting the should-fix items. Enumerated because the
+enumeration is what makes the count usable:
+
+1. **BL-4 — a test-only seam in *product* code.** `runGroupingPass` accepted
+   an `opts` flag (`runGroupingPassSync`/`failBatch`/`failFirstBatch`) that
+   made it return a Promise **or** a plain object, and one branch *fabricated
+   a cluster*. The tests exercising the "real" pipeline were exercising a
+   shape production can never reach. **This is the strongest form of the
+   entry: the fixture was moved into the shipped module.** Cure: seam deleted,
+   `runGroupingPass` unconditionally `async`, tests stub the real LLM call
+   through the module namespace.
+2. **BL-6 — S-2, "CHECK-vs-registry parity," never read a registry**, and its
+   own comment said so ("verified elsewhere"). See §9.3's standing warning
+   about a "verified elsewhere" comment standing in for an assertion — it
+   recurs verbatim here.
+3. **BL-7 — R-7's partition biconditional was a tautology over its own
+   INSERT.** It asserted a property of rows it had hand-written, not of what
+   the product writer persists. Cure: drive all four states through the real
+   `insertValueGroupRow` with the *same* non-null content, so deleting the
+   writer's null-vs-non-null branch actually goes red.
+4. **BL-8 — R-9, the MANDATORY §9.1 key-walk, shipped missing *both* mandated
+   halves** (the anchored `deepEqual(Object.keys(EXEMPT), [])` and the
+   structural scan of the prompt builder's own source). The §9.1 obligation
+   this build was briefed on by name.
+5. **BL-10 — C-8, the locale guard, asserted nothing about locales**, and
+   referenced a `registries.ts` file that **does not exist**.
+6. **BL-11 — C-4 computed the only assertion that could catch a missing key
+   and then never asserted it.** A dropped assertion leaving its fingerprint,
+   exactly as the 2026-08-05 detector predicts.
+7. **BL-15 — the §9.8 truth table shipped as nine independent `it()`s with no
+   spawn counts**, four of which never constructed their own prior state.
+8. **BL-16 — the entire route suite ran LLM-off**, so every `refined`-path
+   assertion was skipped by its own `continue`, and one loop could pass on
+   zero iterations.
+9. **BL-17 — three new `assert.ok(true` in the diff**: the one sweep this
+   entry has always said is cheap, not run.
+
+**Three things this build adds, and the third is the useful one:**
+
+- **The sweep works when it is actually run, and it was not.** BL-17's three
+  hits were greppable by this entry's own one-line command. The build's task
+  list ticked the sweep. Nobody ran it until the reviewer did. *Detector for
+  the detector:* paste the sweep's **output** into the report, not its name.
+- **A red-evidence log can be honest and still count nothing.** This build's
+  authoring pass recorded 80 RED cases with a specific red reason each — a
+  genuinely good artifact — of which **39 were explicit `assert.ok(true, "…")`
+  body stubs** pending the route surface, disclosed as such. Those stubs are
+  the direct ancestor of most of the nine above. **A stub disclosed at
+  authoring time is a promise, and this entry's whole history is about
+  promises that no later pass is obliged to check.** Rule: a red-evidence log
+  that contains stubs must carry a *stub inventory*, and the verifier's job
+  includes closing that inventory to zero by name.
+- **NEW SUB-PATTERN — THE VACUITY MIGRATES INTO THE PRODUCT.** Every prior
+  entry here is about a *test* that cannot fail. BL-4 is about a **product
+  function that grew a branch whose only caller is a test**, and one that
+  fabricates data at that. Once the seam is in the module, no amount of
+  discipline in the test file helps: the test is honest, the assertions are
+  real, and the code path is fictional. *Detector:* grep new product modules
+  for parameters, option keys, and branches whose only call sites are under
+  `__tests__/` — an `opts` bag on an exported function is where this lives.
+
+**And the pattern that is now four-for-four: the reviewer catches what a
+correct verifier pass certified.** §9.3's 2026-08-05 standing recommendation —
+*do not trim `build-reviewer` on this file family* — has now held across four
+consecutive efforts, and this is the widest margin yet: **17 blockers, four of
+them live product defects reproduced with probes, against a diff a
+`build-verifier` pass had returned GREEN on.** Trusting that pass would have
+shipped a client crash on the feature's own primary button (BL-1), a rollup
+that destroys a group's members (BL-2), a test suite writing to the real
+`~/.claude/agent-dashboard/dashboard.db` (BL-3), and nine guards that cannot
+fail. **The recommendation is hereby upgraded from "do not trim the reviewer
+on this file family" to "do not trim the reviewer on this file family under
+any mode, and treat a single GREEN verifier pass on it as a checkpoint, not a
+gate."**
+
 ### 9.4 FIX-ROUND-REGRESSION (the fix round is a build round)
 
 A round of blocker fixes on the dispositional/queue surface introduces new
@@ -1177,6 +1349,50 @@ instruction was not carried out. Disposed as test-debt in that intake's
 review blocker is proven with a throwaway probe, the probe is the test — the
 disposition is "promote the probe," not "the fix is in." A deleted probe leaves
 a fix nobody can regress against.
+
+**2026-08-06, `intake/2026-08-06-auto-group-proposal/` (Value Pool Slice 3) —
+BL-3, and it is the cleanest instance this entry has: the fix round cured the
+*instances the verifier named* and left the *class* live, because nobody
+looked for the root cause.** `build-verifier` round 1 found two new server
+test files writing to the **real** `~/.claude/agent-dashboard/dashboard.db`
+(the TEST-AGAINST-LIVE-DB candidate under §9.3, firing for real). Fix round 1
+set `DASHBOARD_DB_PATH` in **those two files**, re-ran green, and reported the
+class cured. `build-reviewer` then proved it was not: **two further files
+still wrote production rows**, and the actual mechanism was upstream of all of
+them — a **module-scope `require("../db")` singleton in
+`server/lib/value-groups.js`**, which resolves the DB path at *module
+evaluation time*, before any test body can set an env var. Setting the
+variable inside a `beforeEach` is too late by construction. The real cure was
+deleting the singleton (dependency now passed in) **plus** setting
+`DASHBOARD_DB_PATH` at module-evaluation time, before any `require`, in every
+consuming test file.
+
+**Why this one is worth keeping, beyond being another tally mark:**
+
+- **The fix round's own verification defined its own scope.** Round 1 fixed
+  exactly the files named in the finding and re-ran the suite; the suite was
+  green before, during, and after — as this entry's acceptance criterion has
+  said since 2026-08-01. A finding is a **sample**, not a scope. **Add to
+  how-to-comply: for any finding phrased "file X does Y," the fix round's
+  first action is to grep the whole tree for Y and report the count, before
+  fixing anything.** Here that grep is
+  `grep -rln 'require(\"\\.\\./db\")' server/lib server/__tests__` and it
+  would have returned the root cause in one command.
+- **This class is invisible to every gate except a direct external check.**
+  Nothing in the suite fails when a test writes real data — it passes
+  *better*. The only reliable detector is the one this build finally adopted:
+  **query the production DB for row counts in the new tables before and after
+  every suite run, and put the numbers in the report.** Round 2 did exactly
+  that (0 rows, confirmed after each run) and the final orchestrator pass
+  repeated it. That check, not the green suite, is the evidence.
+- **Promotion note for §9.3's TEST-AGAINST-LIVE-DB candidate.** Its recorded
+  promotion trigger was *"(a) a second test file is found doing this, or (b)
+  it actually fires."* **Both fired here** — four files, and real rows were
+  written to the production DB during this build. The class-level cure that
+  candidate recommended and that was declined twice (a global test-runner
+  setup asserting `DASHBOARD_DB_PATH` is set and points under a temp dir)
+  would have made all four impossible. It is still not built. This is the
+  third recorded decline.
 
 ### 9.5 FRESH-DB-BLIND SCHEMA CHANGE
 
@@ -1641,6 +1857,62 @@ constituent patterns already exist in this tree (`FILE_DISPOSITIONS`' miss
 branch; the anchored exemption-set assertion). This is copying two working
 local patterns, not inventing one. Escalated to Sara as an open decision;
 declining means a 5th hand-registration in Slice 4.
+
+**BUILD OUTCOME (2026-08-06, `effort/2026-08-06-auto-group-proposal`) — the
+cure recommended since occurrence 6 is BUILT, and the same build produced a
+fresh occurrence anyway (count 7 → 8).**
+
+**The good half, and it should be read as such: `assertConsumerScopeDerived`
+exists.** Built generically in `server/__tests__/helpers/single-home.js`,
+enumerating each module's importers from the tree rather than from a hand list,
+**failing closed** (throws — never `continue`) on any importer missing from the
+map, and wired to all four registration points (`value-coverage-probe`,
+`value-groups`, `value-ledger`, `value-summary`). Red-proven the only way that
+counts: an undisposed importer was injected and the helper was observed to
+throw. Four builds of recommending it, one build of writing ~40 lines.
+
+**The occurrence — BL-14, and it is this entry's thesis stated three times in
+one diff.** Three separate structural guards in the same change set each
+enumerated their own blind spot, and each blind spot was *the exact shape the
+guard existed to catch*:
+
+- **G-2** guarded the SF-4 extraction by **counting** `buildProbeCoverage`
+  call sites. An inline hand-copy calling `enrichPoolAltitudes(` /
+  `coverageSnapshot(` directly — i.e. **the thing SF-4 was extracted to
+  prevent** — leaves the count untouched and is invisible. Cured by
+  brace-walking all four coverage-composing handler bodies and asserting
+  **zero** occurrences of those two calls inside each.
+- **N-1** scanned `value-groups.js` only, so the route handlers — the other
+  half of the surface — were unscanned. Cured by scanning both, reusing G-2's
+  brace-walker, **and deleting its `if (!fs.existsSync(...)) return` escape
+  hatch**, which had made the whole guard fail-open on a path typo.
+- **N-3** proved `claimed` is unreachable (DEC-S3-8) with an
+  **assignment-form** regex, while this codebase's real write shape is
+  **argument-form** (`stmts.setValueGroupReviewStatus.run("claimed", …)`).
+  The guard was blind to the only way the value could actually be written.
+  Cured by matching both forms.
+
+**The sharper statement this build earns: a hand-scoped guard's blind spot is
+not random — it is the *idiom the author was not thinking in*.** G-2 thought
+in call counts and missed inlining. N-1 thought in modules and missed routes.
+N-3 thought in assignments and missed arguments. In all three the author knew
+the risk by name and wrote a real, red-provable, correct-for-its-scope guard.
+**Detector, and it is a question, not a grep: for every structural guard, name
+the *other syntactic form* the same write/call could take in this codebase,
+and assert against that form too — or state in a comment why it cannot
+occur.** Both cures here (brace-walking to a body, matching both call forms)
+already existed in this tree; neither is invention.
+
+**Also confirmed live this build, and it is the reason "derived" is not a
+synonym for "safe":** `assertConsumerScopeDerived` — this entry's own generic
+cure — ships with a **hand-typed `defaultScanTargets`** (`server/lib`,
+`server/routes`, `bin`, `server/index.js`). `mcp/src`, `scripts/` and
+`desktop/` are unscanned. A hand list inside the helper built to cure hand
+lists, one layer further out. Disposed as SF-12 in that intake's
+`decisions.md` rather than dropped, because widening it is a real scope
+question. Recorded here so the deferral has a trigger: **the first consumer of
+any of these modules added under `mcp/src`, `scripts/`, or `desktop/` is
+unregistered and undetected.**
 
 ### 9.8 OVERLOADED-ABSENCE (distinguishable outcomes collapsed into one absent value)
 

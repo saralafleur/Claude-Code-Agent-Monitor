@@ -468,6 +468,25 @@ function startBackgroundServices() {
   } catch (err) {
     console.warn("value summary tick failed to start:", err.message);
   }
+  // Value Pool Slice 3: an in_progress grouping run cannot outlive the
+  // process honestly — a crashed run would otherwise render "running"
+  // forever (an overloaded-absence with a spinner on it). Flip every
+  // surviving in_progress value_group_runs row to failed/
+  // interrupted_restart before anything else touches the table this boot.
+  // Same fail-safe, non-blocking try/catch posture as startValueSummaryTick
+  // above (technical-plan.md §5.6).
+  try {
+    const dbModule = require("./db");
+    const { reconcileInterruptedGroupRuns } = require("./lib/value-groups");
+    const reconciledRuns = reconcileInterruptedGroupRuns(dbModule);
+    if (reconciledRuns > 0) {
+      console.log(
+        `[value-groups] reconciled ${reconciledRuns} interrupted grouping run(s) → failed`
+      );
+    }
+  } catch (err) {
+    console.warn("value groups interrupted-run reconciliation failed:", err.message);
+  }
   // The Coach engine: evaluates the Playbook's enabled practices on a tick
   // and records Observations (server/lib/playbook/engine.js). Disable with
   // DASHBOARD_PLAYBOOK_MODE=off or DASHBOARD_PLAYBOOK_MS=0.

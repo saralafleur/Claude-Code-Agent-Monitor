@@ -902,99 +902,17 @@ describe("Group T: coverage-on-demand routes (POST /coverage-request, GET /cover
     );
   });
 
-  it("T7 (SF-4): the POST /coverage-request and GET /coverage handlers compose their coverageSnapshot call from identical building blocks", () => {
-    // Read the route file
-    const routesFile = fs.readFileSync(path.join(__dirname, "../routes/project-plans.js"), "utf8");
-
-    // Extract handler bodies with proper boundaries
-    // POST handler: from router.post start until router.get (next handler)
-    const postMatch = routesFile.match(/router\.post\("\/coverage-request"[\s\S]*?(?=router\.get)/);
-    const postBody = postMatch ? postMatch[0] : "";
-
-    // GET handler: from router.get start until next router. call
-    const getMatch = routesFile.match(/router\.get\("\/coverage"[\s\S]*?(?=router\.)/);
-    const getBody = getMatch ? getMatch[0] : "";
-
-    // Both must contain these literal composition steps (DEC-16 sole composer)
-    assert.ok(
-      routesFile.includes('router.post("/coverage-request"') &&
-        postBody.includes("await valueLedger.assembleValuePool(dbModule, { id: projectId })"),
-      "POST /coverage-request handler missing assembleValuePool call"
-    );
-    assert.ok(
-      routesFile.includes('router.get("/coverage"') &&
-        getBody.includes("await valueLedger.assembleValuePool(dbModule, { id: projectId })"),
-      "GET /coverage handler missing assembleValuePool call"
-    );
-
-    // Both must call enrichPoolAltitudes with probe: true (DEC-9)
-    assert.ok(
-      postBody.includes("await enrichPoolAltitudes(dbModule, units, { probe: true })"),
-      "POST /coverage-request handler missing enrichPoolAltitudes"
-    );
-    assert.ok(
-      getBody.includes("await enrichPoolAltitudes(dbModule, units, { probe: true })"),
-      "GET /coverage handler missing enrichPoolAltitudes"
-    );
-
-    // Both must pass isDrainingProject to coverageSnapshot (SF-3 fix)
-    assert.ok(
-      postBody.includes("draining: isDrainingProject(projectId)"),
-      "POST /coverage-request handler missing isDrainingProject in coverageSnapshot"
-    );
-    assert.ok(
-      getBody.includes("draining: isDrainingProject(projectId)"),
-      "GET /coverage handler missing isDrainingProject in coverageSnapshot"
-    );
-
-    // Both must have identical coverageSnapshot argument key sets (SF-4 parity check)
-    // Extract keys from the immediate coverageSnapshot call arguments only
-    const extractCoverageSnapshotKeys = (handlerBody) => {
-      // More precise: match from coverageSnapshot(dbModule, { to the closing });
-      // Stop at the first }); to avoid picking up extra content
-      const coverageMatch = handlerBody.match(
-        /const snapshot = coverageSnapshot\(dbModule, \{([^]*?)\}\);/
-      );
-      if (!coverageMatch) return [];
-
-      const args = coverageMatch[1];
-      const keys = new Set();
-
-      // Extract line-by-line to handle the specific structure of the call
-      // Each property is typically on its own line
-      for (const line of args.split("\n")) {
-        // Remove comments and trim whitespace
-        const cleanLine = line.split("//")[0].trim();
-        if (!cleanLine) continue;
-
-        // Match shorthand properties (e.g., "projectId,") or named properties (e.g., "draining: ...")
-        // For named: "key: value," or "key: value"
-        // For shorthand: "key," or "key"
-        const match = cleanLine.match(/^(\w+)(\s*:|,|$)/);
-        if (match && match[1]) {
-          keys.add(match[1]);
-        }
-      }
-
-      return Array.from(keys).sort();
-    };
-
-    const postKeys = extractCoverageSnapshotKeys(postBody);
-    const getKeys = extractCoverageSnapshotKeys(getBody);
-
-    assert.ok(postKeys.length > 0, "POST /coverage-request handler missing coverageSnapshot call");
-    assert.ok(getKeys.length > 0, "GET /coverage handler missing coverageSnapshot call");
-
-    assert.deepEqual(
-      postKeys,
-      getKeys,
-      "coverageSnapshot argument keys must be identical between POST and GET handlers"
-    );
-
-    assert.deepEqual(
-      postKeys,
-      ["computedAt", "counts", "draining", "projectId", "requestedAt"],
-      "coverageSnapshot argument key set is the reviewed closed set — a matched pair of drifts must still fail"
-    );
-  });
+  // T7 (SF-4) deleted in full (WATCH-S3-D, technical-plan.md §6.1) — the
+  // POST /coverage-request and GET /coverage handlers no longer inline the
+  // 4-step coverageSnapshot composition this test asserted on; both now
+  // call the single `buildProbeCoverage` extraction
+  // (server/lib/value-coverage-probe.js). T7's five claims (T7-C1…T7-C5)
+  // each have a named successor test: T7-C1→G-2+P-1, T7-C2→G-2+P-5,
+  // T7-C3→P-6, T7-C4 deliberately NOT replaced (DEC-S3-4 — a route↔route
+  // parity assertion would degenerate to deepEqual(f(X), f(X)) once both
+  // routes call one function), T7-C5→P-7+P-8. See
+  // server/__tests__/value-coverage-probe.test.js and the single-call-site
+  // guard in server/__tests__/single-writer-guard.test.js (G-1/G-2/G-4).
+  // The response-key-set anchor above (T6) is untouched and still the
+  // canary for both handlers' wire shape.
 });
