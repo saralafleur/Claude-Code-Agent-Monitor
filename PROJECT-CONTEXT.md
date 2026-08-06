@@ -389,6 +389,95 @@ consumer: a structural guard asserting both handler bodies compose
 regression-proofs the SF-3 fix). Extract `buildProbeCoverage` when Slice 3's
 consumer lands, and replace the guard then — do not keep both.
 
+**SF-4 DISPOSITION, 2026-08-06 — ruled MANDATORY for Slice 3 by
+`intake-project-manager` (`intake/2026-08-06-auto-group-proposal/pm-plan.md`
+PM-2; count unchanged at 7, nothing built yet).** The trigger this note wrote
+has fired: Slice 3's server-side 100%-coverage gate (its PO's AC-6, a pure read
+of `coverageSnapshot.complete`) is the third consumer, so deferring is **not a
+null action** — it ships the third hand-copy this note exists to prevent, into
+handlers whose two copies already diverged once. Confirmed live 2026-08-06:
+both hand-written compositions still stand at `server/routes/project-plans.js:319`
+and `:352`.
+
+**Two corrections to the recommendation above, both found only by cross-reading
+the intake's own documents against the tree:**
+
+1. **The interim guard was BUILT, and this note's "recommended now" reads as if
+   it were not.** It is `T7` in `server/__tests__/project-plans-api.test.js:905`,
+   landed in the Slice 2 QA-fix round, and it is the **anchored** form (lines
+   988–998: `deepEqual(postKeys, getKeys)` *plus* `deepEqual(postKeys,
+   ["computedAt","counts","draining","projectId","requestedAt"])`) that §9.4's
+   PARITY-WITHOUT-ANCHOR detector forced. Slice 3's `intake-engineer` searched
+   for `"sorted key set"` / `"buildProbeCoverage"` — neither string appears in
+   T7 — and concluded "nothing to delete." **A hand-scoped grep is this entry's
+   own §9.7 failure mode reproduced at the *investigation* level, where no test
+   can catch it.** Search for the *behavior* (the route file, the composition's
+   literal lines), not for the vocabulary a note happened to use.
+2. **The extraction will turn T7 RED**, because T7 asserts each handler *body*
+   literally contains `await valueLedger.assembleValuePool(dbModule, { id:
+   projectId })` and `await enrichPoolAltitudes(dbModule, units, { probe: true })`
+   — lines that move into the new module. **T7 is deleted and replaced in the
+   same commit; it is never "adjusted until it passes"** (§9.4's named
+   temptation, which the Slice 2 implementer was right to refuse).
+
+**And the replacement must not be a parity guard.** Once both routes call one
+function, `deepEqual(routeA, routeB)` degenerates to `deepEqual(f(X), f(X))` —
+structurally incapable of failing, i.e. exactly the shape that made
+`value-coverage-parity.test.js` the vacuous guard in the immediately preceding
+slice. The replacement is a **single-definition + exact-call-site-set** guard
+with scope **derived** from a grep of `server/lib` + `server/routes` + `bin/`
+and a **fail-closed** miss branch, red-proven by injecting a fourth hand-copy.
+The `requestedAt` divergence is parameterised, never erased — it is load-bearing
+(SF-2/SF-3: POST cannot re-read `getValueSweepState` without racing the drain it
+just kicked).
+
+**QA-pass note (2026-08-06, `team-qa` strategist,
+`intake/2026-08-06-auto-group-proposal/` — Value Pool Slice 3, PRE-build; count
+unchanged at 7, nothing built).** Verdict GAPPED. Two things this entry did not
+previously know, both verified byte-for-byte against
+`server/__tests__/project-plans-api.test.js` this pass:
+
+1. **T7 is deleted in FULL — no part survives, and the assertion named as its
+   survivor anchors a different closed set.** T7's *entire* mechanism is
+   regex-scanning the route-handler source text; `extractCoverageSnapshotKeys`
+   matches `const snapshot = coverageSnapshot(dbModule, {…});` **inside the
+   handler body**, so after extraction it returns `[]` and
+   `assert.ok(postKeys.length > 0)` (`:985`) fails *before* the anchor at
+   `:994-998` is reached. That anchor cannot survive; it is inside T7 and
+   depends on T7's mechanism. `technical-plan.md` §6.1 and this intake's
+   `change-brief.md` disagreed on this and the change-brief was wrong.
+   **T6 (`:886-903`) is not T7's anchor**: T6 anchors the HTTP *response body*
+   (nine `snake_case` keys), T7 anchored the `coverageSnapshot` *argument set*
+   (five `camelCase` keys — `computedAt/counts/draining/projectId/requestedAt`).
+   The five-key anchor — the one §9.4's PARITY-WITHOUT-ANCHOR detector forced
+   into existence one week earlier, and the only thing regression-proofing the
+   SF-3 `draining` fix and the load-bearing SF-2/SF-3 `requestedAt` divergence
+   — had **no named successor anywhere in the plan of record.** Deleting it
+   unreplaced would make the cure for occurrence 7 into occurrence 8.
+
+2. **Generalizable, and adopted as a standing rule: a deleted guard is replaced
+   claim-by-claim, not test-by-test.** This entry's recurring failure here is
+   not carelessness — it is that **a test is one unit and its claims are
+   many**, so a delete-and-replace silently drops whichever claims nobody
+   enumerated. Same mechanism that shipped T7 itself at 1-of-2 mandated
+   assertions in Slice 2. **Required from now on: any commit deleting a guard
+   carries a table mapping each distinct claim the deleted test made to its
+   named successor assertion, and the DoD line is "every row has a successor
+   and each was observed red" — not "the test was deleted."** T7's table is
+   five rows; one of them (route↔route parity) is deliberately *not* replaced
+   per DEC-S3-4, which is exactly the kind of decision a claim table makes
+   visible instead of indistinguishable from an oversight.
+
+**Second exposure of this entry in the same slice, and it is a structural re-run
+of occurrence 7's own defect:** `groupingFacts` extends `unitFacts`, so
+`unitFacts` now has **two** downstream comparators — `compareUnitInputs`
+(altitudes) and `computeGroupingDigest` (groups). Occurrence 7 was precisely
+this shape one layer in, shipped with a JSDoc asserting divergence was
+"physically impossible," harmless only by accident. The
+`UNCOMPARED_FIELD_GUARANTORS`-shaped key-walk test is mandated (PM-4) and is the
+right shape; it is also the assertion most likely to be quietly narrowed, so it
+gets the anchored **exactly**-this-exempt-set form or it is decoration.
+
 ### 9.2 row-id-as-chronology-proxy
 
 A query or aggregation over a table with an auto-increment `id` assumes
@@ -1480,6 +1569,79 @@ wearing a derived scan's clothes. Fix shape is already proven in this file
 the point of growth until someone dispositions the new member. Two lines. Worth
 landing before Slice 3 touches either registry rather than after.
 
+**N2 CLOSED — correction recorded 2026-08-06 by `intake-project-manager` during
+`intake/2026-08-06-auto-group-proposal/` (Value Pool Slice 3; count unchanged at
+7).** The note above says N2 is open. **It is not, and has not been since
+`5ec640b`** (the Slice 2 QA-fix commit): `server/__tests__/value-coverage.test.js:297`
+now carries exactly the two-line cure this entry specified —
+`assert.deepEqual(exemptDemand, ["passive"])` / `assert.deepEqual(exemptEta,
+["none"])` — so the hand-typed `STATE_TO_LOCALE_KEY` axis fails **closed** at the
+point of registry growth. Verified by direct read, not by the commit message.
+**Recorded as a correction rather than silently edited, because the stale status
+is itself an instance of this project's live recurrence:** a deferral whose
+trigger nothing is obliged to check. Slice 3's intake had three chances to read
+this file correctly and got one of three — it caught SF-4, re-argued a closed
+decision (Slice 2 DEC-3 / OPEN-4) from code instead of citing it, and would have
+re-done N2. **Standing instruction for this entry: a catalog row's status is a
+claim about the tree, and it goes stale the moment a fix round lands. Re-verify
+by direct read before acting on an "OPEN" marker.**
+
+**Still live on this axis for Slice 3, and it is the reason the cure above must
+be copied rather than admired:** WATCH-S2-F's literal trigger ("any Slice 3
+growth of `demand`/`eta.state`") does **not** fire — Slice 3 grows neither. It
+adds *new sibling registries at the same CJS/Vite boundary* instead
+(`GROUP_RUN_STATES`, per-group `refinement_state`, `review_status`, and the
+per-member availability states ruled in that intake's `pm-plan.md` PM-1), each
+needing four locale files. A trigger written against two named registries cannot
+see a third being born. Each new registry gets the anchored exemption-set
+assertion **from day one**.
+
+**QA-pass note (2026-08-06, `team-qa` strategist,
+`intake/2026-08-06-auto-group-proposal/` — Value Pool Slice 3, PRE-build; count
+unchanged at 7).** Slice 3 must register **one** new consumer
+(`value-groups.js`) in **four** hand-typed places: `CONSUMERS`
+(`value-ledger.js:70-74`), both `assertSingleHome` consumer maps
+(`single-writer-guard.test.js` `:400` and `:462`), and — the one the technical
+plan's own change-set table omitted — **`ledger-metrics-parity.test.js:281`
+(C2.4)**, which `deepEqual`s `CONSUMERS` against a literal 3-entry array and
+therefore goes red by construction. Confirmed live. That omission is this
+entry's shape at the *plan* level: **a registry's anchor lives in a different
+file from the registry, so the registration edit and the anchor edit are two
+files no single obligation owns jointly** — identical to SF-5, where the author
+was inside the map and still did not see its own membership was stale.
+
+**New, and it changes what the fix must be: the registration `DEC-S3-10`
+mandates is forbidden by `CONSUMERS`' own declaring comment.** That comment
+(`value-ledger.js:64-69`) states the growth rule *"grow this list ONLY when the
+new consumer reads `computePlanHealth`/`assembleValuePool`/
+`summarizeDeliveredValue` directly"* — and `DEC-S3-10` rules that
+`value-groups.js` **never calls `assembleValuePool`** (route handlers pass
+`units` in); it calls `unitKey` and nothing else. Over-registering is a
+defensible call, but as planned the registry's membership would falsify the
+registry's own comment. Per §9.1's standing check this is the **fourth
+consecutive build** in which an unevidenced invariant claim in a header marked
+the exact spot the invariant fails. **Ruling: the growth rule is widened in the
+same commit as the 4th entry, and C2.4's failure message updated to match.**
+
+**Good news, both verified by direct read this pass, and worth recording
+because this entry's notes have twice gone stale in the other direction:**
+`FILE_DISPOSITIONS` in `chronology-ordering.test.js` genuinely fails closed
+(throws at `:243` on an undispositioned file, at `:249` on a stale entry), and
+N2's cure is confirmed landed at `value-coverage.test.js:297`. Both are the
+working shape.
+
+**The cure this entry has recommended since occurrence 6 remains half-built,
+and Slice 3 is the strongest forcing function it will get.** Build
+`assertConsumerScopeDerived(modulePath)` **once**, generically — enumerate the
+consumer list from a grep of `server/lib` + `server/routes` + `bin/` for the
+module's own import specifier, fail closed on any importer missing from the map
+— and point all four registrations at it, including `CONSUMERS`, whose own
+completeness has never been guarded by anything. ~40 lines, and both
+constituent patterns already exist in this tree (`FILE_DISPOSITIONS`' miss
+branch; the anchored exemption-set assertion). This is copying two working
+local patterns, not inventing one. Escalated to Sara as an open decision;
+declining means a 5th hand-registration in Slice 4.
+
 ### 9.8 OVERLOADED-ABSENCE (distinguishable outcomes collapsed into one absent value)
 
 **PROMOTED from candidate to a numbered entry 2026-08-04** by `team-qa`
@@ -1740,6 +1902,44 @@ tick first, so **the suite structurally cannot observe the case**.
    Required assertion here: `shouldBroadcastCoverage(pid, 0, "passive", true)`
    with `lastBroadcastState` empty must return `true`, plus the negative case
    (first observation, not complete → no broadcast) to bound the fix.
+
+**QA-pass note (2026-08-06, `team-qa` strategist,
+`intake/2026-08-06-auto-group-proposal/` — Value Pool Slice 3, PRE-build; count
+unchanged).** Slice 3 lands three orthogonal axes of this entry at once (5 run
+states / 4 refinement states / 3 member-availability states). The reusable
+artifact this pass produced is the **reconciled combination-table row set**, and
+the reason it needed reconciling is itself this project's recorded meta-failure.
+
+`technical-plan.md` mandated **one** row; `unit-tests.md` designed **six** (a–f);
+`risk.md` named **three** more. Reconciled to **nine**, plus one read-side case:
+
+- One of `risk.md`'s three (complete coverage + prior `failed` + re-request →
+  *fresh* attempt) was **already** `unit-tests.md`'s row c — two documents
+  independently specifying the same row, neither aware.
+- One (`completed_zero_groups` + digest match → `reused_unchanged`) was named in
+  `risk.md` §4.1 and **fell out of `risk.md`'s own §6 tracked-artifact list** —
+  i.e. *"named by the risk analyst, adopted by neither architect, and the
+  WATCH-row fallback also didn't happen"* (§9.1's 2026-08-02 note) recurring
+  **inside the QA pass whose job was to prevent it**. Adopted, not dropped.
+- `unit-tests.md`'s deferred candidate conflated two routes: it reasoned about a
+  `GET /groups` poll but proposed a `POST /groups/propose` table row, where
+  §7's own ordering (gate at step 2, `in_progress` at step 3) makes it assert
+  the opposite of the plan. Split: relocated to a read-side case, and its
+  ordering concern promoted to its own propose-table row.
+
+**Three rows added beyond the six, all of them branch-*ordering* seams — the
+"cap first, then gate" shape this entry's own worked example names:** (g)
+`in_progress` **and** a matching digest → `already_running`, proving step 3
+precedes step 4 and no second spawn ever fires; (h) digest match against
+`completed_zero_groups` specifically, since that is the state most likely to be
+conflated with "not attempted" and seeding only a `completed` fixture leaves the
+more dangerous half of the `OR` untested; (i) `in_progress` **and** incomplete
+coverage → 409, pinning the gate-vs-`in_progress` ordering, with the same test
+asserting `GET /groups` still reports `run.state === "in_progress"` — two
+both-true facts that must never collapse into one field. **Generalizable
+addition to this entry: a suite organized one-test-per-branch is structurally
+incapable of containing a seam *between* branches; enumerate the orderings the
+handler's own step list creates, not just the states its registry declares.**
 
 ### Candidate new pattern, NOT yet catalogued — CWD-IDENTITY-FANOUT
 
