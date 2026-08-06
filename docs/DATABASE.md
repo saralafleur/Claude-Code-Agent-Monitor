@@ -1124,11 +1124,14 @@ CREATE TABLE value_unit_summaries (
 
 **Background overflow-sweep audit trail** (`intake/2026-08-04-value-summary-tick/`, `server/lib/value-summary-tick.js`): `POST /api/project-plans/altitudes` only ever synthesizes up to `MAX_UNITS_PER_PROMPT` (40) units per visit, so a large pool (the measured worst case is 182 units) needs a background sweep to reach full coverage without repeated manual reloads. The tick sweeps `MAX_PROJECTS_PER_TICK` (default 3) projects per cycle in **least-recently-swept rotation** (`value_summary_sweep_state.last_swept_at`, a real timestamp — never a row id), calling `value-ledger.js`'s `assembleValuePool` and `value-summary.js`'s `enrichPoolAltitudes` exactly once per swept project — the same composer the request path uses, never a second pool-assembly or cache-write path. Both tables are additive; landing them required zero `ALTER TABLE` and zero rebuilds.
 
+**Value Pool Slice 2 (coverage-on-demand)** adds one nullable column, `value_summary_sweep_state.coverage_requested_at` — `NULL` means passive (the ordinary least-recently-swept rotation); a non-`NULL` timestamp means a user-issued "prioritize now" coverage request is outstanding, which `listValueSweepTargets` sorts to the head of the rotation (ahead of the passive `last_swept_at` ordering) and which `server/lib/value-summary-tick.js`'s `runCoverageDrain()` clears once the project's pool reads fully described, or after a 24h TTL (`COVERAGE_REQUEST_TTL_MS`) with a logged revert to passive. Migrated via the guarded `addColumnsIfMissing` (`PRAGMA table_info`) idiom — additive and nullable, so a legacy row simply reads `NULL`. See [API.md](API.md#post-apiproject-planscoverage-request) for the two new routes and `server/lib/value-coverage.js` for the single-home `coverageSnapshot`/`estimateEta` computation this column feeds.
+
 ```sql
 CREATE TABLE value_summary_sweep_state (
     project_id TEXT PRIMARY KEY,
     last_swept_at TEXT,
-    pending_after_sweep INTEGER NOT NULL DEFAULT 0
+    pending_after_sweep INTEGER NOT NULL DEFAULT 0,
+    coverage_requested_at TEXT
 );
 
 CREATE TABLE value_summary_generation_log (
@@ -1154,6 +1157,7 @@ CREATE TABLE value_summary_generation_log (
 |--------|------|----------|-------------|
 | `value_summary_sweep_state.last_swept_at` | TEXT | YES | `NULL` until a project's first sweep — sorts first in the rotation (`ORDER BY (last_swept_at IS NOT NULL) ASC, last_swept_at ASC`), so a never-swept project is never starved behind a slower-rotating one |
 | `value_summary_sweep_state.pending_after_sweep` | INTEGER | NO | **Re-derived from that sweep's own `queued + unavailable` counts every time** — never decremented from a prior value, never a stale `pool_size` read. A project whose pool grows between sweeps must show that growth here |
+| `value_summary_sweep_state.coverage_requested_at` | TEXT | YES | Value Pool Slice 2: `NULL` = passive; a live timestamp jumps this project to the head of the rotation and marks `coverageSnapshot.demand` as `"requested"`/`"draining"`. Cleared at true 100% completion or 24h TTL expiry — never on a single failed sweep (transient errors must resume) |
 | `value_summary_generation_log.source` | TEXT | NO | `'tick'` or `'request'` — request-path logging (`POST /api/project-plans/altitudes`) landed alongside `stale_regenerated` below, using the same statement the tick already wrote through |
 | `value_summary_generation_log.outcome` | TEXT | NO | `ok`, `skipped` (reserved), or `error` — a per-project sweep failure never stops the rest of the sweep, and still writes an `error` row so the rotation's next-target logic and the operator both see it |
 | `value_summary_generation_log.pool_size` / `cache_hits` / `generated` / `queued` / `unavailable` | INTEGER | NO | A strict four-term partition: `cache_hits + generated + queued + unavailable === pool_size`, always — the direct audit-trail evidence that a sweep accounted for every unit in the pool it read |

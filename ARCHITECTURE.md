@@ -2249,15 +2249,60 @@ rotation's own ordering key, and `pending_after_sweep`, re-derived from that
 sweep's own `queued + unavailable` counts every time, never decremented) and
 `value_summary_generation_log` (one row per sweep attempt — `pool_size`,
 `cache_hits`, `generated`, `queued`, `unavailable`, `model`, `duration_ms`;
-the four counted columns always sum to `pool_size`). A sweep that generated
-at least one unit broadcasts `value_altitudes_updated`
-(`{project_id, unit_keys, pending}`) — v1 ships no client subscriber for
-this broadcast, so an already-open panel picks up newly-swept coverage on
-its next mount, not in place. One project failing never stops the sweep or
-starves the rotation (its `last_swept_at` still advances). Env:
-`DASHBOARD_VALUE_SUMMARY_TICK_MODE` (`on` default / `off`),
+the four counted columns always sum to `pool_size`). A sweep broadcasts
+`value_altitudes_updated` (`{project_id, unit_keys, pending, coverage}`)
+whenever it generated at least one unit, OR (Value Pool Slice 2, below)
+whenever `coverage.demand`/`coverage.complete` transitioned since the last
+broadcast for that project. **`PlanLedgerPanel` subscribes to this message
+and updates in place** — its first-ever `eventBus` subscription, superseding
+the original "v1 ships no client subscriber" design. One project failing
+never stops the sweep or starves the rotation (its `last_swept_at` still
+advances). Env: `DASHBOARD_VALUE_SUMMARY_TICK_MODE` (`on` default / `off`),
 `DASHBOARD_VALUE_SUMMARY_TICK_MS` (tick interval, default 600000 = 10m; ≤0
 disables), `MAX_PROJECTS_PER_TICK` (default 3).
+
+**Coverage-on-demand** (Value Pool Slice 2, `server/lib/value-coverage.js` +
+`runCoverageDrain()` in `value-summary-tick.js`) gives the passive sweep
+above a second, explicit demand level: a **coverage request**
+(`POST /api/project-plans/coverage-request`) stamps
+`value_summary_sweep_state.coverage_requested_at`, jumping that project to
+the head of the sweep rotation (one new leading `ORDER BY` term — passive
+ordering for unflagged projects is byte-identical to before), and kicks
+`runCoverageDrain()` fire-and-forget: a bounded loop of back-to-back
+≤`MAX_UNITS_PER_PROMPT`-unit batches, hard-capped at
+`MAX_DRAIN_BATCHES_PER_RUN = 25` (a safety bound sized against the measured
+182-unit pool, never an env-tunable knob — the drain deliberately never
+reads `MAX_PROJECTS_PER_TICK`, which governs passive rotation width only),
+sharing the passive tick's SAME module-scope overlap guard (one runner, one
+guard — a concurrent call to either function returns
+`{skipped: "overlap"}`, making the two-writer race structurally impossible
+rather than merely discouraged). Each iteration re-assembles the pool and
+re-derives `pending` from THAT iteration's own full-pool counts — never a
+decremented counter — so a pool that grows mid-drain extends the drain for
+free. A request that ages past `COVERAGE_REQUEST_TTL_MS` (24h) is cleared
+with a logged revert to passive, never silently, and never on a single
+transient sweep error (which keeps the flag and resumes next cycle).
+`server/lib/value-coverage.js` is the single home — never re-derived
+anywhere else, enforced by the named
+`server/__tests__/value-coverage-parity.test.js` — for one `coverageSnapshot`
+object (`described` = "fresh-or-immutable," so a stale-but-served mutable
+unit counts as NOT described; `pending`; `complete`; `demand` ∈
+`{"passive","requested","draining"}`; and an `eta` from the last 5
+qualifying `value_summary_generation_log` rows, per-project first then
+fleet-wide fallback, or the named `"estimating"`/`"none"` states — never a
+fabricated number) that `GET /api/project-plans/coverage` and the WS
+broadcast's `coverage` field both carry VERBATIM. `GET /coverage` runs the
+composer in **probe mode** (classify only, never spawns, writes no
+generation-log row). The client renders these fields; it never recomputes
+any of them — `PlanLedgerPanel` merges an incoming snapshot only if its
+`computed_at` is newer than the one already held, so an out-of-order
+HTTP/WS race can never visibly regress the header. Model tiering rides
+alongside: `summaryModel(stage)` (`server/lib/value-summary.js`) is one
+fallback cascade for both the existing per-unit synthesis (`stage: "unit"`)
+and a reserved `stage: "grouping"` (no consumer until a future slice),
+prepending a per-stage env override
+(`DASHBOARD_VALUE_SUMMARY_UNIT_MODEL` / `DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL`)
+to the existing model-selection chain — never a second sibling function.
 
 ---
 

@@ -775,6 +775,84 @@ caught seven undisposed should-fix items (§9.4). **Re-verifying at every gate
 cost this build two full fix cycles and found nine things. Trusting any single
 self-report would have shipped all nine.**
 
+**2026-08-05, `intake/2026-08-05-coverage-on-demand/` (Value Pool Slice 2) —
+THIRD CONSECUTIVE EFFORT on this file family (`value-summary-tick.js` /
+`value-coverage.js` siblings). Four events, down from nine — and the one that
+mattered was the MANDATORY deliverable again. NEW SUB-PATTERN: THE GUARD IS THE
+VACUITY, and its fallback launders a correct mutation proof.**
+
+Density fell (8 → 9 → 4) and the process caught everything before it shipped,
+which is the good news and should be read as such. The bad news is the *shape*:
+
+1. **`value-coverage-parity.test.js` — the named, MANDATORY §9.1 deliverable —
+   was itself the vacuous guard.** Its `if (broadcastPayload)` branch was
+   unreachable under its own fixture (`DASHBOARD_FOCUS_INFER_MODE=heuristic`
+   ⇒ `generated === 0`; `__resetTickStateForTest()` ⇒ no prior state ⇒
+   `shouldBroadcastCoverage` returns false), so `broadcast` was never invoked.
+   The `else` fallback then **built the "broadcast" side by calling
+   `coverageSnapshot()` from the test itself**, with `pool_size: 3` hardcoded
+   and `requestedAt`/`draining` hand-fed. "Route vs. broadcast parity"
+   degenerated to `coverageSnapshot(X) deepEquals coverageSnapshot(X)`.
+   **The guard whose entire job was to catch dual derivation was itself the
+   dual-derivation-hiding vacuity** — §9.3 silently un-doing §9.1, the exact
+   coupling this entry has warned about since 2026-08-01, now at its sharpest.
+2. **A correctly-executed mutation proof certified it green.** The verifier did
+   everything the standing rule asks — injected two real mutations, observed
+   red, restored — and both landed on the **route** side, the only side the
+   fallback still compared. AGENT-SELF-REPORTED-RED said "the observation must
+   be performed, not reported." This adds: **the observation must be injected
+   on the side of the artifact the guard claims to compare.** A parity guard
+   red-proven from one side only is proven for one side only.
+3. *(verifier)* A new `assert.ok(true, …)` dead `catch`-fallback branch in
+   `coverage-smoke.test.js` — the plan's own literal G5 gate made false by the
+   very build whose task list ticked "zero vacuous guards detected by sweep."
+   Fixed substantively, not cosmetically: the fallback deleted **and** the
+   assertion narrowed from a whole-file substring match to an
+   interface-body-scoped `coverage?: CoverageSnapshot` match.
+4. *(reviewer, SF-7 — knowingly shipped, disposed in that build's `decisions.md`
+   DEC-3)* four existence-only cases (`assert.ok(stmts.requestValueCoverage)`)
+   under describe titles promising the **mechanism** ("Coverage Request
+   Mechanism"), plus a **conditional** assertion (`if (eta.state ===
+   "estimating") { assert… }`) that is vacuous for any other state. Mitigated
+   only because the real proofs exist in other files.
+
+**Detectors this build adds (cheap, run them on every new guard):**
+- **Any `if (<the artifact the guard names>) { … } else { … }` in a guard is a
+  §9.3 candidate, and the `else` is the load-bearing half.** A guard that
+  silently substitutes a self-computed object for the artifact it names
+  *cannot fail*. Grep new guard files for `if (` around the captured
+  payload/response/spy, and for `let x = null` initializations that are only
+  conditionally assigned. Delete the fallback; assert the artifact exists
+  first (`assert.ok(broadcastPayload, "…")`) so absence is red, not a branch.
+- **A hardcoded literal inside a parity/equality fixture (`pool_size: 3`) is a
+  dropped comparison** — the same fingerprint as §9.3's
+  extracted-but-unused local. If both sides of a "these two must agree"
+  assertion can be traced to the same expression, there is one side, not two.
+- **For any cross-consumer parity guard, red-prove from BOTH sides** and record
+  both mutations. Here the catching mutation was `pool_size: result.poolSize
+  - 1` inside `buildAndMaybeBroadcastCoverage` — invisible to the guard as
+  originally shipped, which is the whole point.
+- **Probe-mode / mode-flag fixtures narrow what a mutation can distinguish.**
+  Recorded live: a first, naive mutation (`snapshot.pending = counts.queued`,
+  dropping `+ counts.unavailable`) **passed**, because probe mode routes every
+  miss to `queued` so `counts.unavailable === 0` on the route path and the
+  wrong formula produced the right number. Running a mutation is necessary,
+  not sufficient — and *a mutation that passes is a finding about the fixture*,
+  not a clean bill of health.
+
+**Being warned still does not reduce incidence — but the headcount still
+works, and this run is the cleanest evidence of it yet.** Every agent here was
+briefed on this entry by name and the MANDATORY deliverable still shipped
+vacuous. What caught it was that the run plan (`director-of-engineering`), under
+`fast` mode, deliberately kept **both** `build-planner` and `build-reviewer` IN
+scope instead of trimming them: the verifier caught two things the implementer
+missed, and the **reviewer caught two blockers the verifier's own correct
+mutation pass had certified green** (the second being a live React 18 StrictMode
+regression — see the STRICTMODE-BLIND CLIENT SUITE candidate below). **Standing
+recommendation: on any build touching this file family, do not trim the reviewer
+under fast mode.** Two consecutive efforts now show the reviewer finding
+blockers that a passing, correctly-executed verifier pass had already cleared.
+
 **Candidate new pattern, NOT yet catalogued — TEST-AGAINST-LIVE-DB (recorded with
 an explicit promotion trigger; 2026-08-03,
 `intake/2026-08-02-practice-kind-override/`).** The §9.3 instance above had a
@@ -1225,6 +1303,29 @@ id is next) and re-sorts correctly. Recorded as **DEC-20** in that effort's `dec
 out of scope to fix there, still open. The hand-typed scan had been green over that defect
 the whole time.
 
+**2026-08-05, `intake/2026-08-05-coverage-on-demand/` — occurrence 7, on
+`assertSingleHome`'s *other* hand-typed axis: the CONSUMER list.** The
+derived-scope cure above fixed the **export** axis — `assertSingleHome` derives
+which exports to check from the artifact itself. Its **consumer** scope is still
+hand-typed. Slice 2 added `server/lib/value-coverage.js` as a third consumer of
+`value-summary.js` (`const { MAX_UNITS_PER_PROMPT } = require("./value-summary")`),
+while `single-writer-guard.test.js`'s `assertSingleHome("../lib/value-summary", …)`
+still listed exactly two (`../routes/project-plans`, `../lib/value-summary-tick`).
+Green suite, invisible consumer. **The aggravating detail: the same build edited
+that same map in the same commit** (adding `SUMMARY_STAGES` to both existing
+consumers' `absent` lists), so the author was inside the map and still did not
+see that the map's own membership was stale — a hand-typed registry does not
+prompt you to add yourself to it. Caught by the reviewer (SF-5), fixed in the
+same change set.
+
+**The generalizable half:** a guard with one derived axis and one hand-typed
+axis reads as "derived" and is trusted as such. **Enumerate the consumer list
+from the artifact too** — `grep` `server/lib` + `server/routes` for the module's
+own import specifier and fail on any importer missing from the map, exactly as
+`FILE_DISPOSITIONS` fails on an undispositioned file. Count 6 → 7; the cure
+recommended at occurrence 6 remains half-built, and this is what the unbuilt
+half costs.
+
 ### 9.8 OVERLOADED-ABSENCE (distinguishable outcomes collapsed into one absent value)
 
 **PROMOTED from candidate to a numbered entry 2026-08-04** by `team-qa`
@@ -1571,7 +1672,90 @@ Count unchanged (pre-flag, not an occurrence; neither promotion trigger is met).
 
 ---
 
+### Candidate new pattern, NOT yet catalogued — STRICTMODE-BLIND CLIENT SUITE
+
+Recorded with an explicit promotion trigger, same convention as
+CWD-IDENTITY-FANOUT above. **First occurrence, and it fired** — this one is not
+theoretical.
+
+**The shape:** `client/src/main.tsx:98` wraps the app in `<StrictMode>` and
+`client/package.json` pins `react ^18.3.1`, so **in `npm run dev` React runs
+every effect setup → cleanup → setup**. React Testing Library renders **without**
+`StrictMode`. Therefore an entire class of double-invoke defects — refs and
+module-scope state armed once at creation and disarmed by a cleanup that the
+second setup never re-arms, subscriptions/timers/aborts created twice,
+idempotence assumptions in effect bodies — is **structurally invisible to this
+project's client suite**. Not "untested": *unobservable*. `npm run test:client`
+can be 817/817 green over a panel that renders nothing in dev.
+
+**How it fired (2026-08-05, `intake/2026-08-05-coverage-on-demand/`, review
+blocker BL-2).** `PlanLedgerPanel.tsx` replaced a StrictMode-correct per-effect
+`let cancelled = false` local with a shared `const mountedRef = useRef(true)`
+plus a **cleanup-only** effect:
+
+```ts
+const mountedRef = useRef(true);
+useEffect(() => () => { mountedRef.current = false; }, []);   // never re-armed
+```
+
+Under StrictMode the second setup returns a fresh cleanup but never restores
+`true`, so `mountedRef.current === false` from first paint for the component's
+whole life. Consequences in dev: `fetchAltitudesFor(...).then/.catch` both
+early-return ⇒ `setAltitudes` never called ⇒ **no unit ever renders its
+PROJECT/STAKEHOLDER text — the entire point of Value Pool Slices 1–2** — and
+`handlePrioritizeNow`'s `finally` never clears `requestingCoverage` ⇒ the
+"prioritize now" button is **permanently disabled after one click**. Two
+independent verification passes (one of them a six-mutation injection pass) and
+a full green client suite saw none of it. It was caught by a human-style read of
+the diff against `main.tsx`, and only because the reviewer went looking for
+what the suite *cannot* see.
+
+**Why the cheap fix is not the cure.** The build added one regression test that
+renders this panel inside `<StrictMode>` (red-proven against the un-re-armed
+ref). That closes this component. The **class** stays open for every other
+component, and the next `useRef`/`useEffect` refactor reintroduces it with a
+green suite.
+
+**Cures worth considering when it is promoted** (cheapest first): wrap the
+shared render helper in `client/src/test/` so *every* RTL render runs under
+`<StrictMode>` (expect a first-run red set — per §9.3's own history, a parity
+check that goes red for legitimate reasons on day one gets weakened, so triage
+the initial failures deliberately rather than reverting); or a lint rule /
+structural guard rejecting `useRef(true)` + cleanup-only `useEffect` on the same
+ref; or, narrowest, require any effect that flips a ref in cleanup to set it in
+setup.
+
+**Promote to a real catalog entry the first time either (a) a second
+StrictMode-only defect is found in any client component, or (b) a
+double-invoke bug reaches Sara's running dashboard.** Until then, anyone
+touching `useRef`/`useEffect` in `client/src/components/` should read this and
+check the setup body re-arms whatever the cleanup tears down.
+
+---
+
 ## Planning notes for `team-intake` / `team-qa`
+
+### Intake throughput can outrun build throughput, and the working tree pays for it
+
+**2026-08-05, `requests/2026-08-04-value-pool-grouping/`** (applied on the
+`effort/2026-08-05-coverage-on-demand` branch per that intake's DEC-11 / PM-5,
+verbatim from `pm-plan.md` §PM-5).
+
+Slice 1 was intaken 2026-08-04 with six documents and zero lines of code; Slice
+2 was intaken 2026-08-05 on top of it, also with zero lines of code, while the
+*previous* effort's merged work existed locally only as an unlabelled
+~2,000-line staged diff on a `master` that was 6 ahead / 2 behind origin. The
+concrete cost landed inside the intake itself: Slice 2's `DEPENDENCY-F1` was
+written on the factually wrong premise that the staged diff was Slice 1's build,
+and was corrected only because two agents independently checked live git instead
+of reading the decision row. A working tree ambiguous enough to make a careful
+reader wrong is a project risk, not a housekeeping issue. **This is the known
+"capability ships with nothing recording it" thread (recorded 3×, adopted 0×)
+running in reverse — the record shipping with no capability.** Cheapest durable
+rule, and the only one this project has evidence of being able to adopt: **do
+not intake slice N+1 of a multi-slice request until slice N's build has
+landed.** The existing worktree / `ps` / `lsof` guidance stays necessary and is
+demonstrably not sufficient.
 
 ### Exact CLI flags in a plan need an empirical check, not a documentation read
 

@@ -23,9 +23,12 @@ const dbModule = require("../db");
 const { db, stmts } = dbModule;
 const {
   runValueSummaryTickOnce,
+  runCoverageDrain,
   listSweepTargets,
   __injectPoolAssemblerForTest,
   __resetTickStateForTest,
+  COVERAGE_REQUEST_TTL_MS,
+  MAX_DRAIN_BATCHES_PER_RUN,
 } = require("../lib/value-summary-tick");
 const { __injectSpawnForTest } = require("../lib/focus-inference");
 const { assembleValuePool } = require("../lib/value-ledger");
@@ -988,5 +991,401 @@ describe("value-summary-tick: partition counting (L1–L4)", () => {
       logRow.pool_size,
       "counts sourced from composer (identity holds)"
     );
+  });
+});
+
+// ─── Value Pool Slice 2: runCoverageDrain (DEC-4, DEC-8, WATCH-7/WATCH-8) ───
+
+function coverageRequestedAt(projectId) {
+  return db
+    .prepare("SELECT coverage_requested_at FROM value_summary_sweep_state WHERE project_id = ?")
+    .get(projectId)?.coverage_requested_at;
+}
+
+describe("runCoverageDrain: overlap guard SHARED with runValueSummaryTickOnce (DEC-4, WATCH-7)", () => {
+  it("a drain call while a passive tick is running returns {skipped: 'overlap'}", async () => {
+    const passiveProject = await makeSweptProject("overlap-passive");
+    const drainProject = await makeSweptProject("overlap-drain");
+    stmts.requestValueCoverage.run(drainProject, new Date().toISOString());
+
+    __injectPoolAssemblerForTest(async () => {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({ units: makeUnits(3), identityWarnings: [] }), 50);
+      });
+    });
+    __injectSpawnForTest(spawnResolvingFirst(3));
+
+    const passivePromise = runValueSummaryTickOnce(dbModule, {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const drainResult = await runCoverageDrain(dbModule, drainProject, {});
+
+    assert.deepEqual(drainResult, { skipped: "overlap" });
+    await passivePromise;
+  });
+
+  it("a passive tick while a drain is running returns {skipped: 'overlap'}", async () => {
+    const drainProject = await makeSweptProject("overlap-drain-2");
+    stmts.requestValueCoverage.run(drainProject, new Date().toISOString());
+
+    __injectPoolAssemblerForTest(async () => {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({ units: makeUnits(3), identityWarnings: [] }), 50);
+      });
+    });
+    __injectSpawnForTest(spawnResolvingFirst(3));
+
+    const drainPromise = runCoverageDrain(dbModule, drainProject, {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const passiveResult = await runValueSummaryTickOnce(dbModule, {});
+
+    assert.deepEqual(passiveResult, { skipped: "overlap" });
+    await drainPromise;
+  });
+});
+
+describe("runCoverageDrain: exit conditions (G1c, all named and mutually exclusive)", () => {
+  it("(a) complete: pool fully described across 2 iterations clears the flag in the same write as the final sweep-state upsert", async () => {
+    const projectId = await makeSweptProject("drain-complete");
+    const pool = makeUnits(41); // > MAX_UNITS_PER_PROMPT (40): forces 2 iterations
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    __injectPoolAssemblerForTest(async () => ({ units: pool, identityWarnings: [] }));
+    __injectSpawnForTest(spawnResolvingFirst(40));
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+
+    assert.equal(result.exitReason, "complete");
+    assert.equal(
+      result.iterations,
+      2,
+      "iteration 1: 40 resolve, 1 queued; iteration 2: the last unit resolves"
+    );
+    assert.equal(coverageRequestedAt(projectId), null, "flag cleared at true 100%");
+
+    const finalState = sweepState(projectId);
+    assert.equal(
+      finalState.pending_after_sweep,
+      0,
+      "flag-clear and the final pending_after_sweep=0 write land together"
+    );
+  });
+
+  it("(b) error: a project failure stops the drain and KEEPS the flag (transient errors must resume)", async () => {
+    const projectId = await makeSweptProject("drain-error");
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    __injectPoolAssemblerForTest(async () => {
+      throw new Error("assembly failed: simulated outage");
+    });
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+
+    assert.equal(result.exitReason, "error");
+    assert.equal(
+      result.iterations,
+      1,
+      "stops immediately on the first error, no retry loop within one drain call"
+    );
+    assert.notEqual(
+      coverageRequestedAt(projectId),
+      null,
+      "flag survives a transient error — DEC-8 (resume next tick/drain)"
+    );
+  });
+
+  it("(c) no_progress: LLM unavailable produces generated=0 while pending > 0 — stops, KEEPS the flag", async () => {
+    const projectId = await makeSweptProject("drain-no-progress");
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+    process.env.DASHBOARD_FOCUS_INFER_MODE = "heuristic"; // forces "unavailable", never "queued"
+
+    __injectPoolAssemblerForTest(async () => ({ units: makeUnits(5), identityWarnings: [] }));
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+    delete process.env.DASHBOARD_FOCUS_INFER_MODE;
+
+    assert.equal(result.exitReason, "no_progress");
+    assert.equal(result.iterations, 1, "stops after the first no-progress iteration, never spins");
+    assert.equal(result.lastResult.generated, 0);
+    assert.ok(result.lastResult.pending > 0);
+    assert.notEqual(coverageRequestedAt(projectId), null, "flag kept on no-progress exit (§9.8)");
+  });
+
+  it("(d) iteration_cap: unbounded (simulated) growth never converges — stops at MAX_DRAIN_BATCHES_PER_RUN, KEEPS the flag", async () => {
+    const projectId = await makeSweptProject("drain-cap");
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    // Every call returns a BRAND NEW 41-unit pool (unique keys per call) —
+    // simulates a pool that keeps growing faster than the drain can catch
+    // up: every iteration makes real progress (40 generated) but pending
+    // never reaches 0 (1 always left over), so the ONLY way this loop can
+    // ever stop is the hard MAX_DRAIN_BATCHES_PER_RUN safety bound.
+    let callCount = 0;
+    __injectPoolAssemblerForTest(async () => {
+      callCount += 1;
+      return {
+        units: makeUnits(41, { prefix: `cap-iter${callCount}-` }),
+        identityWarnings: [],
+      };
+    });
+    __injectSpawnForTest(spawnResolvingFirst(40));
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+
+    assert.equal(result.exitReason, "iteration_cap");
+    assert.equal(result.iterations, MAX_DRAIN_BATCHES_PER_RUN);
+    assert.equal(MAX_DRAIN_BATCHES_PER_RUN, 25);
+    assert.notEqual(
+      coverageRequestedAt(projectId),
+      null,
+      "flag kept — a later drain or tick resume picks it back up"
+    );
+  });
+
+  it("(e) not_requested: calling runCoverageDrain when the flag isn't set exits immediately without touching the pool", async () => {
+    const projectId = await makeSweptProject("drain-not-requested");
+    // No requestValueCoverage call — the flag is unset.
+
+    __injectPoolAssemblerForTest(async () => {
+      throw new Error("must never assemble the pool when not requested");
+    });
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+    assert.equal(result.exitReason, "not_requested");
+    assert.equal(result.iterations, 1);
+  });
+
+  it("(f) pool growth mid-drain extends the drain for free — pending re-derived from THAT iteration's own full-pool counts, never a decremented counter (WATCH-8)", async () => {
+    const projectId = await makeSweptProject("drain-grows");
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    // Iteration 1: 45-unit pool (> 40 cap) → 40 generated, 5 queued,
+    // pending=5. A DECREMENT-based (WRONG) implementation would then expect
+    // iteration 2 to resolve exactly those 5 and stop. Instead, the pool
+    // GROWS to 50 units before iteration 2 (assembleValuePool called
+    // again returns 5 MORE brand-new units — an active repo minting work
+    // faster than the drain can keep up). Correct (re-derive-every-
+    // iteration) behavior: iteration 2 sees 50 units, 40 already cached
+    // (iteration 1's generation), 10 genuine misses (5 old stragglers + 5
+    // new growth units) — all 10 fit under the 40 cap, so ALL resolve in
+    // one more iteration (generated=10, not 5), converging to pending=0.
+    let call = 0;
+    __injectPoolAssemblerForTest(async () => {
+      call += 1;
+      const n = call === 1 ? 45 : 50;
+      return { units: makeUnits(n), identityWarnings: [] };
+    });
+    __injectSpawnForTest(spawnResolvingFirst(40));
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+
+    assert.equal(result.exitReason, "complete");
+    assert.equal(result.iterations, 2);
+    assert.equal(
+      result.lastResult.generated,
+      10,
+      "iteration 2 generates 10 (5 old stragglers + 5 units the pool grew by), not the naively-expected 5 — proves re-derivation, not decrement"
+    );
+    assert.equal(result.lastResult.pending, 0);
+    assert.equal(coverageRequestedAt(projectId), null);
+  });
+});
+
+describe("runCoverageDrain: TTL expiry (DEC-8)", () => {
+  it("an already-expired request exits 'ttl_expired' immediately, clears the flag, and never touches the pool", async () => {
+    const projectId = await makeSweptProject("drain-ttl");
+    const expiredAt = new Date(Date.now() - COVERAGE_REQUEST_TTL_MS - 60_000).toISOString();
+    stmts.requestValueCoverage.run(projectId, expiredAt);
+
+    __injectPoolAssemblerForTest(async () => {
+      throw new Error("must never assemble the pool for an expired request");
+    });
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+    assert.equal(result.exitReason, "ttl_expired");
+    assert.equal(result.iterations, 1);
+    assert.equal(coverageRequestedAt(projectId), null, "flag cleared on TTL expiry");
+  });
+
+  it("a live (not-yet-expired) request still drains normally", async () => {
+    const projectId = await makeSweptProject("drain-ttl-live");
+    const recentAt = new Date(Date.now() - 60_000).toISOString(); // 1 minute ago
+    stmts.requestValueCoverage.run(projectId, recentAt);
+
+    __injectPoolAssemblerForTest(async () => ({ units: makeUnits(3), identityWarnings: [] }));
+    __injectSpawnForTest(spawnResolvingFirst(3));
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+    assert.equal(result.exitReason, "complete");
+    assert.equal(coverageRequestedAt(projectId), null);
+  });
+
+  it("listValueSweepTargets sorts an EXPIRED coverage request as passive, not first (DEC-8 ordering half)", async () => {
+    const expiredProject = await makeSweptProject("ttl-order-expired", {
+      lastSweptAt: new Date(Date.now() - 1000).toISOString(), // swept 1s ago (very recent)
+    });
+    stmts.requestValueCoverage.run(
+      expiredProject,
+      new Date(Date.now() - COVERAGE_REQUEST_TTL_MS - 60_000).toISOString()
+    );
+    const neverSweptProject = await makeSweptProject("ttl-order-never-swept");
+
+    const targets = listSweepTargets(dbModule, 10);
+    const targetIds = targets.map((t) => t.project_id);
+    const expiredIdx = targetIds.indexOf(expiredProject);
+    const neverSweptIdx = targetIds.indexOf(neverSweptProject);
+
+    assert.ok(
+      neverSweptIdx < expiredIdx,
+      "an expired request must sort as passive (behind a never-swept passive project), never first"
+    );
+  });
+
+  it("listValueSweepTargets sorts a LIVE coverage request first, ahead of a never-swept passive project", async () => {
+    const requestedProject = await makeSweptProject("ttl-order-live");
+    stmts.requestValueCoverage.run(requestedProject, new Date(Date.now() - 60_000).toISOString());
+    const neverSweptProject = await makeSweptProject("ttl-order-never-swept-2");
+
+    const targets = listSweepTargets(dbModule, 10);
+    const targetIds = targets.map((t) => t.project_id);
+
+    assert.equal(targetIds[0], requestedProject, "a live coverage request always sorts first");
+    assert.ok(targetIds.includes(neverSweptProject));
+  });
+
+  it("passive ordering for unflagged projects is byte-identical to pre-Slice-2 (no coverage requests anywhere)", async () => {
+    const now = new Date();
+    const pNever = await makeSweptProject("byte-identical-never");
+    const pOld = await makeSweptProject("byte-identical-old", {
+      lastSweptAt: new Date(now.getTime() - 7 * 86400_000).toISOString(),
+    });
+    const pRecent = await makeSweptProject("byte-identical-recent", {
+      lastSweptAt: new Date(now.getTime() - 1 * 86400_000).toISOString(),
+    });
+
+    const targets = listSweepTargets(dbModule, 10);
+    const targetIds = targets.map((t) => t.project_id);
+
+    assert.deepEqual(
+      targetIds,
+      [pNever, pOld, pRecent],
+      "identical rotation order to the pre-Slice-2 rotation (never-swept, then oldest, then most recent)"
+    );
+  });
+
+  it("runValueSummaryTickOnce's TTL sweep proactively clears an expired flag before target selection (sweepExpiredCoverageRequests)", async () => {
+    const projectId = await makeSweptProject("ttl-proactive-clear");
+    stmts.requestValueCoverage.run(
+      projectId,
+      new Date(Date.now() - COVERAGE_REQUEST_TTL_MS - 60_000).toISOString()
+    );
+
+    __injectPoolAssemblerForTest(async () => ({ units: makeUnits(2), identityWarnings: [] }));
+    __injectSpawnForTest(spawnResolvingFirst(2));
+
+    await runValueSummaryTickOnce(dbModule, {});
+
+    assert.equal(
+      coverageRequestedAt(projectId),
+      null,
+      "the passive tick's own TTL sweep clears an expired flag even without a drain call"
+    );
+  });
+});
+
+describe("runCoverageDrain: MAX_PROJECTS_PER_TICK is never read by the drain path (DEC-3.3)", () => {
+  it("the drain path source contains no reference to MAX_PROJECTS_PER_TICK inside runCoverageDrain's body", () => {
+    const source = fs.readFileSync(require.resolve("../lib/value-summary-tick"), "utf8");
+    const sigMatch = source.match(/async function runCoverageDrain\s*\([^)]*\)\s*\{/);
+    assert.ok(sigMatch, "runCoverageDrain not found");
+    const bodyStart = sigMatch.index + sigMatch[0].length - 1;
+    let depth = 1;
+    let i = bodyStart + 1;
+    while (i < source.length && depth > 0) {
+      if (source[i] === "{") depth++;
+      else if (source[i] === "}") depth--;
+      i++;
+    }
+    const drainBody = source.slice(bodyStart, i);
+    assert.doesNotMatch(
+      drainBody,
+      /MAX_PROJECTS_PER_TICK/,
+      "the drain must not read MAX_PROJECTS_PER_TICK — that knob governs passive rotation width only (DEC-3.3)"
+    );
+  });
+
+  it("setting a tiny MAX_PROJECTS_PER_TICK does not bound a drain's iteration count", async () => {
+    process.env.MAX_PROJECTS_PER_TICK = "1";
+    const projectId = await makeSweptProject("drain-ignores-max-projects");
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    __injectPoolAssemblerForTest(async () => ({ units: makeUnits(41), identityWarnings: [] }));
+    __injectSpawnForTest(spawnResolvingFirst(40));
+
+    const result = await runCoverageDrain(dbModule, projectId, {});
+    delete process.env.MAX_PROJECTS_PER_TICK;
+
+    // 2 iterations needed to fully drain 41 units — would be impossible if
+    // MAX_PROJECTS_PER_TICK=1 bounded the drain the way it bounds a passive
+    // tick's target count.
+    assert.equal(result.exitReason, "complete");
+    assert.equal(result.iterations, 2);
+  });
+});
+
+describe("Broadcast widening (DEC-6): terminal iteration with generated===0 still emits on a demand/complete transition", () => {
+  it("a drain iteration that reaches 100% via a cache-hit (not a new generation) still broadcasts the terminal snapshot", async () => {
+    const projectId = await makeSweptProject("broadcast-transition");
+    const pool = makeUnits(2);
+    const stragglerUnit = pool[1];
+    stmts.requestValueCoverage.run(projectId, new Date().toISOString());
+
+    let call = 0;
+    __injectPoolAssemblerForTest(async () => {
+      call += 1;
+      if (call === 2) {
+        // Simulate the straggler unit being resolved by SOMETHING ELSE
+        // (e.g. a concurrent POST /altitudes request) in between this
+        // drain's two iterations — this iteration's own enrichPoolAltitudes
+        // call will find it as a cache hit, not a new generation.
+        stmts.upsertValueUnitSummary.run(
+          stragglerUnit.unitKey,
+          "P-straggler",
+          "S-straggler",
+          "haiku",
+          null,
+          stragglerUnit.label,
+          null,
+          "initial",
+          null
+        );
+      }
+      return { units: pool, identityWarnings: [] };
+    });
+    // Only ONE unit should ever need a real spawn (iteration 1, the
+    // non-straggler unit) — iteration 2 must find BOTH units already
+    // cached and never call spawn again.
+    __injectSpawnForTest(spawnResolvingFirst(1));
+
+    const broadcasts = [];
+    const result = await runCoverageDrain(dbModule, projectId, {
+      broadcast: (type, payload) => broadcasts.push({ type, payload }),
+    });
+
+    assert.equal(result.exitReason, "complete");
+    assert.equal(result.iterations, 2);
+    assert.equal(result.lastResult.generated, 0, "the terminal iteration itself generated nothing");
+    assert.equal(result.lastResult.pending, 0);
+
+    // Both iterations must have broadcast: iteration 1 via generated > 0,
+    // iteration 2 via the demand/complete TRANSITION despite generated === 0.
+    assert.equal(
+      broadcasts.length,
+      2,
+      "both iterations broadcast — the second via the widened transition rule"
+    );
+    const terminal = broadcasts[1].payload;
+    assert.equal(terminal.coverage.complete, true);
+    assert.equal(terminal.coverage.demand, "passive");
+    assert.ok(Array.isArray(terminal.unit_keys));
   });
 });

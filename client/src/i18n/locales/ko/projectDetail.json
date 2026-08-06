@@ -162,6 +162,14 @@
         "dismiss": "닫기",
         "dismissAll": "모두 닫기",
         "updatedGeneric": "업데이트됨"
+      },
+      "coverage": {
+        "header": "{{poolSize}}개 중 {{described}}개 설명됨",
+        "etaRemaining": "약 {{minutes}}분 남음",
+        "estimating": "추정 중…",
+        "prioritizeNow": "지금 우선 처리",
+        "requested": "우선 처리 요청됨",
+        "draining": "지금 처리 중…"
       }
     },
     "health": {

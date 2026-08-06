@@ -162,6 +162,14 @@
         "dismiss": "关闭",
         "dismissAll": "全部关闭",
         "updatedGeneric": "已更新"
+      },
+      "coverage": {
+        "header": "已描述 {{described}}/{{poolSize}}",
+        "etaRemaining": "预计还需 {{minutes}} 分钟",
+        "estimating": "正在估算…",
+        "prioritizeNow": "立即优先处理",
+        "requested": "已请求优先处理",
+        "draining": "正在处理…"
       }
     },
     "health": {

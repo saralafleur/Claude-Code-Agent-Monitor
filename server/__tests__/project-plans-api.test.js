@@ -817,3 +817,88 @@ describe("project-plans API (B1)", () => {
     });
   });
 });
+
+// Value Pool Slice 2: coverage-on-demand routes. Every project here has no
+// project_paths row (makeProject() never inserts one), so assembleValuePool
+// resolves to an empty pool with zero git work — safe and fast for route
+// tests, and exercises the "empty pool" edge (pool_size=0, described=0,
+// complete=true) honestly.
+describe("Group T: coverage-on-demand routes (POST /coverage-request, GET /coverage)", () => {
+  it("T1: GET /coverage on a never-requested project returns a passive, complete snapshot (empty pool)", async () => {
+    const projectId = await makeProject("coverage-passive");
+    const res = await fetch(`/api/project-plans/coverage?project_id=${projectId}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.coverage.project_id, projectId);
+    assert.equal(res.body.coverage.demand, "passive");
+    assert.equal(res.body.coverage.pool_size, 0);
+    assert.equal(res.body.coverage.described, 0);
+    assert.equal(res.body.coverage.pending, 0);
+    assert.equal(res.body.coverage.complete, true);
+    assert.equal(res.body.coverage.requested_at, null);
+    assert.ok(res.body.coverage.eta);
+    assert.ok(res.body.coverage.computed_at);
+  });
+
+  it("T2: GET /coverage requires project_id", async () => {
+    const res = await fetch(`/api/project-plans/coverage`);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  });
+
+  it("T3: POST /coverage-request stamps the flag, returns 202 with demand !== 'passive', and is idempotent under a redundant call", async () => {
+    const projectId = await makeProject("coverage-request-idempotent");
+    const res1 = await post("/api/project-plans/coverage-request", { project_id: projectId });
+    assert.equal(res1.status, 202);
+    assert.notEqual(res1.body.coverage.demand, "passive");
+    assert.ok(["requested", "draining"].includes(res1.body.coverage.demand));
+
+    // A redundant "prioritize now" click while a drain may already be
+    // in flight must never 500 — the overlap guard absorbs it.
+    const res2 = await post("/api/project-plans/coverage-request", { project_id: projectId });
+    assert.equal(res2.status, 202);
+
+    // Give the fire-and-forget drain a tick to run to completion (empty
+    // pool converges in one iteration) before asserting the flag's fate —
+    // this is a liveness check, not a strict timing assertion.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const finalState = stmts.getValueSweepState.get(projectId);
+    // An empty pool is immediately "complete" — the drain clears the flag.
+    assert.equal(
+      finalState ? finalState.coverage_requested_at : null,
+      null,
+      "an empty pool's drain completes and clears the flag almost immediately"
+    );
+  });
+
+  it("T4: POST /coverage-request requires project_id", async () => {
+    const res = await post("/api/project-plans/coverage-request", {});
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  });
+
+  it("T5: POST /altitudes response shape is unchanged by this slice (no coverage field leaks in)", async () => {
+    const projectId = await makeProject("altitudes-shape-unchanged");
+    const res = await post("/api/project-plans/altitudes", { project_id: projectId, units: [] });
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.keys(res.body).sort(), ["altitudes", "counts", "states"]);
+  });
+
+  it("T6 (G2 smoke): GET /coverage's response shape matches the coverageSnapshot contract exactly", async () => {
+    const projectId = await makeProject("coverage-shape");
+    const res = await fetch(`/api/project-plans/coverage?project_id=${projectId}`);
+    assert.deepEqual(
+      Object.keys(res.body.coverage).sort(),
+      [
+        "complete",
+        "computed_at",
+        "demand",
+        "described",
+        "eta",
+        "pending",
+        "pool_size",
+        "project_id",
+        "requested_at",
+      ].sort()
+    );
+  });
+});

@@ -1894,6 +1894,17 @@ db.exec(`
 //    counts, never decremented from a prior value and never read from a
 //    stale pool_size — a project whose pool grows between sweeps must show
 //    that growth here (T-C, qa/decisions.md QA-DEC-2 / WATCH-8).
+//    `coverage_requested_at` (Value Pool Slice 2, DEC-4/DEC-8) is nullable —
+//    NULL means passive (this project follows the plain least-recently-swept
+//    rotation); a non-NULL timestamp means a user-issued coverage request is
+//    outstanding, which `listValueSweepTargets` sorts to the head of the
+//    rotation ahead of passive ordering, and which `server/lib/value-summary-tick.js`'s
+//    `runCoverageDrain` clears only once that project's pool reads fully
+//    described (queued === 0 && unavailable === 0) OR the request ages past
+//    `COVERAGE_REQUEST_TTL_MS` (24h, cleared-with-log, DEC-8) — a flag is
+//    NEVER cleared merely because one sweep attempt errored (transient
+//    failures must resume next tick, same §9.8 OVERLOADED-ABSENCE discipline
+//    `pending_after_sweep` already follows).
 //  - value_summary_generation_log: one row per sweep attempt, the observable
 //    audit trail (AC-2) an operator can read directly. `source` carries an
 //    unused-in-v1 'request' enum value on purpose (DEC-14): SQLite cannot
@@ -1906,7 +1917,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS value_summary_sweep_state (
     project_id TEXT PRIMARY KEY,
     last_swept_at TEXT,
-    pending_after_sweep INTEGER NOT NULL DEFAULT 0
+    pending_after_sweep INTEGER NOT NULL DEFAULT 0,
+    coverage_requested_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS value_summary_generation_log (
@@ -2256,6 +2268,20 @@ addColumnsIfMissing({
     outcome: "TEXT NOT NULL DEFAULT 'ok'",
     model: "TEXT",
     duration_ms: "INTEGER",
+  },
+});
+
+// Migrate: value_summary_sweep_state.coverage_requested_at (Value Pool Slice
+// 2, DEC-8) — additive/nullable, same addColumnsIfMissing/PRAGMA table_info
+// idiom as the block above (§9.5 FRESH-DB-BLIND SCHEMA CHANGE — never the
+// deprecated try/SELECT…LIMIT 1/catch probe). A legacy row (predating this
+// column) reads coverage_requested_at = NULL, which is exactly the "passive"
+// semantics the schema comment above documents — no behavioral migration is
+// needed beyond the column existing and being writable.
+addColumnsIfMissing({
+  table: "value_summary_sweep_state",
+  columns: {
+    coverage_requested_at: "TEXT",
   },
 });
 
@@ -3396,14 +3422,83 @@ const stmts = {
   // server/lib/value-summary-tick.js only. `listValueSweepTargets` orders by
   // a real timestamp (never-swept projects first via the portable
   // `IS NOT NULL` form, then oldest `last_swept_at`, with `p.id` only as a
-  // deterministic tiebreak — §9.2, never the sole ordering key).
+  // deterministic tiebreak — §9.2, never the sole ordering key). Value Pool
+  // Slice 2 (DEC-4/DEC-8) prepends ONE new leading ORDER BY term: a project
+  // with a live (not TTL-expired) `coverage_requested_at` jumps to the head
+  // of the rotation, oldest request first (FIFO among requested projects);
+  // `?1` (the TTL cutoff, an ISO string computed in JS — never
+  // `datetime('now')` inside the statement, so it stays testable) makes an
+  // expired request sort exactly like a passive project, WITHOUT needing to
+  // have cleared the flag first — the tick's own TTL sweep (DEC-8) clears it
+  // for real before the next call, this is a same-call belt-and-braces so a
+  // stale flag can never wedge the rotation even for one extra tick. Passive
+  // projects (coverage_requested_at IS NULL) are entirely unaffected by this
+  // new leading term — it evaluates to the same constant (1) for every one of
+  // them, so their relative order is byte-identical to the pre-Slice-2 query.
   listValueSweepTargets: db.prepare(
-    `SELECT p.id AS project_id, s.last_swept_at AS last_swept_at
+    `SELECT p.id AS project_id, s.last_swept_at AS last_swept_at,
+            s.coverage_requested_at AS coverage_requested_at
      FROM projects p
      JOIN (SELECT DISTINCT project_id FROM project_paths) pp ON pp.project_id = p.id
      LEFT JOIN value_summary_sweep_state s ON s.project_id = p.id
-     ORDER BY (s.last_swept_at IS NOT NULL) ASC, s.last_swept_at ASC, p.id ASC
+     ORDER BY (s.coverage_requested_at IS NULL OR s.coverage_requested_at < ?) ASC,
+              s.coverage_requested_at ASC,
+              (s.last_swept_at IS NOT NULL) ASC, s.last_swept_at ASC, p.id ASC
      LIMIT ?`
+  ),
+  // Value Pool Slice 2 (DEC-4): stamps/refreshes the coverage-request flag
+  // for one project — the ONLY writer of `coverage_requested_at` to a
+  // non-NULL value (single-call-site guard in single-writer-guard.test.js,
+  // same shape as Slice 1's markValueUnitSummariesSeen guard). Does not
+  // touch `last_swept_at`/`pending_after_sweep` — a first-ever request for a
+  // never-swept project must not fabricate a false "already swept" row.
+  requestValueCoverage: db.prepare(
+    `INSERT INTO value_summary_sweep_state (project_id, coverage_requested_at)
+     VALUES (?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       coverage_requested_at = excluded.coverage_requested_at`
+  ),
+  // Value Pool Slice 2 (DEC-8): clears the flag — called only at true 100%
+  // completion (same write as the final sweep-state upsert) or on TTL
+  // expiry (cleared-with-log). Never called on a mere `outcome='error'`
+  // sweep — transient errors must resume next tick, the flag survives.
+  clearValueCoverageRequest: db.prepare(
+    `UPDATE value_summary_sweep_state SET coverage_requested_at = NULL WHERE project_id = ?`
+  ),
+  // Value Pool Slice 2 (DEC-8): the TTL sweep's own read — every project with
+  // a live (non-NULL) coverage_requested_at older than the JS-computed
+  // cutoff (never `datetime('now')` inside the statement, so this stays
+  // testable). Small, rare result set (a fleet has at most a handful of
+  // outstanding requests at once) — no LIMIT, so no chronology-ordering
+  // concern applies.
+  listExpiredCoverageRequests: db.prepare(
+    `SELECT project_id, coverage_requested_at FROM value_summary_sweep_state
+     WHERE coverage_requested_at IS NOT NULL AND coverage_requested_at < ?`
+  ),
+  // Value Pool Slice 2: single row read of one project's current sweep-state
+  // bookkeeping, including its live `coverage_requested_at` — used by
+  // runCoverageDrain (to know if the flag is still set / still valid) and by
+  // GET /coverage's route (to read `demand` without re-deriving it).
+  getValueSweepState: db.prepare(`SELECT * FROM value_summary_sweep_state WHERE project_id = ?`),
+  // Value Pool Slice 2 (DEC-5/DEC-16): the ETA's SOLE input — read only by
+  // server/lib/value-coverage.js's estimateEta. Fleet-wide (no project_id
+  // filter) fallback for a project with no measurement history of its own;
+  // `listRecentValueGenerationDurationsForProject` is the per-project-first
+  // variant estimateEta tries before falling back to this one. Both sort
+  // `created_at DESC, id DESC` BEFORE `LIMIT` (§9.2 row-id-as-chronology-
+  // proxy — `id` is a tiebreak only, never the primary key). Filters to
+  // `outcome='ok' AND generated > 0 AND duration_ms IS NOT NULL` so a
+  // skipped/errored/zero-work sweep (duration not meaningfully comparable to
+  // "time to synthesize N units") never skews the average.
+  listRecentValueGenerationDurations: db.prepare(
+    `SELECT duration_ms, generated FROM value_summary_generation_log
+     WHERE outcome = 'ok' AND generated > 0 AND duration_ms IS NOT NULL
+     ORDER BY created_at DESC, id DESC LIMIT ?`
+  ),
+  listRecentValueGenerationDurationsForProject: db.prepare(
+    `SELECT duration_ms, generated FROM value_summary_generation_log
+     WHERE project_id = ? AND outcome = 'ok' AND generated > 0 AND duration_ms IS NOT NULL
+     ORDER BY created_at DESC, id DESC LIMIT ?`
   ),
   upsertValueSweepState: db.prepare(
     `INSERT INTO value_summary_sweep_state (project_id, last_swept_at, pending_after_sweep)

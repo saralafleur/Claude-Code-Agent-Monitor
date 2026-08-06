@@ -28,7 +28,13 @@ process.env.DASHBOARD_DB_PATH = TEST_DB;
 const { createApp, startServer } = require("../index");
 const dbModule = require("../db");
 const { db, stmts } = dbModule;
-const { enrichPoolAltitudes, buildPrompt, parseOutput } = require("../lib/value-summary");
+const {
+  enrichPoolAltitudes,
+  buildPrompt,
+  parseOutput,
+  summaryModel,
+  SUMMARY_STAGES,
+} = require("../lib/value-summary");
 const { __injectSpawnForTest } = require("../lib/focus-inference");
 
 let server;
@@ -125,6 +131,10 @@ beforeEach(() => {
   __injectSpawnForTest(null);
   delete process.env.DASHBOARD_FOCUS_INFER_MODE;
   delete process.env.DASHBOARD_VALUE_SUMMARY_MODEL;
+  delete process.env.DASHBOARD_VALUE_SUMMARY_UNIT_MODEL;
+  delete process.env.DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL;
+  delete process.env.DASHBOARD_FOCUS_SUMMARY_MODEL;
+  delete process.env.DASHBOARD_FOCUS_INFER_MODEL;
   db.exec("DELETE FROM value_unit_summaries");
 });
 
@@ -320,6 +330,131 @@ describe("enrichPoolAltitudes caching", () => {
       states: { [u3.unitKey]: "unavailable" },
       counts: expectedCounts,
     });
+  });
+});
+
+// Extends the per-stage env precedence coverage the "spawns with
+// DASHBOARD_VALUE_SUMMARY_MODEL" case above already established for the
+// legacy (no-stage) chain — DEC-7/O2: ONE summaryModel(stage) cascade, never
+// a second sibling function, so a per-stage override must prepend the SAME
+// existing chain, not branch into a parallel one.
+describe("summaryModel(stage) per-stage env precedence (DEC-7/O2)", () => {
+  it("SUMMARY_STAGES is the closed two-entry registry", () => {
+    assert.deepEqual(SUMMARY_STAGES, ["unit", "grouping"]);
+  });
+
+  it("defaults to stage 'unit' when called with no argument (pre-Slice-2 call shape)", () => {
+    process.env.DASHBOARD_VALUE_SUMMARY_MODEL = "opus";
+    assert.equal(summaryModel(), "opus", "no-arg call must still resolve through the unit stage");
+  });
+
+  it("DASHBOARD_VALUE_SUMMARY_UNIT_MODEL takes precedence over the shared chain for stage 'unit'", () => {
+    process.env.DASHBOARD_VALUE_SUMMARY_UNIT_MODEL = "unit-override";
+    process.env.DASHBOARD_VALUE_SUMMARY_MODEL = "shared-override";
+    assert.equal(summaryModel("unit"), "unit-override");
+  });
+
+  it("DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL takes precedence over the shared chain for stage 'grouping'", () => {
+    process.env.DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL = "grouping-override";
+    process.env.DASHBOARD_VALUE_SUMMARY_MODEL = "shared-override";
+    assert.equal(summaryModel("grouping"), "grouping-override");
+  });
+
+  it("falls back to the shared chain, unchanged, when no per-stage override is set", () => {
+    process.env.DASHBOARD_VALUE_SUMMARY_MODEL = "shared-only";
+    assert.equal(summaryModel("unit"), "shared-only");
+    assert.equal(summaryModel("grouping"), "shared-only");
+  });
+
+  it("falls all the way through to 'haiku' with nothing set", () => {
+    assert.equal(summaryModel("unit"), "haiku");
+    assert.equal(summaryModel("grouping"), "haiku");
+  });
+
+  it("per-unit synthesis actually spawns with the unit-stage override (DEC-7 end-to-end)", async () => {
+    process.env.DASHBOARD_VALUE_SUMMARY_UNIT_MODEL = "unit-stage-model";
+    const spawnedArgs = [];
+    __injectSpawnForTest((cmd, args) => {
+      spawnedArgs.push(args);
+      return fakeSpawn({
+        stdout: envelope({ units: [{ index: 1, project: "P", stakeholder: "S" }] }),
+      })();
+    });
+    const u = unit({
+      unitKey: "trunk_commit::stage-model-test::/repo",
+      value_ref: "stage-model-test",
+    });
+    const { altitudes } = await enrichPoolAltitudes(dbModule, [u]);
+    assert.equal(altitudes[u.unitKey].model, "unit-stage-model");
+    const promptArgs = spawnedArgs.find((a) => a.includes("-p"));
+    assert.equal(promptArgs[promptArgs.indexOf("--model") + 1], "unit-stage-model");
+  });
+});
+
+// DEC-9 (Value Pool Slice 2): probe mode never spawns and never writes a
+// generation-log row.
+describe("enrichPoolAltitudes probe mode (DEC-9)", () => {
+  it("never spawns and classifies every miss as 'queued', never 'unavailable'", async () => {
+    __injectSpawnForTest(() => {
+      throw new Error("probe mode must never spawn");
+    });
+    const u = unit({ unitKey: "trunk_commit::probe-test::/repo", value_ref: "probe-test" });
+    const { altitudes, states, counts } = await enrichPoolAltitudes(dbModule, [u], {
+      probe: true,
+    });
+    assert.deepEqual(altitudes, {});
+    assert.deepEqual(states, { [u.unitKey]: "queued" });
+    assert.equal(counts.queued, 1);
+    assert.equal(counts.unavailable, 0);
+    assert.equal(counts.pool_size, 1);
+  });
+
+  it("a probe run leaves the generation-log row count unchanged (DEC-9)", async () => {
+    // enrichPoolAltitudes itself never writes value_summary_generation_log
+    // (only its callers do, after inspecting the result) — this proves the
+    // probe path gives its caller nothing that WOULD prompt a log write:
+    // no cache write, no spawn, so a caller that (correctly) skips logging
+    // a probe result has nothing left over to accidentally log either.
+    const before = db.prepare("SELECT COUNT(*) AS n FROM value_summary_generation_log").get().n;
+    const u1 = unit({ unitKey: "trunk_commit::probe-nolog-1::/repo", value_ref: "probe-nolog-1" });
+    const u2 = unit({
+      unitKey: "trunk_commit::probe-nolog-2::/repo",
+      value_ref: "probe-nolog-2",
+      value_source: "intake_initiative",
+    });
+    await enrichPoolAltitudes(dbModule, [u1, u2], { probe: true });
+    const after = db.prepare("SELECT COUNT(*) AS n FROM value_summary_generation_log").get().n;
+    assert.equal(after, before, "probe mode must not add any generation-log rows");
+  });
+
+  it("a probe run also writes no value_unit_summaries cache row (never spawns, so nothing to cache)", async () => {
+    const u = unit({ unitKey: "trunk_commit::probe-nocache::/repo", value_ref: "probe-nocache" });
+    await enrichPoolAltitudes(dbModule, [u], { probe: true });
+    const row = stmts.getValueUnitSummary.get(u.unitKey);
+    assert.equal(row, undefined, "probe mode must not populate the synthesis cache");
+  });
+
+  it("a probe run still resolves an existing cache hit (probe only affects MISSES)", async () => {
+    __injectSpawnForTest(
+      fakeSpawn({
+        stdout: envelope({
+          units: [{ index: 1, project: "Cached project", stakeholder: "Cached stakeholder" }],
+        }),
+      })
+    );
+    const u = unit({
+      unitKey: "trunk_commit::probe-cache-hit::/repo",
+      value_ref: "probe-cache-hit",
+    });
+    await enrichPoolAltitudes(dbModule, [u]); // real generation, populates the cache
+
+    __injectSpawnForTest(() => {
+      throw new Error("probe mode must never spawn, even alongside a cache hit in the same batch");
+    });
+    const { altitudes, states } = await enrichPoolAltitudes(dbModule, [u], { probe: true });
+    assert.equal(altitudes[u.unitKey].project, "Cached project");
+    assert.equal(altitudes[u.unitKey].cached, true);
+    assert.deepEqual(states, {});
   });
 });
 

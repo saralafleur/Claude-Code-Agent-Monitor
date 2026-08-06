@@ -16,6 +16,7 @@
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { PlanLedgerPanel } from "../PlanLedgerPanel";
@@ -28,6 +29,8 @@ const mockHealthMock = vi.fn();
 const mockRefreshMock = vi.fn();
 const mockAltitudesMock = vi.fn();
 const mockMarkSeenMock = vi.fn();
+const mockCoverageMock = vi.fn();
+const mockRequestCoverageMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -40,6 +43,8 @@ vi.mock("../../lib/api", () => ({
       refresh: (...args: unknown[]) => mockRefreshMock(...args),
       altitudes: (...args: unknown[]) => mockAltitudesMock(...args),
       markAltitudesSeen: (...args: unknown[]) => mockMarkSeenMock(...args),
+      coverage: (...args: unknown[]) => mockCoverageMock(...args),
+      requestCoverage: (...args: unknown[]) => mockRequestCoverageMock(...args),
     },
   },
 }));
@@ -127,12 +132,35 @@ function makeHealth(overrides: any = {}) {
   };
 }
 
+// Value Pool Slice 2: a CoverageSnapshot factory, mirroring the other
+// make*() factories above. Default: passive, complete, empty pool — the
+// coverage header renders nothing for this shape (pool_size === 0), so
+// pre-Slice-2 tests that never mention coverage stay unaffected by default.
+function makeCoverage(overrides: any = {}) {
+  return {
+    project_id: "proj-1",
+    described: 0,
+    pool_size: 0,
+    pending: 0,
+    complete: true,
+    demand: "passive",
+    requested_at: null,
+    eta: { state: "none" },
+    computed_at: "2026-06-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("PlanLedgerPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Default: no altitude for any unit (LLM off/unavailable) — tests that
     // care about the resolved/generating states override this explicitly.
     mockAltitudesMock.mockResolvedValue({ altitudes: {} });
+    mockCoverageMock.mockResolvedValue({ coverage: makeCoverage() });
+    mockRequestCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({ demand: "requested", requested_at: "2026-06-01T00:00:00.000Z" }),
+    });
   });
 
   it("renders 2 open plans with their nested items in the left pane", async () => {
@@ -876,5 +904,353 @@ describe("PlanLedgerPanel", () => {
     expect(document.querySelectorAll('[data-test="pool-unit"]')).toHaveLength(0);
 
     warnSpy.mockRestore();
+  });
+});
+
+describe("PlanLedgerPanel: Value Pool Slice 2 coverage header (DEC-1, DEC-5, R4)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAltitudesMock.mockResolvedValue({ altitudes: {} });
+  });
+
+  it("cold start renders the named 'estimating' copy — never a minutes string, never '0'", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({
+        described: 0,
+        pool_size: 1,
+        pending: 1,
+        complete: false,
+        eta: { state: "estimating" },
+      }),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="coverage-header"]')).toBeInTheDocument();
+    });
+    const headerText = document.querySelector('[data-test="coverage-header"]')!.textContent || "";
+    expect(headerText).toContain("Estimating");
+    expect(headerText).not.toMatch(/~0 min/);
+    expect(headerText).not.toMatch(/\bmin remaining\b/);
+  });
+
+  it("a 'measured' ETA renders the minutes-remaining copy from the server-provided ms_remaining, never re-derived", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({
+        described: 3,
+        pool_size: 5,
+        pending: 2,
+        complete: false,
+        eta: {
+          state: "measured",
+          ms_remaining: 120_000,
+          per_batch_ms: 60_000,
+          batches_remaining: 2,
+        },
+      }),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="coverage-header"]')).toBeInTheDocument();
+    });
+    const headerText = document.querySelector('[data-test="coverage-header"]')!.textContent || "";
+    expect(headerText).toContain("3 of 5 described");
+    expect(headerText).toContain("~2 min remaining"); // 120_000ms / 60_000 = 2 minutes, unit conversion only
+  });
+
+  it("a complete, passive pool shows no 'prioritize now' button", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({ described: 1, pool_size: 1, pending: 0, complete: true }),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="coverage-header"]')).toBeInTheDocument();
+    });
+    expect(document.querySelector('[data-test="prioritize-now-button"]')).toBeNull();
+  });
+
+  it("'prioritize now' calls api.projectPlans.requestCoverage and reflects the returned demand", async () => {
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({ described: 0, pool_size: 1, pending: 1, complete: false }),
+    });
+    mockRequestCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({
+        described: 0,
+        pool_size: 1,
+        pending: 1,
+        complete: false,
+        demand: "requested",
+        requested_at: "2026-06-05T00:00:00.000Z",
+        computed_at: "2026-06-05T00:00:00.000Z",
+      }),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="prioritize-now-button"]')).toBeInTheDocument();
+    });
+    fireEvent.click(document.querySelector('[data-test="prioritize-now-button"]')!);
+
+    expect(mockRequestCoverageMock).toHaveBeenCalledWith("proj-1");
+    await waitFor(() => {
+      expect(screen.getByText("Prioritization requested")).toBeInTheDocument();
+    });
+  });
+
+  it("BL-2 regression: under React 18 StrictMode's setup->cleanup->setup double-invoke, altitude text still renders and 'prioritize now' does not stay disabled forever", async () => {
+    const { eventBus } = await import("../../lib/eventBus");
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({ described: 0, pool_size: 1, pending: 1, complete: false }),
+    });
+    mockAltitudesMock.mockResolvedValue({
+      altitudes: {
+        [unit.id]: {
+          project: "Part of the tracker.",
+          stakeholder: "Shipped the tracker.",
+          model: "haiku",
+          generated_at: "2026-08-04T00:00:00.000Z",
+          cached: true,
+        },
+      },
+    });
+    mockRequestCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({
+        described: 0,
+        pool_size: 1,
+        pending: 1,
+        complete: false,
+        demand: "requested",
+        requested_at: "2026-06-05T00:00:00.000Z",
+        computed_at: "2026-06-05T00:00:00.000Z",
+      }),
+    });
+
+    render(
+      <StrictMode>
+        <PlanLedgerPanel projectId="proj-1" />
+      </StrictMode>
+    );
+
+    // If `mountedRef` is never re-armed on StrictMode's second effect setup
+    // (build-reviewer BL-2), `fetchAltitudesFor`'s resolved response is
+    // silently dropped and this text never appears in `npm run dev`.
+    await waitFor(() => {
+      expect(screen.getByText("Part of the tracker.")).toBeInTheDocument();
+      expect(screen.getByText("Shipped the tracker.")).toBeInTheDocument();
+    });
+
+    // Click "prioritize now" — this sets `requestingCoverage(true)` and, on
+    // a REAL server, the response's `demand` always flips away from
+    // "passive" (never back to it), so the button itself unmounts here
+    // (expected, not the bug under test).
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="prioritize-now-button"]')).toBeInTheDocument();
+    });
+    fireEvent.click(document.querySelector('[data-test="prioritize-now-button"]')!);
+    await waitFor(() => {
+      expect(mockRequestCoverageMock).toHaveBeenCalledWith("proj-1");
+      expect(document.querySelector('[data-test="prioritize-now-button"]')).toBeNull();
+    });
+
+    // Simulate the request later reverting to passive again (DEC-8 TTL
+    // expiry, or a no-progress drain exit reported via a fresh WS
+    // broadcast) while the pool is still incomplete — the button re-mounts.
+    // If `handlePrioritizeNow`'s `finally` never cleared `requestingCoverage`
+    // (BL-2, because `mountedRef.current` was stuck `false`), this fresh
+    // button renders permanently `disabled` from the moment it appears —
+    // the exact "stuck forever" symptom build-reviewer flagged.
+    eventBus.publish({
+      type: "value_altitudes_updated",
+      timestamp: "2026-06-05T10:10:00.000Z",
+      data: {
+        project_id: "proj-1",
+        unit_keys: [],
+        pending: 1,
+        coverage: makeCoverage({
+          described: 0,
+          pool_size: 1,
+          pending: 1,
+          complete: false,
+          demand: "passive",
+          requested_at: null,
+          computed_at: "2026-06-05T10:10:00.000Z",
+        }),
+      },
+    });
+
+    await waitFor(() => {
+      const reappeared = document.querySelector(
+        '[data-test="prioritize-now-button"]'
+      ) as HTMLButtonElement | null;
+      expect(reappeared).toBeInTheDocument();
+      expect(reappeared!.disabled).toBe(false);
+    });
+  });
+
+  it("R4: out-of-order snapshot delivery does not regress the header — a stale (older computed_at) WS message never overwrites a newer one", async () => {
+    const { eventBus } = await import("../../lib/eventBus");
+    const plan = makePlan();
+    plan.items = [];
+    const unit = makeUnit();
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({
+      coverage: makeCoverage({
+        described: 1,
+        pool_size: 5,
+        pending: 4,
+        complete: false,
+        computed_at: "2026-06-05T10:00:00.000Z",
+      }),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="coverage-header"]')!.textContent).toContain(
+        "1 of 5 described"
+      );
+    });
+
+    // A NEWER snapshot arrives first (e.g. the drain raced ahead) —
+    // must be accepted and rendered.
+    eventBus.publish({
+      type: "value_altitudes_updated",
+      timestamp: "2026-06-05T10:05:00.000Z",
+      data: {
+        project_id: "proj-1",
+        unit_keys: [],
+        pending: 1,
+        coverage: makeCoverage({
+          described: 4,
+          pool_size: 5,
+          pending: 1,
+          complete: false,
+          computed_at: "2026-06-05T10:05:00.000Z", // NEWER
+        }),
+      },
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-test="coverage-header"]')!.textContent).toContain(
+        "4 of 5 described"
+      );
+    });
+
+    // A STALE (older computed_at) snapshot arrives afterward (an
+    // out-of-order HTTP/WS race) — must be REJECTED, not regress the header.
+    eventBus.publish({
+      type: "value_altitudes_updated",
+      timestamp: "2026-06-05T10:01:00.000Z",
+      data: {
+        project_id: "proj-1",
+        unit_keys: [],
+        pending: 4,
+        coverage: makeCoverage({
+          described: 1,
+          pool_size: 5,
+          pending: 4,
+          complete: false,
+          computed_at: "2026-06-05T10:01:00.000Z", // OLDER than what's held
+        }),
+      },
+    });
+
+    // Give React a tick to (not) re-render, then assert the header STILL
+    // shows the newer value — a regression here would be "decrement wearing
+    // a race's clothes" (architect R4).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(document.querySelector('[data-test="coverage-header"]')!.textContent).toContain(
+      "4 of 5 described"
+    );
+  });
+
+  it("WATCH-S2-B: a value_altitudes_updated message refetches ONLY the named unit_keys' altitude text, never re-fetches coverage from the server", async () => {
+    const { eventBus } = await import("../../lib/eventBus");
+    const plan = makePlan();
+    plan.items = [];
+    const unit1 = makeUnit({ id: "trunk_commit:u1", sourceRef: "u1" });
+    const unit2 = makeUnit({ id: "trunk_commit:u2", sourceRef: "u2" });
+
+    mockListMock.mockResolvedValue({ plans: [plan] });
+    mockPoolMock.mockResolvedValue({ units: [unit1, unit2], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockCoverageMock.mockResolvedValue({ coverage: makeCoverage({ pool_size: 2, pending: 2 }) });
+
+    render(<PlanLedgerPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      // Initial mount fetch: both units requested once.
+      expect(mockAltitudesMock).toHaveBeenCalledTimes(1);
+    });
+    const coverageCallCountAfterMount = mockCoverageMock.mock.calls.length;
+    mockAltitudesMock.mockClear();
+
+    eventBus.publish({
+      type: "value_altitudes_updated",
+      timestamp: "2026-06-05T10:05:00.000Z",
+      data: {
+        project_id: "proj-1",
+        unit_keys: [unit1.id],
+        pending: 1,
+        coverage: makeCoverage({
+          pool_size: 2,
+          pending: 1,
+          computed_at: "2026-06-05T10:05:00.000Z",
+        }),
+      },
+    });
+
+    await waitFor(() => {
+      expect(mockAltitudesMock).toHaveBeenCalledTimes(1);
+    });
+    // Only unit1 (the named unit_keys entry) is re-requested, never unit2.
+    const [, calledUnits] = mockAltitudesMock.mock.calls[0]!;
+    expect(calledUnits).toHaveLength(1);
+    expect((calledUnits as any[])[0].id).toBe(unit1.id);
+    // The message's own `coverage` field was used directly — GET /coverage
+    // was never called again as a result of this WS message.
+    expect(mockCoverageMock.mock.calls.length).toBe(coverageCallCountAfterMount);
   });
 });

@@ -552,7 +552,8 @@
  *  - `plan_updated` ................................. {@link PlanUpdatedPayload}
  *  - `session_focus` ................................ {@link SessionFocus}
  *  - `value_altitudes_updated` ....................... {@link ValueAltitudesUpdatedPayload}
- *    (no subscriber in v1 — OPEN-3)
+ *    (`PlanLedgerPanel.tsx` subscribes as of Value Pool Slice 2 — superseding
+ *    the prior "no subscriber in v1" OPEN-3 note)
  *  - `project_plan_updated` .......................... {@link ProjectPlanUpdatedPayload}
  *  - `value_claim_updated` ........................... {@link ValueClaimUpdatedPayload}
  *
@@ -2765,15 +2766,80 @@ export interface PlanUpdatedPayload {
   items: PlanItem[];
 }
 
+/** Value Pool Slice 2 (coverage-on-demand) — the closed, server-authored
+ *  `demand` registry. CANONICAL SOURCE: `server/lib/value-coverage.js`'s
+ *  `DEMAND_STATES` export (WATCH-S2-F precedent: a CJS server module cannot
+ *  be imported across the Vite/Node boundary, so this is a hand-maintained
+ *  copy — keep it in the SAME commit as any server-side change to that
+ *  export). `"passive"`: no outstanding coverage request. `"requested"`: a
+ *  request is outstanding but not actively draining THIS instant.
+ *  `"draining"`: a drain iteration is in flight right now. */
+export type CoverageDemand = "passive" | "requested" | "draining";
+
+/** Value Pool Slice 2 — the closed, server-authored ETA shape. CANONICAL
+ *  SOURCE: `server/lib/value-coverage.js`'s `estimateEta` (`ETA_STATES`
+ *  export names the three `state` values) — hand-maintained copy here per
+ *  the same WATCH-S2-F precedent as {@link CoverageDemand}. `"measured"`:
+ *  at least one real historical duration exists; the numeric fields are
+ *  real measurements, never a guess. `"estimating"`: `pending > 0` but no
+ *  qualifying history exists yet (cold start) — render the named copy
+ *  string, NEVER a `~0 min` (a fabricated number is a requirement
+ *  violation, not a rounding choice). `"none"`: `pending === 0`, coverage
+ *  is already complete. */
+export type CoverageEta =
+  | { state: "measured"; ms_remaining: number; per_batch_ms: number; batches_remaining: number }
+  | { state: "estimating" }
+  | { state: "none" };
+
+/** Value Pool Slice 2 — the single coverage/ETA object, computed exactly
+ *  once server-side (`server/lib/value-coverage.js`'s `coverageSnapshot`,
+ *  DEC-5/§9.1) and carried VERBATIM by both `GET /api/project-plans/coverage`
+ *  and this file's `ValueAltitudesUpdatedPayload.coverage`. The client
+ *  (`PlanLedgerPanel.tsx`) renders these fields; it never recomputes
+ *  `described`/`pending`/`complete`/an ETA number itself. */
+export interface CoverageSnapshot {
+  /** The project this snapshot describes. */
+  project_id: string;
+  /** Units this project's pool "fresh-or-immutable" describes (DEC-1) —
+   *  `described` can be less than the number of units actually DISPLAYING
+   *  text (a stale-but-served mutable unit counts as NOT described, by
+   *  design — described ≠ displayed). */
+  described: number;
+  /** Total units in this project's pool right now. */
+  pool_size: number;
+  /** Units not yet described (`queued` + `unavailable`), re-derived live
+   *  from the composer's own counts every computation — never a
+   *  decremented counter. */
+  pending: number;
+  /** `true` iff `pending === 0` — the server-authored gate Slice 3's
+   *  auto-group action reads directly; never re-derive this client-side as
+   *  `described === pool_size`. */
+  complete: boolean;
+  /** See {@link CoverageDemand}. */
+  demand: CoverageDemand;
+  /** The coverage request's timestamp, or `null` if `demand === "passive"`. */
+  requested_at: string | null;
+  /** See {@link CoverageEta}. */
+  eta: CoverageEta;
+  /** ISO timestamp this snapshot was computed. Used ONLY for the client's
+   *  monotonic merge rule (accept a snapshot only if its `computed_at` is
+   *  newer than the one currently held) — never rendered, never compared
+   *  by any other logic. */
+  computed_at: string;
+}
+
 /** Payload for `value_altitudes_updated` WebSocket messages, broadcast by
  *  `server/lib/value-summary-tick.js` at the end of a sweep that generated
- *  at least one PROJECT/STAKEHOLDER altitude (never broadcast on an
- *  all-cached or LLM-unavailable sweep — zero units generated means zero
- *  broadcasts). **v1 ships no client subscriber for this message** (OPEN-3,
- *  intake/2026-08-04-value-summary-tick/decisions.md) — do not assume a
- *  live-update behavior exists from this type alone; `PlanLedgerPanel.tsx`
- *  only re-fetches altitudes on mount/unit-set change, not on receipt of
- *  this broadcast. */
+ *  at least one PROJECT/STAKEHOLDER altitude, OR (Value Pool Slice 2,
+ *  DEC-6) whose `coverage.demand`/`coverage.complete` transitioned since the
+ *  last broadcast for that project — a terminal "now complete" transition
+ *  with zero units generated THIS iteration must still be observable, or
+ *  Slice 3's auto-group gate would never enable without a remount.
+ *  **`PlanLedgerPanel.tsx` now subscribes to this message** (Value Pool
+ *  Slice 2 — the panel's first-ever `eventBus` subscription; the OPEN-3
+ *  "v1 ships no client subscriber" note from
+ *  `intake/2026-08-04-value-summary-tick/decisions.md` is superseded by this
+ *  slice, not still true). */
 export interface ValueAltitudesUpdatedPayload {
   /** The project this sweep covered. */
   project_id: string;
@@ -2784,6 +2850,11 @@ export interface ValueAltitudesUpdatedPayload {
   /** Units still unresolved after this sweep (`queued` + `unavailable`),
    *  re-derived live each sweep — never a decremented counter. */
   pending: number;
+  /** Value Pool Slice 2 (DEC-6): the SAME `coverageSnapshot` object
+   *  `GET /api/project-plans/coverage` returns for this project — optional
+   *  only because a pre-Slice-2 message shape is not retroactively
+   *  rewritten; every Slice-2-and-later broadcast always carries it. */
+  coverage?: CoverageSnapshot;
 }
 
 /** Payload for `project_plan_updated` WebSocket messages, broadcast by
@@ -3006,8 +3077,9 @@ export interface WSMessage {
    *  DetourDisposition; playbook_practice_config_updated → PlaybookPractice;
    *  playbook_settings_updated → PlaybookSettings;
    *  coach_observation_created/coach_observation_updated → CoachObservation;
-   *  value_altitudes_updated → ValueAltitudesUpdatedPayload (no subscriber in
-   *  v1, OPEN-3); project_plan_updated → ProjectPlanUpdatedPayload;
+   *  value_altitudes_updated → ValueAltitudesUpdatedPayload (subscribed by
+   *  PlanLedgerPanel.tsx as of Value Pool Slice 2); project_plan_updated →
+   *  ProjectPlanUpdatedPayload;
    *  value_claim_updated → ValueClaimUpdatedPayload. */
   type:
     | "session_created"

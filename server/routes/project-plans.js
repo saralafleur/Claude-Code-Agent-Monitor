@@ -10,8 +10,14 @@
  * this router touches is canonicalized through server/lib/cwd-identity.js
  * before it is written to `value_claims.source_cwd` or handed to pool
  * assembly. `:id(\d+)` / `:itemId(\d+)` / `:claimId(\d+)` digit constraints
- * keep the literal `pool`/`health`/`history`/`import`/`items`/`claims`
- * segments unambiguous.
+ * keep the literal `pool`/`health`/`history`/`import`/`items`/`claims`/
+ * `coverage`/`coverage-request` segments unambiguous.
+ *
+ * Value Pool Slice 2 (coverage-on-demand) adds `POST /coverage-request` and
+ * `GET /coverage` — both route through `server/lib/value-coverage.js`'s
+ * single-home `coverageSnapshot` (DEC-5, §9.1); the denominator M comes from
+ * `assembleValuePool` (DEC-16 sole composer), never a hand-rolled query
+ * here.
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
@@ -21,6 +27,8 @@ const { broadcast } = require("../websocket");
 const planLifecycle = require("../lib/plan-lifecycle");
 const valueLedger = require("../lib/value-ledger");
 const { enrichPoolAltitudes } = require("../lib/value-summary");
+const { coverageSnapshot } = require("../lib/value-coverage");
+const { runCoverageDrain, isDrainingProject } = require("../lib/value-summary-tick");
 const cwdIdentity = require("../lib/cwd-identity");
 
 const { VALUE_SOURCES, ATTRIBUTION_TIERS } = valueLedger;
@@ -277,6 +285,85 @@ router.post("/altitudes/seen", async (req, res) => {
   }
 
   res.json({ updated });
+});
+
+// POST /api/project-plans/coverage-request {project_id} - Value Pool Slice 2
+// (DEC-4): stamps `coverage_requested_at`, jumping the project to the head
+// of the sweep rotation, then kicks `runCoverageDrain` fire-and-forget (the
+// bounded back-to-back drain loop DEC-4 designed this feature around — safe
+// to call redundantly: the module-scope overlap guard `runCoverageDrain`
+// shares with `runValueSummaryTickOnce` turns a second concurrent call, from
+// either function, into `{skipped: "overlap"}`). Responds 202 immediately
+// with a probe-built snapshot — this route never blocks on the drain
+// finishing.
+router.post("/coverage-request", async (req, res) => {
+  const { project_id: projectId } = req.body || {};
+  if (!projectId || typeof projectId !== "string") {
+    return res
+      .status(400)
+      .json({ error: { code: "INVALID_INPUT", message: "project_id is required" } });
+  }
+  const nowIso = new Date().toISOString();
+  dbModule.stmts.requestValueCoverage.run(projectId, nowIso);
+
+  // Fire-and-forget (SF-6 discipline): never awaited, never lets a drain
+  // failure fail this request. The overlap guard makes a redundant
+  // "prioritize now" click while a drain is already running harmless.
+  // `runCoverageDrain` sets its own module-scope `drainingProjectId`
+  // synchronously (before its first `await`), so `isDrainingProject` below
+  // already reflects reality by the time this handler composes its response
+  // (build-reviewer SF-3).
+  runCoverageDrain(dbModule, projectId, { broadcast }).catch(() => {});
+
+  const { units } = await valueLedger.assembleValuePool(dbModule, { id: projectId });
+  const { counts } = await enrichPoolAltitudes(dbModule, units, { probe: true });
+  // `requestValueCoverage` above is an unconditional upsert
+  // (`coverage_requested_at = excluded.coverage_requested_at`), so `nowIso`
+  // IS the value now on the row — re-reading it back via
+  // `getValueSweepState` here raced the fire-and-forget drain kicked above
+  // (which can clear the flag on its own first iteration before this read
+  // runs) and could answer `demand: "passive"` for a request this same
+  // handler just accepted (build-reviewer SF-2). Pass the value this
+  // handler itself just wrote instead.
+  const snapshot = coverageSnapshot(dbModule, {
+    projectId,
+    counts,
+    requestedAt: nowIso,
+    draining: isDrainingProject(projectId),
+    computedAt: new Date().toISOString(),
+  });
+  res.status(202).json({ coverage: snapshot });
+});
+
+// GET /api/project-plans/coverage?project_id= - Value Pool Slice 2: the same
+// `coverageSnapshot` object the WS `value_altitudes_updated` broadcast
+// carries (G2 parity, byte-same shape). `assembleValuePool` is the sole
+// composer (DEC-16) — the denominator M comes from here and nowhere else.
+// Runs the composer in PROBE mode (classify only, never spawn, no
+// generation-log row — DEC-9): this is a read, not a generation attempt.
+router.get("/coverage", async (req, res) => {
+  const projectId = req.query.project_id;
+  if (!projectId) {
+    return res
+      .status(400)
+      .json({ error: { code: "INVALID_INPUT", message: "project_id is required" } });
+  }
+  const { units } = await valueLedger.assembleValuePool(dbModule, { id: projectId });
+  const { counts } = await enrichPoolAltitudes(dbModule, units, { probe: true });
+  const state = dbModule.stmts.getValueSweepState.get(projectId);
+  const snapshot = coverageSnapshot(dbModule, {
+    projectId,
+    counts,
+    requestedAt: state ? state.coverage_requested_at : null,
+    // Real drain-state accessor (build-reviewer SF-3) — was hardcoded
+    // `false`, which meant this route could never report `demand:
+    // "draining"` even while a `runCoverageDrain` iteration was actively in
+    // flight for this exact project, disagreeing with a concurrent WS
+    // broadcast for the same instant.
+    draining: isDrainingProject(projectId),
+    computedAt: new Date().toISOString(),
+  });
+  res.json({ coverage: snapshot });
 });
 
 // POST /api/project-plans/import {project_id, cwd} - DEC-P2 generation-1

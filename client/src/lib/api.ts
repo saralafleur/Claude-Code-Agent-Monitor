@@ -418,6 +418,7 @@ import type {
   ValuePool,
   ValueUnit,
   PlanHealth,
+  CoverageSnapshot,
   MarkAltitudeSeenRequest,
   MarkAltitudeSeenResponse,
   DecisionQueueItem,
@@ -2782,6 +2783,37 @@ export const api = {
       request<MarkAltitudeSeenResponse>("/project-plans/altitudes/seen", {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, units }),
+      }),
+    /**
+     * GET /api/project-plans/coverage?project_id= — Value Pool Slice 2
+     * (DEC-5): the single `coverageSnapshot` object, verbatim, the SAME
+     * shape the `value_altitudes_updated` WebSocket broadcast's `coverage`
+     * field carries (G2 parity). Render every field as-is — never re-derive
+     * `described`/`pending`/`complete`/an ETA number from a locally-held
+     * pool (§9.1).
+     * @param projectId The project id.
+     * @returns `{ coverage }` — {@link CoverageSnapshot}.
+     */
+    coverage: (projectId: string) =>
+      request<{ coverage: CoverageSnapshot }>(
+        `/project-plans/coverage?project_id=${encodeURIComponent(projectId)}`
+      ),
+    /**
+     * POST /api/project-plans/coverage-request {project_id} — Value Pool
+     * Slice 2 (DEC-4): the "prioritize now" entry point. Stamps the
+     * coverage-request flag server-side, jumping this project to the head
+     * of the background sweep rotation, and kicks a bounded drain
+     * fire-and-forget. Returns 202 immediately with a probe-built snapshot
+     * — this call never blocks on the drain finishing; the panel's
+     * `eventBus` subscription (not this call's response) is what reports
+     * live progress after this.
+     * @param projectId The project id.
+     * @returns `{ coverage }` — {@link CoverageSnapshot}.
+     */
+    requestCoverage: (projectId: string) =>
+      request<{ coverage: CoverageSnapshot }>("/project-plans/coverage-request", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId }),
       }),
     /**
      * GET /api/project-plans/health?project_id= — `computePlanHealth`'s

@@ -858,6 +858,70 @@ const UPGRADE_CASES = [
       assertWritable,
     }));
   })(),
+  // Value Pool Slice 2: value_summary_sweep_state.coverage_requested_at
+  // (DEC-8) — additive/nullable, same addColumnsIfMissing call shape as M1/M2
+  // above. Legacy shape predates this column entirely; a legacy row reads
+  // NULL (= passive, per the schema comment in db.js), and is writable via
+  // the new requestValueCoverage statement.
+  ...(() => {
+    const legacySql = `
+      CREATE TABLE IF NOT EXISTS value_summary_sweep_state (
+        project_id TEXT PRIMARY KEY,
+        last_swept_at TEXT,
+        pending_after_sweep INTEGER NOT NULL DEFAULT 0
+      );
+    `;
+    const seed = (legacyDb) => {
+      legacyDb
+        .prepare(
+          `INSERT INTO value_summary_sweep_state (project_id, last_swept_at, pending_after_sweep)
+           VALUES (?, ?, ?)`
+        )
+        .run("legacy-project-1", "2026-08-01T00:00:00.000Z", 5);
+    };
+    const assertLegacyRow = (db) => {
+      const row = db
+        .prepare("SELECT coverage_requested_at FROM value_summary_sweep_state WHERE project_id = ?")
+        .get("legacy-project-1");
+      assert.ok(row, "value_summary_sweep_state row should exist after migration");
+      assert.strictEqual(
+        row.coverage_requested_at,
+        null,
+        "coverage_requested_at should be NULL (passive) for legacy rows"
+      );
+    };
+    const assertWritable = (db) => {
+      const { stmts } = require("../db");
+      stmts.requestValueCoverage.run("legacy-project-1", "2026-08-05T12:00:00.000Z");
+      const row = db
+        .prepare("SELECT coverage_requested_at FROM value_summary_sweep_state WHERE project_id = ?")
+        .get("legacy-project-1");
+      assert.equal(
+        row.coverage_requested_at,
+        "2026-08-05T12:00:00.000Z",
+        "coverage_requested_at should be writable via requestValueCoverage on a migrated legacy row"
+      );
+      stmts.clearValueCoverageRequest.run("legacy-project-1");
+      const cleared = db
+        .prepare("SELECT coverage_requested_at FROM value_summary_sweep_state WHERE project_id = ?")
+        .get("legacy-project-1");
+      assert.strictEqual(
+        cleared.coverage_requested_at,
+        null,
+        "coverage_requested_at should be clearable via clearValueCoverageRequest"
+      );
+    };
+    return [
+      {
+        table: "value_summary_sweep_state",
+        column: "coverage_requested_at",
+        legacySql,
+        seed,
+        assertLegacyRow,
+        assertWritable,
+      },
+    ];
+  })(),
 ];
 
 describe("Migration: plan_items.target_date", () => {
@@ -2123,6 +2187,81 @@ describe("Migration: value_summary_generation_log.outcome/model/duration_ms (old
     upgradeCase.assertWritable(db);
 
     db.close();
+  });
+});
+
+describe("Migration: value_summary_sweep_state.coverage_requested_at (Value Pool Slice 2, DEC-8)", () => {
+  let tempDbPath;
+  let tempDb;
+  const originalDbPath = process.env.DASHBOARD_DB_PATH;
+  const upgradeCase = UPGRADE_CASES.find(
+    (uc) => uc.table === "value_summary_sweep_state" && uc.column === "coverage_requested_at"
+  );
+
+  before(() => {
+    tempDbPath = path.join(os.tmpdir(), `db-migration-sweep-state-coverage-${Date.now()}.db`);
+    tempDb = new Database(tempDbPath);
+    tempDb.pragma("journal_mode = WAL");
+    tempDb.exec(upgradeCase.legacySql);
+    upgradeCase.seed(tempDb);
+    tempDb.close();
+  });
+
+  after(() => {
+    process.env.DASHBOARD_DB_PATH = originalDbPath;
+    delete require.cache[require.resolve("../db")];
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(`${tempDbPath}${suffix}`, { force: true });
+      } catch {
+        // Best effort
+      }
+    }
+  });
+
+  it("adds coverage_requested_at via guarded ALTER, legacy row reads NULL, column is writable", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    const tableInfo = db.prepare("PRAGMA table_info(value_summary_sweep_state)").all();
+    assert.ok(
+      tableInfo.some((col) => col.name === "coverage_requested_at"),
+      "coverage_requested_at column should exist after migration"
+    );
+
+    upgradeCase.assertLegacyRow(db);
+    upgradeCase.assertWritable(db);
+
+    db.close();
+  });
+
+  it("migration is idempotent: second require does not fail or duplicate the column", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db1 = new Database(tempDbPath);
+    const count1 = db1
+      .prepare("PRAGMA table_info(value_summary_sweep_state)")
+      .all()
+      .filter((c) => c.name === "coverage_requested_at").length;
+    assert.equal(count1, 1, "should have exactly one coverage_requested_at column");
+    db1.close();
+
+    delete require.cache[require.resolve("../db")];
+    require("../db");
+
+    const db2 = new Database(tempDbPath);
+    const count2 = db2
+      .prepare("PRAGMA table_info(value_summary_sweep_state)")
+      .all()
+      .filter((c) => c.name === "coverage_requested_at").length;
+    assert.equal(count2, 1, "should still have exactly one coverage_requested_at column");
+    db2.close();
   });
 });
 

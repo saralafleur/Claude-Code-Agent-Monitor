@@ -162,6 +162,14 @@
         "dismiss": "Dismiss",
         "dismissAll": "Dismiss all",
         "updatedGeneric": "Updated"
+      },
+      "coverage": {
+        "header": "{{described}} of {{poolSize}} described",
+        "etaRemaining": "~{{minutes}} min remaining",
+        "estimating": "Estimating…",
+        "prioritizeNow": "Prioritize now",
+        "requested": "Prioritization requested",
+        "draining": "Draining now…"
       }
     },
     "health": {

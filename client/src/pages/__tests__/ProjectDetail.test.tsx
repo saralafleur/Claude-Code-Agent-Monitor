@@ -145,6 +145,8 @@ const projectPlansHealthMock = vi.fn();
 const projectPlansClaimMock = vi.fn();
 const projectPlansCloseMock = vi.fn();
 const projectPlansAltitudesMock = vi.fn();
+const projectPlansCoverageMock = vi.fn();
+const projectPlansRequestCoverageMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -168,6 +170,8 @@ vi.mock("../../lib/api", () => ({
       claim: (...args: unknown[]) => projectPlansClaimMock(...args),
       close: (...args: unknown[]) => projectPlansCloseMock(...args),
       altitudes: (...args: unknown[]) => projectPlansAltitudesMock(...args),
+      coverage: (...args: unknown[]) => projectPlansCoverageMock(...args),
+      requestCoverage: (...args: unknown[]) => projectPlansRequestCoverageMock(...args),
     },
     sessions: {
       list: (...args: unknown[]) => sessionsListMock(...args),
@@ -229,6 +233,32 @@ describe("ProjectDetail page", () => {
     projectPlansClaimMock.mockResolvedValue({ claim: {} });
     projectPlansCloseMock.mockResolvedValue({ plan: {} });
     projectPlansAltitudesMock.mockResolvedValue({ altitudes: {} });
+    projectPlansCoverageMock.mockResolvedValue({
+      coverage: {
+        project_id: "proj-1",
+        described: 0,
+        pool_size: 0,
+        pending: 0,
+        complete: true,
+        demand: "passive",
+        requested_at: null,
+        eta: { state: "none" },
+        computed_at: "2026-06-01T00:00:00.000Z",
+      },
+    });
+    projectPlansRequestCoverageMock.mockResolvedValue({
+      coverage: {
+        project_id: "proj-1",
+        described: 0,
+        pool_size: 0,
+        pending: 0,
+        complete: true,
+        demand: "requested",
+        requested_at: "2026-06-01T00:00:00.000Z",
+        eta: { state: "none" },
+        computed_at: "2026-06-01T00:00:00.000Z",
+      },
+    });
   });
 
   it("shows a not-found state for an unknown project id", async () => {

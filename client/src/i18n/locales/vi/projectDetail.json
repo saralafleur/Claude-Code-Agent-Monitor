@@ -162,6 +162,14 @@
         "dismiss": "Bỏ qua",
         "dismissAll": "Bỏ qua tất cả",
         "updatedGeneric": "Đã cập nhật"
+      },
+      "coverage": {
+        "header": "Đã mô tả {{described}}/{{poolSize}}",
+        "etaRemaining": "còn khoảng {{minutes}} phút",
+        "estimating": "Đang ước tính…",
+        "prioritizeNow": "Ưu tiên ngay",
+        "requested": "Đã yêu cầu ưu tiên",
+        "draining": "Đang xử lý…"
       }
     },
     "health": {

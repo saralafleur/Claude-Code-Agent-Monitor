@@ -146,6 +146,7 @@ const FILE_DISPOSITIONS = {
   "server/lib/usage-capture.js": "scanned",
   "server/lib/usage-captures-db.js": "scanned",
   "server/lib/usage-fetch-oauth.js": "scanned",
+  "server/lib/value-coverage.js": "scanned",
   "server/lib/value-ledger.js": "scanned",
   "server/lib/value-summary.js": "scanned",
   "server/lib/value-summary-tick.js": "scanned",
@@ -571,6 +572,62 @@ describe("chronology-ordering: behavioral tests", () => {
       // item 3 (-30s) last.
       expected: ["Queue item 1", "Queue item 2", "Queue item 3"],
       limit: null,
+    });
+  });
+
+  it("listRecentValueGenerationDurations returns created_at-ordered rows, not id-ordered rows (Value Pool Slice 2, DEC-5 ETA input)", () => {
+    // G4 / §9.2: the ETA's SOLE input must sort `created_at DESC, id DESC`
+    // BEFORE `LIMIT` — never `id DESC` alone, since a bulk-imported or
+    // clock-skewed row's insertion order does not always track its real
+    // recency. Scrambled deliberately: insertion order (ids) is 1,2,3, but
+    // the created_at we set afterward is oldest,newest,middle — the query
+    // must return newest-first by created_at, not by id.
+    const { stmts, db } = dbModule;
+    const now = new Date();
+    const rows = [
+      { project: "eta-proj-A", daysAgo: 5, durationMs: 1000, generated: 10 }, // oldest
+      { project: "eta-proj-A", daysAgo: 1, durationMs: 3000, generated: 30 }, // newest
+      { project: "eta-proj-A", daysAgo: 3, durationMs: 2000, generated: 20 }, // middle
+    ];
+
+    assertOrderedByCreatedAt({
+      seed: () => {
+        for (const r of rows) {
+          stmts.insertValueSummaryGeneration.run(
+            r.project,
+            "tick",
+            "ok",
+            r.generated + 5,
+            5,
+            r.generated,
+            0,
+            0,
+            "haiku",
+            r.durationMs,
+            0
+          );
+        }
+        // Overwrite created_at to the scrambled-vs-id-insertion times above.
+        const stampedRows = db
+          .prepare(
+            "SELECT id, duration_ms FROM value_summary_generation_log WHERE project_id = ? ORDER BY id ASC"
+          )
+          .all("eta-proj-A");
+        stampedRows.forEach((row, i) => {
+          const daysAgo = rows.find((r) => r.durationMs === row.duration_ms).daysAgo;
+          db.prepare("UPDATE value_summary_generation_log SET created_at = ? WHERE id = ?").run(
+            new Date(now.getTime() - daysAgo * 86_400_000).toISOString(),
+            row.id
+          );
+        });
+      },
+      run: () =>
+        stmts.listRecentValueGenerationDurationsForProject
+          .all("eta-proj-A", 3)
+          .map((r) => r.duration_ms),
+      // Newest (1 day ago, duration 3000) first, oldest (5 days ago, 1000) last.
+      expected: [3000, 2000, 1000],
+      limit: 3,
     });
   });
 

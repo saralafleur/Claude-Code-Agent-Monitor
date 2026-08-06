@@ -97,11 +97,32 @@ const MAX_UNITS_PER_PROMPT = 40;
  *  stakeholder sentence is never chopped mid-word. */
 const MAX_TEXT_LENGTH = 240;
 
-/** The model this synthesis spawns: a dedicated override, falling back to
- *  the shared Focus-summary model, then the shared inference model, then
- *  `haiku` — same cascade shape as `focus-summary.js`'s `summaryModel()`. */
-function summaryModel() {
+/** The two synthesis stages {@link summaryModel} accepts (DEC-7/O2, closed
+ *  registry, exported — never hand-typed at any consumer). `"unit"`: this
+ *  file's own per-unit PROJECT/STAKEHOLDER synthesis (the stage every
+ *  production call site uses today). `"grouping"`: reserved for Slice 3's
+ *  cross-unit grouping synthesis — it has NO consumer yet in this codebase;
+ *  do not read that absence as dead code (a §9.3 "exported and never called"
+ *  sweep must not flag it — this JSDoc line is that sweep's exemption). */
+const SUMMARY_STAGES = ["unit", "grouping"];
+
+/** The model this synthesis spawns, for a given stage (DEC-7/O2: ONE
+ *  fallback cascade, written once — not a second `groupingModel()` sibling
+ *  function, which would duplicate this exact chain one call frame away,
+ *  §9.1's twice-proven rogue-re-derivation shape). Precedence: a per-stage
+ *  override (`DASHBOARD_VALUE_SUMMARY_UNIT_MODEL` /
+ *  `DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL`) first, THEN today's existing
+ *  chain unchanged — the shared value-summary override, the shared
+ *  Focus-summary model, the shared inference model, then `haiku`. `stage`
+ *  defaults to `"unit"` so every pre-Slice-2 call site (none of which passed
+ *  an argument) keeps its exact prior behavior.
+ * @param {"unit"|"grouping"} [stage]
+ * @returns {string}
+ */
+function summaryModel(stage = "unit") {
+  const stageEnvName = `DASHBOARD_VALUE_SUMMARY_${stage.toUpperCase()}_MODEL`;
   return (
+    process.env[stageEnvName] ||
     process.env.DASHBOARD_VALUE_SUMMARY_MODEL ||
     process.env.DASHBOARD_FOCUS_SUMMARY_MODEL ||
     process.env.DASHBOARD_FOCUS_INFER_MODEL ||
@@ -355,10 +376,15 @@ function reHomeStaleUnits(altitudes, states, staleReasons, staleRows) {
  *
  * @param {object} dbModule
  * @param {Array<{unitKey: string, value_source: string, value_ref?: string, label?: string|null, stage?: string|null}>} units
- * @param {{droppedCount?: number}} [opts] - A-3: units the caller already
- *   dropped before calling (e.g. no usable key) but still wants counted —
- *   folded into `pool_size`/`unavailable` so the caller never re-derives a
- *   partition term of its own (the route logs `counts` verbatim).
+ * @param {{droppedCount?: number, probe?: boolean}} [opts] - A-3: units the
+ *   caller already dropped before calling (e.g. no usable key) but still
+ *   wants counted — folded into `pool_size`/`unavailable` so the caller
+ *   never re-derives a
+ *   partition term of its own (the route logs `counts` verbatim). `probe`
+ *   (DEC-9, Value Pool Slice 2): classify-only — never spawns, every miss
+ *   reports `"queued"` (never `"unavailable"`, since nothing was attempted),
+ *   and this function writes no cache row either way for a probe call
+ *   (the LLM spawn — the only write trigger — never runs).
  * @returns {Promise<{
  *   altitudes: Record<string, object>,
  *   states: Record<string, "queued"|"unavailable">,
@@ -450,6 +476,25 @@ async function enrichPoolAltitudes(dbModule, units, opts = {}) {
   // without re-deriving anything a second time.
   const dedupedMisses = misses;
 
+  // Probe mode (DEC-9, Value Pool Slice 2): classify-only, never spawns.
+  // This function never writes the generation-log itself (only its callers
+  // do, after it returns), so a probe result simply never gets logged as
+  // long as its caller skips that write for a probe call — GET /coverage's
+  // route does exactly that. Every miss reports "queued", never "unavailable" —
+  // a probe never actually ATTEMPTED anything, so "unavailable" (which
+  // implies an attempt was made and failed) would misreport why the unit
+  // isn't described yet. Reuses the existing cap/gate machinery only in the
+  // sense that it still returns the same `counts` shape every other path
+  // returns; it does not slice a batch or check `llmAvailable()` at all.
+  if (opts.probe) {
+    for (const unit of dedupedMisses) {
+      states[unit.unitKey] = "queued";
+      counts.queued += 1;
+    }
+    reHomeStaleUnits(altitudes, states, staleReasons, staleRows);
+    return { altitudes, states, counts };
+  }
+
   if (!(await llmAvailable())) {
     // Nothing was attempted — every miss (in-cap or not) is unavailable,
     // never queued (DEC-11: "outage," not "backlog").
@@ -468,7 +513,7 @@ async function enrichPoolAltitudes(dbModule, units, opts = {}) {
     counts.queued += 1;
   }
 
-  const model = summaryModel();
+  const model = summaryModel("unit");
   const stdout = await runClaudePromptJson(buildPrompt(batch), { model });
   if (stdout == null) {
     for (const unit of batch) {
@@ -544,6 +589,7 @@ module.exports = {
   buildPrompt,
   parseOutput,
   summaryModel,
+  SUMMARY_STAGES,
   MAX_UNITS_PER_PROMPT,
   ALTITUDE_STATES,
   ALTITUDE_FRESHNESS,

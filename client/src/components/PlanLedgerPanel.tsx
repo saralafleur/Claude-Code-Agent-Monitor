@@ -36,7 +36,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Info, X } from "lucide-react";
 import { api } from "../lib/api";
-import type { PlanHealth, ProjectPlanItem, ProjectPlanWithItems, ValueUnit } from "../lib/types";
+import { eventBus } from "../lib/eventBus";
+import type {
+  CoverageSnapshot,
+  PlanHealth,
+  ProjectPlanItem,
+  ProjectPlanWithItems,
+  ValueAltitudesUpdatedPayload,
+  ValueUnit,
+} from "../lib/types";
 
 /** Hand-maintained mirror of `server/lib/value-summary.js`'s
  *  `ALTITUDE_FRESHNESS` export (§9.7 accepted exception, WATCH-F — a CJS
@@ -49,6 +57,40 @@ const ALTITUDE_FRESHNESS = [
   "stale_refresh_unavailable",
   "updated_unseen",
 ] as const;
+
+/**
+ * Value Pool Slice 2 (DEC-5/DEC-1, §9.1): the monotonic merge rule. Accepts
+ * `next` only if its `computed_at` is strictly newer than `prev`'s —
+ * otherwise an HTTP response that lands AFTER a later WS broadcast (or vice
+ * versa) would visibly regress the header, which is "decrement" wearing a
+ * race's clothes (architect R4). ISO-8601 timestamps compare correctly as
+ * plain strings. This is the ONLY comparison this file performs on a
+ * `CoverageSnapshot` — every other field is rendered verbatim, never
+ * recomputed.
+ */
+function mergeCoverage(
+  prev: CoverageSnapshot | null,
+  next: CoverageSnapshot | null | undefined
+): CoverageSnapshot | null {
+  if (!next) return prev;
+  if (!prev) return next;
+  return next.computed_at > prev.computed_at ? next : prev;
+}
+
+/**
+ * Formats an already-server-computed `ms_remaining` (a `CoverageSnapshot`
+ * field this file never derives) into whole minutes for display. This is a
+ * UNIT CONVERSION of a value the server already computed — not a re-
+ * derivation of the estimate itself (DEC-1/DEC-5's "no ETA arithmetic"
+ * bars deriving `ms_remaining`/`batches_remaining` from more primitive
+ * inputs here, which this file never does; it never reads `duration_ms` or
+ * any generation-log data at all). Floors at 1 so a near-complete drain
+ * never displays "~0 min remaining" (a fabricated zero is explicitly a
+ * requirement violation, not a rounding choice — technical-plan.md §8).
+ */
+function formatEtaMinutes(msRemaining: number): number {
+  return Math.max(1, Math.round(msRemaining / 60_000));
+}
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -612,24 +654,55 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [altitudes, setAltitudes] = useState<Record<string, Altitude>>({});
+  // Value Pool Slice 2: the single coverage/ETA snapshot, server-computed
+  // (server/lib/value-coverage.js) and rendered verbatim — this component
+  // never derives `described`/`pending`/`complete`/an ETA number itself.
+  const [coverage, setCoverage] = useState<CoverageSnapshot | null>(null);
+  const [requestingCoverage, setRequestingCoverage] = useState(false);
   // Tracks every unit id ever requested, independent of `altitudes` state
   // timing — the effect below reads this instead of `altitudes` itself so
   // it never needs `altitudes` in its own dependency array (no feedback
   // loop between "state I set" and "state that re-triggers me").
   const requestedAltitudesRef = useRef<Set<string>>(new Set());
+  // Mirrors `units` for the eventBus handler below (WATCH-S2-B), which is
+  // subscribed once per `projectId` (not re-subscribed on every pool
+  // change) and therefore needs a way to read the CURRENT pool without a
+  // stale closure over an old `units` array.
+  const unitsRef = useRef<ValueUnit[]>([]);
+  useEffect(() => {
+    unitsRef.current = units;
+  }, [units]);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // Re-arm on every setup, not just at the initial `useRef(true)` — under
+    // React 18 StrictMode dev double-invoke (setup -> cleanup -> setup),
+    // leaving this armed only once at declaration time means the SECOND
+    // setup never restores `true` after the first cleanup flips it `false`,
+    // so `mountedRef.current` stays `false` for the component's entire life
+    // and every `fetchAltitudesFor` response / `handlePrioritizeNow` finally
+    // block silently no-ops (build-reviewer BL-2). Mirrors the per-effect
+    // `let cancelled = false` local this replaced, just shared across this
+    // component's several callbacks instead of scoped to one effect.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     if (!projectId) return;
     setError(null);
     try {
-      const [plansRes, poolRes, healthRes] = await Promise.all([
+      const [plansRes, poolRes, healthRes, coverageRes] = await Promise.all([
         api.projectPlans.list(projectId),
         api.projectPlans.pool(projectId),
         api.projectPlans.health(projectId),
+        api.projectPlans.coverage(projectId),
       ]);
       setPlans(plansRes.plans);
       setUnits(poolRes.units);
       setHealth(healthRes);
+      setCoverage((prev) => mergeCoverage(prev, coverageRes.coverage));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -639,74 +712,131 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
     load();
   }, [load]);
 
+  // Shared altitude-fetch body — called both for genuinely-new pool units
+  // (the effect below) and for the eventBus handler's WATCH-S2-B refetch of
+  // exactly the units a live broadcast named (never the whole pool, never
+  // coverage — the message IS the coverage).
+  const fetchAltitudesFor = useCallback(
+    (unitsToFetch: ValueUnit[]) => {
+      if (unitsToFetch.length === 0) return;
+      api.projectPlans
+        .altitudes(projectId, unitsToFetch)
+        .then((res) => {
+          if (!mountedRef.current) return;
+          // T-E trap coverage: an out-of-registry states value (a malformed
+          // new-server response) must not silently masquerade as an
+          // old-server absence — warn once per occurrence so it is visible in
+          // dev, then still fall through to the same safe "unavailable"
+          // render as any other unrecognized string (see AltitudeText above).
+          for (const [uid, state] of Object.entries(res.states ?? {})) {
+            if (state && !["queued", "unavailable"].includes(state)) {
+              console.warn(
+                `Altitude state "${state}" not in ALTITUDE_STATES registry for unit ${uid}`
+              );
+            }
+          }
+          // Same T-E-shaped coverage for the new freshness registry: an
+          // out-of-registry `freshness` value (a malformed/future-server
+          // response) still renders (generic fallback, altitudeMarkerKey
+          // above) but is never silently unremarked in dev.
+          for (const [uid, entry] of Object.entries(res.altitudes)) {
+            const freshness = (entry as { freshness?: string }).freshness;
+            if (
+              freshness &&
+              !ALTITUDE_FRESHNESS.includes(freshness as (typeof ALTITUDE_FRESHNESS)[number])
+            ) {
+              console.warn(
+                `Altitude freshness "${freshness}" not in ALTITUDE_FRESHNESS registry for unit ${uid}`
+              );
+            }
+          }
+          setAltitudes((prev) => {
+            const next = { ...prev };
+            for (const u of unitsToFetch) {
+              const a = res.altitudes[u.id];
+              next[u.id] = a
+                ? {
+                    project: a.project,
+                    stakeholder: a.stakeholder,
+                    ...(a.freshness ? { freshness: a.freshness } : {}),
+                    ...(a.update_reason ? { update_reason: a.update_reason } : {}),
+                    ...("regenerated_at" in a ? { regenerated_at: a.regenerated_at ?? null } : {}),
+                  }
+                : res.states?.[u.id] === "queued"
+                  ? "queued"
+                  : "unavailable";
+            }
+            return next;
+          });
+        })
+        .catch(() => {
+          if (!mountedRef.current) return;
+          setAltitudes((prev) => {
+            const next = { ...prev };
+            for (const u of unitsToFetch) next[u.id] = "unavailable";
+            return next;
+          });
+        });
+    },
+    [projectId]
+  );
+
   useEffect(() => {
     const missing = units.filter((u) => !requestedAltitudesRef.current.has(u.id));
     if (missing.length === 0) return;
     for (const u of missing) requestedAltitudesRef.current.add(u.id);
+    fetchAltitudesFor(missing);
+  }, [units, fetchAltitudesFor]);
 
-    let cancelled = false;
-    api.projectPlans
-      .altitudes(projectId, missing)
-      .then((res) => {
-        if (cancelled) return;
-        // T-E trap coverage: an out-of-registry states value (a malformed
-        // new-server response) must not silently masquerade as an
-        // old-server absence — warn once per occurrence so it is visible in
-        // dev, then still fall through to the same safe "unavailable"
-        // render as any other unrecognized string (see AltitudeText above).
-        for (const [uid, state] of Object.entries(res.states ?? {})) {
-          if (state && !["queued", "unavailable"].includes(state)) {
-            console.warn(
-              `Altitude state "${state}" not in ALTITUDE_STATES registry for unit ${uid}`
-            );
-          }
+  // Value Pool Slice 2 (§3.6c–f): this panel's FIRST-EVER eventBus
+  // subscription. The handler must not throw — eventBus.publish is
+  // synchronous and a throwing subscriber aborts delivery to the handlers
+  // registered after it (colorThresholds.ts:105 / focusStore.ts precedent),
+  // so the entire body is wrapped in try/catch. The subscriber NEVER
+  // refetches coverage on a WS message — the message IS the coverage
+  // (merged via the monotonic {@link mergeCoverage} rule); it only refetches
+  // altitude TEXTS, and only for the message's own `unit_keys` (WATCH-S2-B).
+  useEffect(() => {
+    if (!projectId) return;
+    const unsubscribe = eventBus.subscribe((msg) => {
+      try {
+        if (msg.type !== "value_altitudes_updated") return;
+        const data = msg.data as ValueAltitudesUpdatedPayload;
+        if (!data || data.project_id !== projectId) return;
+
+        if (data.coverage) {
+          setCoverage((prev) => mergeCoverage(prev, data.coverage));
         }
-        // Same T-E-shaped coverage for the new freshness registry: an
-        // out-of-registry `freshness` value (a malformed/future-server
-        // response) still renders (generic fallback, altitudeMarkerKey
-        // above) but is never silently unremarked in dev.
-        for (const [uid, entry] of Object.entries(res.altitudes)) {
-          const freshness = (entry as { freshness?: string }).freshness;
-          if (
-            freshness &&
-            !ALTITUDE_FRESHNESS.includes(freshness as (typeof ALTITUDE_FRESHNESS)[number])
-          ) {
-            console.warn(
-              `Altitude freshness "${freshness}" not in ALTITUDE_FRESHNESS registry for unit ${uid}`
-            );
-          }
+
+        if (Array.isArray(data.unit_keys) && data.unit_keys.length > 0) {
+          const keySet = new Set(data.unit_keys);
+          // Relax the once-ever semantics for exactly these keys — a live-
+          // updated unit must refetch its text, not sit stale forever
+          // because it was already "requested" once (WATCH-S2-B).
+          for (const key of keySet) requestedAltitudesRef.current.delete(key);
+          const toRefetch = unitsRef.current.filter((u) => keySet.has(u.id));
+          for (const u of toRefetch) requestedAltitudesRef.current.add(u.id);
+          fetchAltitudesFor(toRefetch);
         }
-        setAltitudes((prev) => {
-          const next = { ...prev };
-          for (const u of missing) {
-            const a = res.altitudes[u.id];
-            next[u.id] = a
-              ? {
-                  project: a.project,
-                  stakeholder: a.stakeholder,
-                  ...(a.freshness ? { freshness: a.freshness } : {}),
-                  ...(a.update_reason ? { update_reason: a.update_reason } : {}),
-                  ...("regenerated_at" in a ? { regenerated_at: a.regenerated_at ?? null } : {}),
-                }
-              : res.states?.[u.id] === "queued"
-                ? "queued"
-                : "unavailable";
-          }
-          return next;
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAltitudes((prev) => {
-          const next = { ...prev };
-          for (const u of missing) next[u.id] = "unavailable";
-          return next;
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [units, projectId]);
+      } catch {
+        /* a throwing subscriber must not abort other eventBus handlers */
+      }
+    });
+    return unsubscribe;
+  }, [projectId, fetchAltitudesFor]);
+
+  const handlePrioritizeNow = useCallback(async () => {
+    if (!projectId) return;
+    setRequestingCoverage(true);
+    try {
+      const res = await api.projectPlans.requestCoverage(projectId);
+      setCoverage((prev) => mergeCoverage(prev, res.coverage));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mountedRef.current) setRequestingCoverage(false);
+    }
+  }, [projectId]);
 
   const handleClaim = useCallback(
     async (unit: ValueUnit, itemId: number) => {
@@ -841,7 +971,50 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
         </div>
 
         <div data-test="value-pool-pane">
-          <h3 className="text-xs font-semibold text-gray-300 mb-2">{t("planLedger.pool.title")}</h3>
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <h3 className="text-xs font-semibold text-gray-300">{t("planLedger.pool.title")}</h3>
+            {coverage && coverage.pool_size > 0 && (
+              <div
+                className="flex items-center gap-2 text-[11px] text-gray-400"
+                data-test="coverage-header"
+              >
+                <span>
+                  {t("planLedger.pool.coverage.header", {
+                    described: coverage.described,
+                    poolSize: coverage.pool_size,
+                  })}
+                  {coverage.eta.state === "measured" && (
+                    <>
+                      {" · "}
+                      {t("planLedger.pool.coverage.etaRemaining", {
+                        minutes: formatEtaMinutes(coverage.eta.ms_remaining),
+                      })}
+                    </>
+                  )}
+                  {coverage.eta.state === "estimating" && (
+                    <> · {t("planLedger.pool.coverage.estimating")}</>
+                  )}
+                </span>
+                {coverage.demand === "requested" && (
+                  <span className="text-accent">{t("planLedger.pool.coverage.requested")}</span>
+                )}
+                {coverage.demand === "draining" && (
+                  <span className="text-accent">{t("planLedger.pool.coverage.draining")}</span>
+                )}
+                {!coverage.complete && coverage.demand === "passive" && (
+                  <button
+                    type="button"
+                    onClick={handlePrioritizeNow}
+                    disabled={requestingCoverage}
+                    data-test="prioritize-now-button"
+                    className="text-[11px] text-accent hover:underline disabled:opacity-50"
+                  >
+                    {t("planLedger.pool.coverage.prioritizeNow")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           {units.length === 0 ? (
             <p className="text-xs text-gray-500 italic">{t("planLedger.pool.empty")}</p>
           ) : (

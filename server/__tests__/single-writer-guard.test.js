@@ -343,11 +343,73 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
     }
   });
 
+  it("requestValueCoverage appears only in db.js and project-plans.js, with one lexical call site in the coverage-request handler (Value Pool Slice 2, DEC-4, same shape as W-3)", () => {
+    const files = scanFiles(serverDir, /requestValueCoverage/);
+    const basenames = files.map((f) => path.basename(f)).filter((f) => !f.endsWith(".test.js"));
+    assert.deepEqual(
+      basenames.sort(),
+      ["db.js", "project-plans.js"].sort(),
+      "requestValueCoverage should exist only in db.js (statement) and project-plans.js (route handler)"
+    );
+
+    const routesPath = path.resolve(serverDir, "routes/project-plans.js");
+    let content = fs.readFileSync(routesPath, "utf8");
+    content = stripComments(content);
+
+    const routeMatch = content.match(/router\.post\(\s*["']\/coverage-request["']/);
+    assert.ok(routeMatch, "/coverage-request route should be defined");
+
+    const handlerStart = routeMatch.index + routeMatch[0].length;
+    let braceDepth = 0;
+    let handlerEnd = handlerStart;
+    let foundBrace = false;
+    for (let i = handlerStart; i < content.length; i++) {
+      if (content[i] === "{") {
+        if (!foundBrace) foundBrace = true;
+        braceDepth++;
+      } else if (content[i] === "}") {
+        braceDepth--;
+        if (braceDepth === 0 && foundBrace) {
+          handlerEnd = i + 1;
+          break;
+        }
+      }
+    }
+    const handlerBody = content.substring(handlerStart, handlerEnd);
+    const callCount = (handlerBody.match(/requestValueCoverage\s*\.\s*run\s*\(/g) || []).length;
+    assert.equal(
+      callCount,
+      1,
+      "requestValueCoverage.run( should appear exactly once in the /coverage-request handler body"
+    );
+  });
+
+  it("value-coverage.js's exports have an explicit disposition at its two consumers (route + tick) — DEC-5, §9.1", () => {
+    assertSingleHome("../lib/value-coverage", {
+      "../routes/project-plans": {
+        shared: ["coverageSnapshot"],
+        absent: ["estimateEta", "DEMAND_STATES", "ETA_STATES", "ETA_SAMPLE_SIZE"],
+      },
+      "../lib/value-summary-tick": {
+        shared: ["coverageSnapshot"],
+        absent: ["estimateEta", "DEMAND_STATES", "ETA_STATES", "ETA_SAMPLE_SIZE"],
+      },
+    });
+  });
+
   it("value-summary.js's exports have an explicit disposition at every consumer", () => {
     // (5) Route and tick consume only enrichPoolAltitudes's return —
     // unitFacts/compareUnitInputs/ALTITUDE_FRESHNESS are new exports this
     // build adds (DEC-15 durable cure); registered "absent" here per
     // technical-plan.md's own file-change table for this test.
+    //
+    // value-coverage.js (build-reviewer SF-5, §9.7) is a THIRD consumer —
+    // `estimateEta`'s batch-count arithmetic needs `MAX_UNITS_PER_PROMPT`,
+    // the same constant the composer itself enforces per-request. Without
+    // this entry, `assertSingleHome`'s hand-typed consumer map stays silent
+    // about a real new consumer even though its own scope-derivation (the
+    // exports list) is artifact-derived — the exact HAND-SCOPED STRUCTURAL
+    // SCAN gap §9.7 exists to close.
     assertSingleHome("../lib/value-summary", {
       "../routes/project-plans": {
         shared: ["enrichPoolAltitudes"],
@@ -355,6 +417,7 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
           "buildPrompt",
           "parseOutput",
           "summaryModel",
+          "SUMMARY_STAGES",
           "MAX_UNITS_PER_PROMPT",
           "ALTITUDE_STATES",
           "unitFacts",
@@ -369,7 +432,23 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
           "buildPrompt",
           "parseOutput",
           "summaryModel",
+          "SUMMARY_STAGES",
           "MAX_UNITS_PER_PROMPT",
+          "ALTITUDE_STATES",
+          "unitFacts",
+          "compareUnitInputs",
+          "ALTITUDE_FRESHNESS",
+          "UNCOMPARED_FIELD_GUARANTORS",
+        ],
+      },
+      "../lib/value-coverage": {
+        shared: ["MAX_UNITS_PER_PROMPT"],
+        absent: [
+          "enrichPoolAltitudes",
+          "buildPrompt",
+          "parseOutput",
+          "summaryModel",
+          "SUMMARY_STAGES",
           "ALTITUDE_STATES",
           "unitFacts",
           "compareUnitInputs",
