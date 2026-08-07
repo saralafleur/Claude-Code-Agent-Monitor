@@ -478,6 +478,25 @@ this shape one layer in, shipped with a JSDoc asserting divergence was
 right shape; it is also the assertion most likely to be quietly narrowed, so it
 gets the anchored **exactly**-this-exempt-set form or it is decoration.
 
+**Design-time pre-flag (2026-08-06, `requests/2026-08-06-session-stakeholder-summary/intake/2026-08-06-session-summary/`
+— NOT an occurrence, count unchanged at 7).** A new session-summary card in
+`SessionDetail.tsx`, with a Board-card badge named in the brief as a *speculative*
+future consumer. **`intake-architect` §6 and `intake-qa` §2 gave opposite remedies
+in the same run** — architect: keep the fetch/state/WS logic inline and name the
+cut line in prose for whoever adds consumer #2; QA: extract a single exported
+hook on day one. PM ruled for QA (`pm-plan.md` PM-2) on this entry's own
+2026-08-05 lesson 1: *"a pre-flag is not a guard… prose in the catalog does not
+enforce."* A named-in-prose cut line is exactly the artifact this entry has now
+watched fail three times. Cheap here — one consumer, so extraction costs a file
+boundary, not a formula — and it converts the tripwire into a structural fact.
+Both agents agreed on the other half and it is right: **no cross-consumer test
+this round** (one consumer ⇒ `deepEqual(f(X), f(X))`, the vacuous shape named
+2026-08-06), replaced by a dated MANDATORY-at-consumer-#2 row. **Generalizable
+and new here: when two evaluators in one run cite this entry and prescribe
+opposite remedies, the tell is which remedy survives nobody reading the
+document again.**
+
+
 ### 9.2 row-id-as-chronology-proxy
 
 A query or aggregation over a table with an auto-increment `id` assumes
@@ -1940,6 +1959,52 @@ both-true facts that must never collapse into one field. **Generalizable
 addition to this entry: a suite organized one-test-per-branch is structurally
 incapable of containing a seam *between* branches; enumerate the orderings the
 handler's own step list creates, not just the states its registry declares.**
+
+**Design-time pre-flag (2026-08-06, `requests/2026-08-06-session-stakeholder-summary/intake/2026-08-06-session-summary/`
+— NOT an occurrence, count unchanged).** A new session-summary card told, in
+its own brief, to model itself on this entry's **live evidence #1**
+(`value-summary.js`) and on the client cure that produced **Trap E**
+(`AltitudeText`). Evaluation handled the *state-shape* half well — a four-state
+wire contract (`resolved`/`generating`/`queued`/`unavailable`) with a
+**mandatory `reason`** on `unavailable`, an exported `SESSION_SUMMARY_STATES`
+registry, and a named Trap-E cure (an out-of-registry value warns and renders
+distinguishably instead of masquerading as a legitimate absence).
+
+**The direction still open is this entry's 2026-08-05 lesson — delivery, not
+shape — and this design is structurally *more* exposed to it than Slice 2 was.**
+The architect (correctly) made the request path fire-and-forget, so the terminal
+state reaches the user **only** over the WebSocket. If generation completes
+between the POST returning `generating` and the client's `useEffect` subscribing
+to `session_summary_updated`, the terminal event is broadcast to nobody and the
+card renders "preparing…" forever — SF-6 one layer over, same invisibility, and
+a suite that always seeds the subscription before the broadcast structurally
+cannot observe it. Aggravated by StrictMode's double-invoke. Mandated by
+`pm-plan.md` PM-3: subscribe-before-request **or** one bounded re-read, plus a
+test in which the broadcast fires *before* the subscription and the card still
+resolves. Also flagged and applied: `architect.md` §5.3 claims the broadcast
+discipline holds *"by construction"* — this entry's own standing check says an
+unevidenced "never/can only/always" marks the spot where the invariant fails.
+
+**The layer walk is now five builds long and worth stating as the entry's
+running shape:** composer (2026-08-04) → route (2026-08-04) → sweep-state table
+(2026-08-04) → broadcast trigger (2026-08-05) → **transport/subscription race
+(2026-08-06, predicted, unbuilt)**. Every cure has been written against the
+layer that just failed, and nothing has ever asserted the invariant *end to
+end*, from "the server decided a terminal state" to "the mounted component
+rendered it." That end-to-end assertion is the cure this entry has not yet been
+given.
+
+**Also recorded, from this intake's live re-run of the precedent suite:** the
+B2-blocker and T-C-instrument guards in
+`server/__tests__/value-summary-tick.test.js` — the two tests this entry's own
+"how to comply" tells future builds to transplant — are **intermittently red on
+`master`**, and not for a product reason: both assert
+`notStrictEqual(<ISO timestamp>, …)` and lose to millisecond clock resolution
+(observed `expected === actual` to the ms; 0 leaf failures on two runs, 1 on
+two more, and once a second test in the same family). Transplanting the shape
+transplants the flake. Fix separately (Slice-2 debt); do not copy the assertion
+form.
+
 
 ### Candidate new pattern, NOT yet catalogued — CWD-IDENTITY-FANOUT
 
