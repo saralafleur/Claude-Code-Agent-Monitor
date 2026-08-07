@@ -2613,3 +2613,241 @@ describe("additive portfolio-layer tables", () => {
     db.close();
   });
 });
+
+describe("Value Groups — Schema assertions (S-1…S-4, Slice 3 new tables)", () => {
+  let tempDbPath;
+  let tempDir;
+
+  before(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ccam-db-test-"));
+    tempDbPath = path.join(tempDir, "test-value-groups.db");
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+  });
+
+  after(() => {
+    // Cleanup - close any open db handles and remove temp files
+    try {
+      if (fs.existsSync(tempDbPath)) {
+        fs.unlinkSync(tempDbPath);
+      }
+      if (fs.existsSync(tempDbPath + "-shm")) {
+        fs.unlinkSync(tempDbPath + "-shm");
+      }
+      if (fs.existsSync(tempDbPath + "-wal")) {
+        fs.unlinkSync(tempDbPath + "-wal");
+      }
+      if (tempDir && fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    } catch (e) {
+      // ignore cleanup errors
+    }
+  });
+
+  it("S-1 [R]: Three tables exist with exactly the columns and types per technical-plan §4", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // Define expected schema per technical-plan §4
+    const expectedTables = {
+      value_group_runs: [
+        { name: "id", type: "TEXT" },
+        { name: "project_id", type: "TEXT" },
+        { name: "state", type: "TEXT" },
+        { name: "input_digest", type: "TEXT" },
+        { name: "model", type: "TEXT" },
+        { name: "batch_count", type: "INTEGER" },
+        { name: "oversized_batch_count", type: "INTEGER" },
+        { name: "group_count", type: "INTEGER" },
+        { name: "ungrouped_no_signal", type: "INTEGER" },
+        { name: "ungrouped_not_selected", type: "INTEGER" },
+        { name: "error_reason", type: "TEXT" },
+        { name: "started_at", type: "TEXT" },
+        { name: "completed_at", type: "TEXT" },
+      ],
+      value_groups: [
+        { name: "id", type: "INTEGER" },
+        { name: "run_id", type: "TEXT" },
+        { name: "name", type: "TEXT" },
+        { name: "summary_sentence", type: "TEXT" },
+        { name: "rationale", type: "TEXT" },
+        { name: "pregroup_signal", type: "TEXT" },
+        { name: "refinement_state", type: "TEXT" },
+        { name: "review_status", type: "TEXT" },
+        { name: "created_at", type: "TEXT" },
+        { name: "refined_at", type: "TEXT" },
+        { name: "reviewed_at", type: "TEXT" },
+      ],
+      value_group_members: [
+        { name: "id", type: "INTEGER" },
+        { name: "group_id", type: "INTEGER" },
+        { name: "value_source", type: "TEXT" },
+        { name: "value_ref", type: "TEXT" },
+        { name: "source_cwd", type: "TEXT" },
+      ],
+    };
+
+    // Check each table
+    for (const [tableName, expectedCols] of Object.entries(expectedTables)) {
+      const actualCols = db.pragma(`table_info(${tableName})`);
+      assert.ok(actualCols.length > 0, `Table ${tableName} should exist`);
+
+      const actualMap = Object.fromEntries(actualCols.map((col) => [col.name, col.type]));
+
+      // Verify every expected column exists with correct type
+      for (const { name, type } of expectedCols) {
+        assert.ok(actualMap.hasOwnProperty(name), `Column ${tableName}.${name} should exist`);
+        assert.equal(
+          actualMap[name],
+          type,
+          `Column ${tableName}.${name} should be type ${type}, got ${actualMap[name]}`
+        );
+      }
+
+      // Verify exact column count matches
+      assert.equal(
+        actualCols.length,
+        expectedCols.length,
+        `Table ${tableName} should have exactly ${expectedCols.length} columns, got ${actualCols.length}`
+      );
+    }
+
+    db.close();
+  });
+
+  it("S-2 [M]: CHECK-vs-registry parity for four columns (registry read, never hand-copy)", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    delete require.cache[require.resolve("../db")];
+
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // BL-6 fix: this test previously did four `sql.includes("CHECK(state IN"
+    // )`-style substring checks and its own comment admitted "When
+    // registries exist, we'll verify... that's where the real parity check
+    // will happen (in the code review)" — never actually reading a
+    // registry, matching zero imports of GROUP_RUN_ROW_STATES /
+    // GROUP_REFINEMENT_STATES / GROUP_REVIEW_STATES / VALUE_SOURCES
+    // anywhere in this file. Now: parse the LITERAL value list out of the
+    // real `CHECK(<col> IN (...))` SQL and deepEqual the sorted result
+    // against each imported registry — a 5th value added to a registry
+    // without widening the CHECK (or vice versa) genuinely fails this.
+    const {
+      GROUP_RUN_ROW_STATES,
+      GROUP_REFINEMENT_STATES,
+      GROUP_REVIEW_STATES,
+    } = require("../lib/value-groups");
+    const { VALUE_SOURCES } = require("../lib/value-ledger");
+
+    function extractCheckValues(sql, column) {
+      const re = new RegExp(`CHECK\\(${column}\\s+IN\\s*\\(([^)]*)\\)\\)`, "s");
+      const match = sql.match(re);
+      assert.ok(match, `CHECK(${column} IN (...)) should be present in the CREATE TABLE sql`);
+      return match[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^'(.*)'$/, "$1"))
+        .filter(Boolean);
+    }
+
+    const runsCheck = db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='value_group_runs'`)
+      .get();
+    assert.deepEqual(
+      extractCheckValues(runsCheck.sql, "state").sort(),
+      [...GROUP_RUN_ROW_STATES].sort(),
+      "value_group_runs.state's CHECK values must exactly match GROUP_RUN_ROW_STATES"
+    );
+
+    const groupsCheck = db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='value_groups'`)
+      .get();
+    assert.deepEqual(
+      extractCheckValues(groupsCheck.sql, "refinement_state").sort(),
+      [...GROUP_REFINEMENT_STATES].sort(),
+      "value_groups.refinement_state's CHECK values must exactly match GROUP_REFINEMENT_STATES"
+    );
+    assert.deepEqual(
+      extractCheckValues(groupsCheck.sql, "review_status").sort(),
+      [...GROUP_REVIEW_STATES].sort(),
+      "value_groups.review_status's CHECK values must exactly match GROUP_REVIEW_STATES (including reserved 'claimed')"
+    );
+
+    const membersCheck = db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='value_group_members'`)
+      .get();
+    assert.deepEqual(
+      extractCheckValues(membersCheck.sql, "value_source").sort(),
+      [...VALUE_SOURCES].sort(),
+      "value_group_members.value_source's CHECK values must exactly match valueLedger.VALUE_SOURCES"
+    );
+
+    db.close();
+  });
+
+  it("S-3 [R]: Inapplicability asserted — tables absent from REBUILD_CASES and UPGRADE_CASES", () => {
+    const dbSource = fs.readFileSync(path.join(__dirname, "..", "db.js"), "utf8");
+
+    const rebuildMatch = dbSource.match(/REBUILD_CASES\s*=\s*\{[\s\S]*?\n\}/);
+    const upgradeMatch = dbSource.match(/UPGRADE_CASES\s*=\s*\{[\s\S]*?\n\}/);
+
+    const rebuildText = rebuildMatch ? rebuildMatch[0] : "";
+    const upgradeText = upgradeMatch ? upgradeMatch[0] : "";
+
+    assert.equal(
+      (rebuildText.match(/value_group/g) || []).length,
+      0,
+      "value_group tables should NOT appear in REBUILD_CASES"
+    );
+
+    assert.equal(
+      (upgradeText.match(/value_group/g) || []).length,
+      0,
+      "value_group tables should NOT appear in UPGRADE_CASES"
+    );
+  });
+
+  it("S-4 [R]: Dropped-column pin (DEC-S3-1/11) — no project_id, parent_group_id, reviewed_by, or availability column", () => {
+    process.env.DASHBOARD_DB_PATH = tempDbPath;
+    // S-2 (immediately above) closes the shared connection at the end of
+    // its own body without clearing require.cache — re-requiring without
+    // clearing it first would hand back that same already-closed
+    // connection. Match S-2's own delete-cache-then-require pattern.
+    delete require.cache[require.resolve("../db")];
+    const dbModule = require("../db");
+    const { db } = dbModule;
+
+    // Check value_groups table
+    const groupsCols = db.pragma("table_info(value_groups)");
+    const groupsNames = groupsCols.map((col) => col.name);
+
+    assert.ok(
+      !groupsNames.includes("project_id"),
+      "value_groups should NOT have project_id column (DEC-S3-1)"
+    );
+    assert.ok(
+      !groupsNames.includes("parent_group_id"),
+      "value_groups should NOT have parent_group_id column (DEC-S3-1)"
+    );
+    assert.ok(
+      !groupsNames.includes("reviewed_by"),
+      "value_groups should NOT have reviewed_by column (DEC-S3-1)"
+    );
+
+    // Check value_group_members table
+    const membersCols = db.pragma("table_info(value_group_members)");
+    const membersNames = membersCols.map((col) => col.name);
+
+    assert.ok(
+      !membersNames.includes("availability"),
+      "value_group_members should NOT have availability column (staleness-proof, §3.4)"
+    );
+    assert.ok(
+      !membersNames.includes("still_available"),
+      "value_group_members should NOT have still_available column (DEC-S3-1)"
+    );
+
+    db.close();
+  });
+});

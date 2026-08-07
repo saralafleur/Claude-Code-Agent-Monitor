@@ -225,6 +225,51 @@
         "lastClosure": "距离上一次真正结束一个计划已经过去多久。"
       },
       "closing": "真正的检验标准不是工作是否完成，而是它是否被结束。价值池不断缩小，说明团队在真正完成事情，而不只是不断堆积。"
+    },
+    "autoGroupButton": "自动分组",
+    "ungroupedUnitCount_one": "{{count}} 个单元尚未分组",
+    "ungroupedUnitCount_other": "{{count}} 个单元尚未分组",
+    "runState": {
+      "not_attempted": "尚未运行",
+      "in_progress": "分组进行中…",
+      "completed": "分组完成",
+      "completed_zero_groups": "未找到分组",
+      "failed": "分组失败"
+    },
+    "refinementState": {
+      "pending": "待处理",
+      "refined": "已精炼",
+      "zero_members": "无成员",
+      "failed": "精炼失败"
+    },
+    "reviewStatus": {
+      "proposed": "已提议",
+      "approved": "已批准",
+      "dismissed": "已驳回",
+      "claimed": "已认领"
+    },
+    "memberAvailability": {
+      "already_claimed": "已被认领",
+      "available": "可用",
+      "no_longer_in_pool": "已不在池中"
+    },
+    "proposeOutcome": {
+      "started": "已开始",
+      "reused_unchanged": "自上次运行以来未变化",
+      "already_running": "已在运行中",
+      "blocked_coverage_incomplete": "覆盖率未完成"
+    },
+    "gateState": {
+      "ready": "就绪",
+      "blocked_coverage_incomplete": "等待覆盖率完成"
+    },
+    "groups": {
+      "sectionLabel": "分组",
+      "proposing": "正在提议…",
+      "approve": "批准",
+      "dismiss": "驳回",
+      "membersLabel": "成员",
+      "empty": "尚未提议任何分组。"
     }
   }
 }

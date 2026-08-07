@@ -6990,6 +6990,14 @@ exports[`screen snapshots > Project detail (coverage in progress) 1`] = `
                 Prioritize now
               </button>
             </div>
+            <button
+              class="text-[11px] text-accent hover:underline disabled:opacity-50"
+              data-test="auto-group-button"
+              disabled=""
+              type="button"
+            >
+              Auto-group
+            </button>
           </div>
           <div
             class="rounded-lg border border-border bg-surface-1/60 px-3 py-2.5 mb-2"
@@ -7083,6 +7091,23 @@ exports[`screen snapshots > Project detail (coverage in progress) 1`] = `
             </div>
           </div>
         </div>
+      </div>
+      <div
+        aria-label="Groups"
+        class="px-4 pb-4"
+        data-test="groups-section"
+        role="region"
+      >
+        <h3
+          class="text-xs font-semibold text-gray-300 mb-2"
+        >
+          Groups
+        </h3>
+        <p
+          class="text-xs text-gray-500 italic"
+        >
+          No groups proposed yet.
+        </p>
       </div>
     </section>
     <section

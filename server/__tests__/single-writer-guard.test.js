@@ -11,7 +11,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
-const { assertSingleHome } = require("./helpers/single-home");
+const { assertSingleHome, assertConsumerScopeDerived } = require("./helpers/single-home");
 
 // Recursively scan a directory for .js files, skipping node_modules, dist, tests
 function scanFiles(dir, pattern) {
@@ -384,12 +384,37 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
     );
   });
 
-  it("value-coverage.js's exports have an explicit disposition at its two consumers (route + tick) — DEC-5, §9.1", () => {
+  it("value-coverage.js's exports have an explicit disposition at its two consumers (the SF-4 probe extraction + the tick) — DEC-5, §9.1", () => {
+    // Value Pool Slice 3 (SF-4 extraction, technical-plan.md §6): the route
+    // handler no longer calls coverageSnapshot directly — both coverage
+    // handlers AND the new groups/propose gate now go through the single
+    // buildProbeCoverage extraction, which is the new (and only) route-side
+    // consumer. BO-5 mandates value-coverage-probe.js call coverageSnapshot
+    // through the module NAMESPACE object (never destructured) so P-7's
+    // behavioral spy can intercept it — assertSingleHome's "shared" check
+    // only recognizes destructured imports, so this one consumer is
+    // verified directly here instead of through that helper's generic path.
+    const probeSrc = fs.readFileSync(
+      path.resolve(serverDir, "lib/value-coverage-probe.js"),
+      "utf8"
+    );
+    assert.match(
+      probeSrc,
+      /const\s+valueCoverage\s*=\s*require\(["']\.\/value-coverage["']\)/,
+      "value-coverage-probe.js must import value-coverage.js via the module namespace object (BO-5)"
+    );
+    assert.match(
+      probeSrc,
+      /valueCoverage\.coverageSnapshot\(/,
+      "value-coverage-probe.js must call coverageSnapshot through the namespace object (BO-5, so P-7's spy can intercept it)"
+    );
+    assert.doesNotMatch(
+      probeSrc,
+      /\{[^}]*\bcoverageSnapshot\b[^}]*\}\s*=\s*require\(["']\.\/value-coverage["']\)/,
+      "value-coverage-probe.js must NOT destructure coverageSnapshot (BO-5)"
+    );
+
     assertSingleHome("../lib/value-coverage", {
-      "../routes/project-plans": {
-        shared: ["coverageSnapshot"],
-        absent: ["estimateEta", "DEMAND_STATES", "ETA_STATES", "ETA_SAMPLE_SIZE"],
-      },
       "../lib/value-summary-tick": {
         shared: ["coverageSnapshot"],
         absent: ["estimateEta", "DEMAND_STATES", "ETA_STATES", "ETA_SAMPLE_SIZE"],
@@ -456,6 +481,44 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
           "UNCOMPARED_FIELD_GUARANTORS",
         ],
       },
+      // Value Pool Slice 3 (SF-4 extraction): value-coverage-probe.js is a
+      // FOURTH consumer — buildProbeCoverage's own probe-mode call to
+      // enrichPoolAltitudes moved here verbatim from the two route handlers
+      // (§6, technical-plan.md).
+      "../lib/value-coverage-probe": {
+        shared: ["enrichPoolAltitudes"],
+        absent: [
+          "buildPrompt",
+          "parseOutput",
+          "summaryModel",
+          "SUMMARY_STAGES",
+          "MAX_UNITS_PER_PROMPT",
+          "ALTITUDE_STATES",
+          "unitFacts",
+          "compareUnitInputs",
+          "ALTITUDE_FRESHNESS",
+          "UNCOMPARED_FIELD_GUARANTORS",
+        ],
+      },
+      // Value Pool Slice 3: value-groups.js is a FIFTH consumer —
+      // groupingFacts is built ON TOP OF unitFacts (technical-plan.md §5.4),
+      // and refineBatch reuses summaryModel("grouping") from the same
+      // already-built cascade (DEC-7/O2) rather than a second model
+      // function.
+      "../lib/value-groups": {
+        shared: ["unitFacts", "summaryModel"],
+        absent: [
+          "enrichPoolAltitudes",
+          "buildPrompt",
+          "parseOutput",
+          "SUMMARY_STAGES",
+          "MAX_UNITS_PER_PROMPT",
+          "ALTITUDE_STATES",
+          "compareUnitInputs",
+          "ALTITUDE_FRESHNESS",
+          "UNCOMPARED_FIELD_GUARANTORS",
+        ],
+      },
     });
   });
 
@@ -473,6 +536,25 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
           "BACKFILL_LOOKBACK_DAYS",
           "CONSUMERS",
           "unitKey",
+          "rowToUnit",
+          "computePlanHealth",
+          "summarizeDeliveredValue",
+          "MUTABLE_VALUE_SOURCES",
+        ],
+      },
+      // Value Pool Slice 3 (O-8): value-groups.js is a SECOND consumer —
+      // registered in CONSUMERS as a derived-values reader. It reads ONLY
+      // unitKey (never assembleValuePool itself — route handlers resolve the
+      // pool and pass units in, mirroring value-summary.js's own header
+      // contract); this disposition is the executable proof of that.
+      "../lib/value-groups": {
+        shared: ["unitKey"],
+        absent: [
+          "assembleValuePool",
+          "VALUE_SOURCES",
+          "ATTRIBUTION_TIERS",
+          "BACKFILL_LOOKBACK_DAYS",
+          "CONSUMERS",
           "rowToUnit",
           "computePlanHealth",
           "summarizeDeliveredValue",
@@ -692,6 +774,241 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
       basenames.sort(),
       ["db.js", "value-summary.js"].sort(),
       "input_stage/input_label should only appear in db.js (schema/statements) and value-summary.js (comparator)"
+    );
+  });
+
+  it("G-1 [M]: buildProbeCoverage defined exactly once (value-coverage-probe.js + project-plans.js)", () => {
+    // Will fail: value-coverage-probe.js doesn't exist yet
+    const files = scanFiles(path.resolve(__dirname, ".."), /buildProbeCoverage/);
+    const basenames = files
+      .map((f) => path.basename(f))
+      .filter((f) => !f.endsWith(".test.js"))
+      .sort();
+
+    assert.deepEqual(
+      basenames,
+      ["project-plans.js", "value-coverage-probe.js"],
+      "buildProbeCoverage definition must be in value-coverage-probe.js, calls in project-plans.js only"
+    );
+  });
+
+  it("G-2 [M]: buildProbeCoverage called exactly 4 times (POST /coverage-request, GET /coverage, POST /groups/propose, GET /groups); zero hand-copies of its own composition anywhere in the routes file", () => {
+    const routesFile = path.join(__dirname, "..", "routes", "project-plans.js");
+    assert.ok(fs.existsSync(routesFile), "routes/project-plans.js must exist");
+
+    // Widened from technical-plan.md §6's initial "exactly three" call-site
+    // enumeration (POST /coverage-request, GET /coverage, POST
+    // /groups/propose) to FOUR: GET /groups also needs a fresh gate/coverage
+    // read on every poll (§7's own response shape `{run, groups, gate,
+    // coverage}`, exercised by TT-read's mid-flight-regression case — a
+    // stale gate would let the client believe coverage is still complete
+    // after it regresses). This is a reviewed, deliberate widening of the
+    // SAME fail-closed single-composer guard — buildProbeCoverage is still
+    // the sole composition, never a hand-copy; the count grew because a
+    // real 4th LEGITIMATE consumer of that one function was found during
+    // Task 7, not because a second hand-copy was added anywhere.
+    const content = stripComments(fs.readFileSync(routesFile, "utf8"));
+    const callsiteCount = (content.match(/buildProbeCoverage\(/g) || []).length;
+
+    assert.equal(
+      callsiteCount,
+      4,
+      "buildProbeCoverage must be called exactly 4 times in project-plans.js routes"
+    );
+
+    // BL-14 fix: this guard's own red-proof is "inject a fourth hand-copy of
+    // the 4-step composition inline into a handler" — but an inline hand-copy
+    // calls `assembleValuePool`/`enrichPoolAltitudes`/`coverageSnapshot`
+    // directly, NOT `buildProbeCoverage`, so the count above stays at 4 and
+    // this guard alone stays green against exactly the defect it exists to
+    // catch (the SF-4 defect the whole extraction was built to close: SF-4
+    // composition duplicated inline). Close that gap directly, brace-walked
+    // per handler (never a whole-file substring ban — `enrichPoolAltitudes`
+    // has its own unrelated, legitimate direct caller at the `/altitudes`
+    // route, which has nothing to do with the coverage-probe composition):
+    // each of the FOUR coverage-composing handler bodies must contain zero
+    // `enrichPoolAltitudes(`/`coverageSnapshot(` occurrences of its own.
+    const rawContent = fs.readFileSync(routesFile, "utf8");
+    function extractHandlerBody(routeRegex) {
+      const match = rawContent.match(routeRegex);
+      assert.ok(match, `route handler matching ${routeRegex} must exist in project-plans.js`);
+      const braceStart = rawContent.indexOf("{", match.index + match[0].length);
+      assert.ok(braceStart !== -1, "handler body opening brace should be found");
+      let depth = 0;
+      for (let i = braceStart; i < rawContent.length; i++) {
+        if (rawContent[i] === "{") depth++;
+        else if (rawContent[i] === "}") {
+          depth--;
+          if (depth === 0) return rawContent.slice(braceStart, i + 1);
+        }
+      }
+      throw new Error("unbalanced braces walking handler body");
+    }
+
+    const coverageHandlers = {
+      "POST /coverage-request": /router\.post\(\s*"\/coverage-request"\s*,/,
+      "GET /coverage": /router\.get\(\s*"\/coverage"\s*,/,
+      "POST /groups/propose": /router\.post\(\s*"\/:projectId\/groups\/propose"\s*,/,
+      "GET /groups": /router\.get\(\s*"\/:projectId\/groups"\s*,/,
+    };
+    for (const [label, routeRegex] of Object.entries(coverageHandlers)) {
+      const body = stripComments(extractHandlerBody(routeRegex));
+      assert.equal(
+        (body.match(/enrichPoolAltitudes\(/g) || []).length,
+        0,
+        `${label} handler must never call enrichPoolAltitudes directly — only buildProbeCoverage may`
+      );
+      assert.equal(
+        (body.match(/coverageSnapshot\(/g) || []).length,
+        0,
+        `${label} handler must never call coverageSnapshot directly — only buildProbeCoverage may`
+      );
+    }
+  });
+
+  it("G-4 [M]: assertSingleHome for value-coverage-probe — routes/project-plans is sole consumer", () => {
+    assertSingleHome("../lib/value-coverage-probe", {
+      "../routes/project-plans": { shared: ["buildProbeCoverage"], absent: [] },
+    });
+  });
+
+  it("G-3 [D]: value-coverage-probe.js's importer scope is derived and fails closed (D2, §9.7)", () => {
+    assertConsumerScopeDerived("../lib/value-coverage-probe", {
+      "../routes/project-plans": {},
+    });
+  });
+
+  it("G-D2 [D]: value-ledger.js's and value-summary.js's importer scopes are derived and fail closed (D2, §9.7)", () => {
+    // bin/ccam.js's cmdLedger is a documented CONSUMERS entry but reaches
+    // these derived values over HTTP (the running server's own routes), not
+    // via a literal require() edge — it is intentionally NOT in this
+    // require()-graph scan's expected map (the scan only enforces "every
+    // real importer has a disposition," never the reverse).
+    assertConsumerScopeDerived("../lib/value-ledger", {
+      "../routes/project-plans": {},
+      "../lib/value-summary-tick": {},
+      "../lib/value-groups": {},
+      "../lib/value-coverage-probe": {},
+      "../lib/value-summary": {},
+    });
+    assertConsumerScopeDerived("../lib/value-summary", {
+      "../routes/project-plans": {},
+      "../lib/value-summary-tick": {},
+      "../lib/value-coverage": {},
+      "../lib/value-coverage-probe": {},
+      "../lib/value-groups": {},
+    });
+  });
+
+  it("G-7 [M]: assertSingleHome for value-groups.js — routes/project-plans and index.js (boot hook) are the only two consumers", () => {
+    // Only what the route handlers actually destructure — buildGroupingPrompt/
+    // parseGroupingOutput/refineBatch/rollupGroups/insertValueGroupRow are
+    // internal to runGroupingPass, never called directly by the route
+    // (single-call-site posture); the six state registries are read from DB
+    // row values verbatim, never re-validated against the registry inline.
+    const routeShared = [
+      "mechanicalPreGroup",
+      "groupingFacts",
+      "computeGroupingDigest",
+      "runGroupingPass",
+      "resolveMemberAvailability",
+    ];
+    const allExports = [
+      "mechanicalPreGroup",
+      "groupingFacts",
+      "buildGroupingPrompt",
+      "parseGroupingOutput",
+      "refineBatch",
+      "rollupGroups",
+      "computeGroupingDigest",
+      "resolveMemberAvailability",
+      "runGroupingPass",
+      "reconcileInterruptedGroupRuns",
+      "insertValueGroupRow",
+      "GROUP_RUN_STATES",
+      "GROUP_RUN_ROW_STATES",
+      "GROUP_REFINEMENT_STATES",
+      "GROUP_REVIEW_STATES",
+      "GROUP_MEMBER_AVAILABILITY",
+      "GROUP_PROPOSE_OUTCOMES",
+      "GROUP_GATE_STATES",
+      "UNGROUPED_REASONS",
+      "MAX_UNITS_PER_GROUPING_PROMPT",
+      "GROUPING_UNCOMPARED_FIELD_GUARANTORS",
+    ];
+    assertSingleHome("../lib/value-groups", {
+      "../routes/project-plans": {
+        shared: routeShared,
+        absent: allExports.filter((n) => !routeShared.includes(n)),
+      },
+      "../index": {
+        shared: ["reconcileInterruptedGroupRuns"],
+        absent: allExports.filter((n) => n !== "reconcileInterruptedGroupRuns"),
+      },
+    });
+  });
+
+  it("G-D2b [D]: value-groups.js's importer scope is derived and fails closed — missing the boot-hook consumer is exactly §9.7's under-registration failure", () => {
+    assertConsumerScopeDerived(
+      "../lib/value-groups",
+      {
+        "../routes/project-plans": {},
+        "../index": {},
+      },
+      { extraScanFiles: [path.resolve(__dirname, "..", "index.js")] }
+    );
+  });
+
+  it("G-8 [R]: value_group_runs/value_groups/value_group_members writer statements have exactly one production call site each (matches requestValueCoverage's shape, :346-385)", () => {
+    // Written/read by runGroupingPass / reconcileInterruptedGroupRuns
+    // (value-groups.js is the sole writer per its module header).
+    const groupsWriterStatements = [
+      "insertValueGroupRun",
+      "updateValueGroupRunState",
+      "markInterruptedValueGroupRuns",
+      "insertValueGroup",
+      "insertValueGroupMember",
+    ];
+    for (const stmtName of groupsWriterStatements) {
+      const files = scanFiles(path.resolve(__dirname, ".."), new RegExp(`${stmtName}\\b`));
+      const basenames = files.map((f) => path.basename(f)).filter((f) => !f.endsWith(".test.js"));
+      assert.ok(
+        basenames.includes("db.js"),
+        `${stmtName} should be a prepared statement declared in db.js`
+      );
+      assert.ok(
+        basenames.includes("value-groups.js"),
+        `${stmtName} should be called from value-groups.js (the sole writer of the three value_group* tables)`
+      );
+      const other = basenames.filter((f) => f !== "db.js" && f !== "value-groups.js");
+      assert.equal(
+        other.length,
+        0,
+        `${stmtName} should only appear in db.js and value-groups.js, not in: ${other.join(", ")}`
+      );
+    }
+
+    // setValueGroupReviewStatus is deliberately DIFFERENT: pure bookkeeping
+    // called directly by the approve/dismiss route handlers
+    // (server/routes/project-plans.js), never by value-groups.js — the two
+    // named routes (DEC-S3-9) are the update, not a lib-layer composer.
+    const reviewFiles = scanFiles(path.resolve(__dirname, ".."), /setValueGroupReviewStatus\b/);
+    const reviewBasenames = reviewFiles
+      .map((f) => path.basename(f))
+      .filter((f) => !f.endsWith(".test.js"));
+    assert.ok(
+      reviewBasenames.includes("db.js"),
+      "setValueGroupReviewStatus should be declared in db.js"
+    );
+    assert.ok(
+      reviewBasenames.includes("project-plans.js"),
+      "setValueGroupReviewStatus should be called from the approve/dismiss route handlers in project-plans.js"
+    );
+    const reviewOther = reviewBasenames.filter((f) => f !== "db.js" && f !== "project-plans.js");
+    assert.equal(
+      reviewOther.length,
+      0,
+      `setValueGroupReviewStatus should only appear in db.js and project-plans.js, not in: ${reviewOther.join(", ")}`
     );
   });
 });

@@ -225,6 +225,51 @@
         "lastClosure": "How long since a plan last actually closed."
       },
       "closing": "The real test isn't whether work got done — it's whether it got closed. A shrinking pool means the team is finishing things, not just accumulating them."
+    },
+    "autoGroupButton": "Auto-group",
+    "ungroupedUnitCount_one": "{{count}} unit not yet grouped",
+    "ungroupedUnitCount_other": "{{count}} units not yet grouped",
+    "runState": {
+      "not_attempted": "Not yet run",
+      "in_progress": "Grouping in progress…",
+      "completed": "Grouping complete",
+      "completed_zero_groups": "No groups found",
+      "failed": "Grouping failed"
+    },
+    "refinementState": {
+      "pending": "Pending",
+      "refined": "Refined",
+      "zero_members": "No members",
+      "failed": "Refinement failed"
+    },
+    "reviewStatus": {
+      "proposed": "Proposed",
+      "approved": "Approved",
+      "dismissed": "Dismissed",
+      "claimed": "Claimed"
+    },
+    "memberAvailability": {
+      "already_claimed": "Already claimed",
+      "available": "Available",
+      "no_longer_in_pool": "No longer in pool"
+    },
+    "proposeOutcome": {
+      "started": "Started",
+      "reused_unchanged": "Unchanged since last run",
+      "already_running": "Already running",
+      "blocked_coverage_incomplete": "Coverage incomplete"
+    },
+    "gateState": {
+      "ready": "Ready",
+      "blocked_coverage_incomplete": "Waiting on coverage"
+    },
+    "groups": {
+      "sectionLabel": "Groups",
+      "proposing": "Proposing…",
+      "approve": "Approve",
+      "dismiss": "Dismiss",
+      "membersLabel": "Members",
+      "empty": "No groups proposed yet."
     }
   }
 }

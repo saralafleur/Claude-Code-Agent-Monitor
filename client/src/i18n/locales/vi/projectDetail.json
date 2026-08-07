@@ -225,6 +225,51 @@
         "lastClosure": "Đã bao lâu kể từ lần một kế hoạch thực sự được đóng."
       },
       "closing": "Phép thử thực sự không phải là công việc đã xong hay chưa — mà là nó đã được đóng lại hay chưa. Kho giá trị nhỏ dần nghĩa là đội đang hoàn tất công việc, chứ không chỉ tích tụ thêm."
+    },
+    "autoGroupButton": "Tự động nhóm",
+    "ungroupedUnitCount_one": "{{count}} đơn vị chưa được nhóm",
+    "ungroupedUnitCount_other": "{{count}} đơn vị chưa được nhóm",
+    "runState": {
+      "not_attempted": "Chưa chạy",
+      "in_progress": "Đang nhóm…",
+      "completed": "Đã nhóm xong",
+      "completed_zero_groups": "Không tìm thấy nhóm nào",
+      "failed": "Nhóm thất bại"
+    },
+    "refinementState": {
+      "pending": "Đang chờ",
+      "refined": "Đã tinh chỉnh",
+      "zero_members": "Không có thành viên",
+      "failed": "Tinh chỉnh thất bại"
+    },
+    "reviewStatus": {
+      "proposed": "Đã đề xuất",
+      "approved": "Đã chấp thuận",
+      "dismissed": "Đã từ chối",
+      "claimed": "Đã nhận"
+    },
+    "memberAvailability": {
+      "already_claimed": "Đã được nhận",
+      "available": "Còn khả dụng",
+      "no_longer_in_pool": "Không còn trong kho"
+    },
+    "proposeOutcome": {
+      "started": "Đã bắt đầu",
+      "reused_unchanged": "Không đổi so với lần chạy trước",
+      "already_running": "Đang chạy rồi",
+      "blocked_coverage_incomplete": "Chưa đủ độ phủ"
+    },
+    "gateState": {
+      "ready": "Sẵn sàng",
+      "blocked_coverage_incomplete": "Đang chờ độ phủ"
+    },
+    "groups": {
+      "sectionLabel": "Nhóm",
+      "proposing": "Đang đề xuất…",
+      "approve": "Chấp thuận",
+      "dismiss": "Từ chối",
+      "membersLabel": "Thành viên",
+      "empty": "Chưa có nhóm nào được đề xuất."
     }
   }
 }

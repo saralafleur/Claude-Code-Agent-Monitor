@@ -2314,6 +2314,57 @@ prepending a per-stage env override
 (`DASHBOARD_VALUE_SUMMARY_UNIT_MODEL` / `DASHBOARD_VALUE_SUMMARY_GROUPING_MODEL`)
 to the existing model-selection chain — never a second sibling function.
 
+**Auto-group proposal engine** (Value Pool Slice 3, `server/lib/value-groups.js`
++ three new tables — `value_group_runs` / `value_groups` /
+`value_group_members`) turns a project's unclaimed value pool into named,
+human-reviewable candidate groups. Two stages: a free, deterministic,
+LLM-free mechanical pre-grouping pass (`mechanicalPreGroup`) clusters units
+by initiative-slug reference, local-calendar-day time adjacency, and a
+shared-surface (label-prefix) proxy — deliberately over-generating candidate
+clusters, since a unit satisfying two signals lands in both — followed by
+one sonnet call per batch (`refineBatch`, `summaryModel("grouping")`) that
+disambiguates a batch of clusters into a name, a stakeholder-level summary
+sentence, member unitKeys, and a rationale; when the pool exceeds
+`MAX_UNITS_PER_GROUPING_PROMPT` (40) it packs multiple batches (never
+splitting a cluster across two) and runs one additional rollup call to merge
+duplicate leaf groups across batch boundaries. A batch whose LLM call fails
+still **discloses**: its mechanical cluster persists as a group row with
+`refinement_state='failed'` and no LLM text, never silently dropped. `GET
+/api/project-plans/:projectId/groups` returns the current run (`not_attempted`
+when no row exists yet), every group, and — computed at READ time only,
+never persisted — each member's live availability
+(`already_claimed`/`available`/`no_longer_in_pool`, precedence in that
+order) plus per-group counts. `POST /api/project-plans/:projectId/groups/propose`
+is gated server-side on the same `buildProbeCoverage` (SF-4 extraction,
+below) the coverage routes use — `blocked_coverage_incomplete` (409) beats
+`already_running` beats a digest-match cache hit
+(`computeGroupingDigest`, no spawn on an unchanged pool). `POST
+.../groups/:id/approve` and `.../dismiss` are pure `review_status` +
+`reviewed_at` bookkeeping — never a claim, a plan item, or a milestone; a
+structural scan (`single-writer-guard.test.js`) asserts zero code paths in
+this module or its routes ever call `insertValueClaim`/`deleteValueClaim`,
+and `review_status='claimed'` is reserved in the schema for a future slice
+but unreachable here. `server/lib/value-groups.js` never calls
+`assembleValuePool` itself (registered in `value-ledger.js`'s `CONSUMERS` as
+a derived-values reader instead, since it does read `unitKey`) — route
+handlers resolve the pool and pass units in, the same posture
+`value-summary.js` already established.
+
+**SF-4 extraction** (`server/lib/value-coverage-probe.js`): the 4-step
+`coverageSnapshot` composition (`assembleValuePool` → `enrichPoolAltitudes`
+in probe mode → resolve `requestedAt` → resolve `draining`) that `POST
+/coverage-request` and `GET /coverage` each independently hand-copied is now
+one function, `buildProbeCoverage(dbModule, projectId, opts)`, with exactly
+four call sites (the two coverage routes plus `POST /groups/propose`'s gate
+and `GET /groups`'s own gate/coverage read). The `requestedAt` divergence
+between POST (passes its own just-written timestamp) and GET (reads sweep
+state) is preserved as a parameter, not erased — forcing parity there would
+reintroduce a fixed race (SF-2/SF-3). `single-writer-guard.test.js` enforces
+single-definition + exact-4-call-site scope, derived from a scan of
+`server/lib`/`server/routes`/`bin/`/`server/index.js`, failing closed on any
+undisposed importer (`assertConsumerScopeDerived`,
+`server/__tests__/helpers/single-home.js`).
+
 ---
 
 ## Agent Extension Layer

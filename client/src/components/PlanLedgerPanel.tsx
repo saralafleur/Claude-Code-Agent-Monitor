@@ -39,10 +39,13 @@ import { api } from "../lib/api";
 import { eventBus } from "../lib/eventBus";
 import type {
   CoverageSnapshot,
+  GroupGateState,
   PlanHealth,
   ProjectPlanItem,
   ProjectPlanWithItems,
   ValueAltitudesUpdatedPayload,
+  ValueGroup,
+  ValueGroupRun,
   ValueUnit,
 } from "../lib/types";
 
@@ -57,6 +60,70 @@ const ALTITUDE_FRESHNESS = [
   "stale_refresh_unavailable",
   "updated_unseen",
 ] as const;
+
+// ── Value Pool Slice 3 — hand-maintained mirrors of
+// server/lib/value-groups.js's six state registries (§9.7 accepted
+// exception, same posture as ALTITUDE_FRESHNESS above). Grow ONLY when the
+// server registry grows; each is server-authored and rendered verbatim —
+// no client-side inference from a missing key, NULL text, or empty array.
+// BL-10: exported (not merely module-local) so
+// `PlanLedgerPanel.groups.test.tsx`'s C-8 can import the REAL registries
+// this component actually renders against, rather than hand-retyping a
+// second copy of the reviewed list that could silently drift from this one.
+export const GROUP_RUN_STATES = [
+  "not_attempted",
+  "in_progress",
+  "completed",
+  "completed_zero_groups",
+  "failed",
+] as const;
+export const GROUP_RUN_ROW_STATES = [
+  "in_progress",
+  "completed",
+  "completed_zero_groups",
+  "failed",
+] as const;
+export const GROUP_REFINEMENT_STATES = ["pending", "refined", "zero_members", "failed"] as const;
+export const GROUP_REVIEW_STATES = ["proposed", "approved", "dismissed", "claimed"] as const;
+export const GROUP_MEMBER_AVAILABILITY = [
+  "already_claimed",
+  "available",
+  "no_longer_in_pool",
+] as const;
+export const GROUP_PROPOSE_OUTCOMES = [
+  "started",
+  "reused_unchanged",
+  "already_running",
+  "blocked_coverage_incomplete",
+] as const;
+export const GROUP_GATE_STATES = ["ready", "blocked_coverage_incomplete"] as const;
+// Anchored exemption-set — the two-line shape that closed N2 (PM-5c): a 6th
+// wire value, or a wire value that quietly becomes persistable, breaks at
+// the point of growth rather than silently rendering nothing.
+if (
+  GROUP_RUN_STATES.filter((s) => !(GROUP_RUN_ROW_STATES as readonly string[]).includes(s)).join(
+    ","
+  ) !== "not_attempted"
+) {
+  console.warn(
+    "GROUP_RUN_STATES/GROUP_RUN_ROW_STATES have drifted apart from their reviewed shape — update both mirrors together."
+  );
+}
+/** T-E-trap coverage (same shape as the ALTITUDE_STATES/ALTITUDE_FRESHNESS
+ *  warns above): an out-of-registry wire value from a malformed/future
+ *  server response still renders via the generic i18n fallback key, but is
+ *  never silently unremarked in dev — a genuine reader of these registries,
+ *  not just a declaration. */
+function warnIfOutOfRegistry(
+  registry: readonly string[],
+  value: string | undefined | null,
+  registryName: string,
+  fieldName: string
+) {
+  if (value && !registry.includes(value)) {
+    console.warn(`${fieldName} "${value}" not in ${registryName} registry`);
+  }
+}
 
 /**
  * Value Pool Slice 2 (DEC-5/DEC-1, §9.1): the monotonic merge rule. Accepts
@@ -659,6 +726,13 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   // never derives `described`/`pending`/`complete`/an ETA number itself.
   const [coverage, setCoverage] = useState<CoverageSnapshot | null>(null);
   const [requestingCoverage, setRequestingCoverage] = useState(false);
+  // Value Pool Slice 3 — entity-scoped grouping state (PM-5a): every field
+  // here resets on `projectId` change, same shape as `coverage`'s own SF-8
+  // reset below.
+  const [groupsRun, setGroupsRun] = useState<ValueGroupRun | null>(null);
+  const [groupsList, setGroupsList] = useState<ValueGroup[]>([]);
+  const [groupsGate, setGroupsGate] = useState<GroupGateState | null>(null);
+  const [proposingGroups, setProposingGroups] = useState(false);
   // Tracks every unit id ever requested, independent of `altitudes` state
   // timing — the effect below reads this instead of `altitudes` itself so
   // it never needs `altitudes` in its own dependency array (no feedback
@@ -773,6 +847,144 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     setCoverage(null);
   }, [projectId]);
+
+  // Value Pool Slice 3 (PM-5a MONOTONIC-GUARD-ACROSS-ENTITY-SWITCH,
+  // mirroring SF-8 above exactly): the group list, run state, and gate are
+  // entity-scoped — reset structurally on every `projectId` change so a
+  // stale project's proposals never linger under the newly mounted one.
+  useEffect(() => {
+    setGroupsRun(null);
+    setGroupsList([]);
+    setGroupsGate(null);
+  }, [projectId]);
+
+  // Value Pool Slice 3: fetches the current run + proposals for `projectId`.
+  // Same `currentProjectIdRef` in-flight guard as `load()`/
+  // `handlePrioritizeNow` — a response that lands after the panel has since
+  // moved on to a different project is dropped outright (C-6).
+  const loadGroups = useCallback(async () => {
+    if (!projectId) return;
+    const requestedProjectId = projectId;
+    try {
+      const res = await api.projectPlans.groups(projectId);
+      if (requestedProjectId !== currentProjectIdRef.current) return;
+      warnIfOutOfRegistry(GROUP_GATE_STATES, res.gate, "GROUP_GATE_STATES", "gate");
+      for (const g of res.groups) {
+        warnIfOutOfRegistry(
+          GROUP_REFINEMENT_STATES,
+          g.refinement_state,
+          "GROUP_REFINEMENT_STATES",
+          "refinement_state"
+        );
+        warnIfOutOfRegistry(
+          GROUP_REVIEW_STATES,
+          g.review_status,
+          "GROUP_REVIEW_STATES",
+          "review_status"
+        );
+        for (const m of g.members) {
+          warnIfOutOfRegistry(
+            GROUP_MEMBER_AVAILABILITY,
+            m.availability,
+            "GROUP_MEMBER_AVAILABILITY",
+            "availability"
+          );
+        }
+      }
+      setGroupsRun(res.run);
+      setGroupsList(res.groups);
+      setGroupsGate(res.gate);
+      setCoverage((prev) => mergeCoverage(prev, res.coverage));
+    } catch {
+      // Silent degrade (SF-9 posture, same as `load()`'s own coverage leg
+      // and `fetchAltitudesFor`'s established precedent): the groups
+      // feature is a progressive enhancement over the core panel, and a
+      // fixture/mock that predates this feature (no `groups` method
+      // provided) must not be treated as a loud, warn-worthy failure — it
+      // simply renders the "not yet run" empty state.
+      if (requestedProjectId !== currentProjectIdRef.current) return;
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadGroups();
+  }, [loadGroups]);
+
+  // AC-7: the auto-group action. Server-side gated on `coverage.complete`
+  // (409 `blocked_coverage_incomplete`) — this handler never bypasses that
+  // gate itself; the button's own `disabled` prop mirrors it, never
+  // replaces it. A `blocked_coverage_incomplete` response still carries a
+  // full `run`/`gate`/`coverage` snapshot the panel reuses as-is.
+  const handleProposeGroups = useCallback(async () => {
+    if (!projectId) return;
+    const requestedProjectId = projectId;
+    setProposingGroups(true);
+    try {
+      const res = await api.projectPlans.proposeGroups(projectId);
+      if (requestedProjectId !== currentProjectIdRef.current) return;
+      warnIfOutOfRegistry(GROUP_PROPOSE_OUTCOMES, res.outcome, "GROUP_PROPOSE_OUTCOMES", "outcome");
+      if (res.run) setGroupsRun(res.run);
+      if (res.gate) setGroupsGate(res.gate);
+      if (res.coverage) setCoverage((prev) => mergeCoverage(prev, res.coverage));
+      // BL-1 fix: the propose response never carries an enriched `groups`
+      // key (no `members`/`member_availability_counts` composition — that
+      // is `GET /groups`'s own read-time composition, §3.4). Reading
+      // `res.groups` here used to crash the very next render on
+      // `group.members.length` for undefined `members`. `GET /groups` is
+      // the single source of truth for group content — re-fetch it instead
+      // of trying to render this response's raw, un-enriched rows (also
+      // matches BL-13: the "started" outcome hasn't produced any groups
+      // yet anyway — this poll is what surfaces them once they exist).
+      await loadGroups();
+    } catch (err) {
+      if (requestedProjectId === currentProjectIdRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (mountedRef.current && requestedProjectId === currentProjectIdRef.current) {
+        setProposingGroups(false);
+      }
+    }
+  }, [projectId, loadGroups]);
+
+  // AC-5: pure bookkeeping — review_status + reviewed_at only, never a plan
+  // item, milestone, or claim (PO §7/§8 fence). Optimistically patches the
+  // single changed row in place rather than a full reload.
+  const handleApproveGroup = useCallback(
+    async (groupId: number) => {
+      try {
+        const res = await api.projectPlans.approveGroup(projectId, groupId);
+        setGroupsList((prev) =>
+          prev.map((g) =>
+            g.id === groupId
+              ? { ...g, review_status: res.review_status, reviewed_at: res.reviewed_at }
+              : g
+          )
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [projectId]
+  );
+
+  const handleDismissGroup = useCallback(
+    async (groupId: number) => {
+      try {
+        const res = await api.projectPlans.dismissGroup(projectId, groupId);
+        setGroupsList((prev) =>
+          prev.map((g) =>
+            g.id === groupId
+              ? { ...g, review_status: res.review_status, reviewed_at: res.reviewed_at }
+              : g
+          )
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [projectId]
+  );
 
   // Shared altitude-fetch body — called both for genuinely-new pool units
   // (the effect below) and for the eventBus handler's WATCH-S2-B refetch of
@@ -1094,6 +1306,28 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
                 )}
               </div>
             )}
+            {/* Value Pool Slice 3 (AC-7): the auto-group action. A DISTINCT
+                control from the existing "prioritize now" coverage-header
+                button above (PO §5 — no second control means no second
+                identifier reachable through that button's own selector,
+                never a shared className with it — BL-12: that identifier is
+                only ever a `data-test` hook, not a real CSS class, so
+                copying it into this button's `className` just to satisfy a
+                test selector duplicated the identifier the PO fence said
+                must stay unique). Own `data-test`, own handler/label — it
+                proposes groups, it does not request coverage. Disabled
+                until `coverage.complete`, mirroring the existing header's
+                own ETA/prioritize-now affordance rather than duplicating
+                it. */}
+            <button
+              type="button"
+              onClick={handleProposeGroups}
+              disabled={!coverage?.complete || proposingGroups}
+              data-test="auto-group-button"
+              className="text-[11px] text-accent hover:underline disabled:opacity-50"
+            >
+              {proposingGroups ? t("planLedger.groups.proposing") : t("planLedger.autoGroupButton")}
+            </button>
           </div>
           {units.length === 0 ? (
             <p className="text-xs text-gray-500 italic">{t("planLedger.pool.empty")}</p>
@@ -1112,6 +1346,135 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
             ))
           )}
         </div>
+      </div>
+
+      {/* Value Pool Slice 3: proposal list. `aria-label` gives this
+          `<section>` an accessible name matching /groups/i (C-7's own
+          StrictMode-render check queries by role="region" + that name).
+          Every field below is rendered VERBATIM from the server response —
+          no client-side member count, no coverage-of-members math, no
+          rollup formula (§9.1's rogue-re-derivation risk, technical-plan.md
+          §8). Run state and the ungrouped-unit disclosure are always
+          visible, never inferred from an empty list (AC-3). */}
+      <div
+        className="px-4 pb-4"
+        data-test="groups-section"
+        aria-label={t("planLedger.groups.sectionLabel")}
+        role="region"
+      >
+        <h3 className="text-xs font-semibold text-gray-300 mb-2">
+          {t("planLedger.groups.sectionLabel")}
+        </h3>
+        {groupsRun && (
+          <p className="text-xs text-gray-400 mb-2" data-test="groups-run-state">
+            {t(`planLedger.runState.${groupsRun.state}`)}
+            {groupsGate === "blocked_coverage_incomplete" && (
+              <span className="ml-2 text-accent">
+                {t("planLedger.gateState.blocked_coverage_incomplete")}
+              </span>
+            )}
+            {(groupsRun.ungrouped_no_signal ?? 0) + (groupsRun.ungrouped_not_selected ?? 0) > 0 && (
+              <span className="ml-2">
+                {t("planLedger.ungroupedUnitCount", {
+                  count:
+                    (groupsRun.ungrouped_no_signal ?? 0) + (groupsRun.ungrouped_not_selected ?? 0),
+                })}
+              </span>
+            )}
+          </p>
+        )}
+        {groupsList.length === 0 ? (
+          <p className="text-xs text-gray-500 italic">{t("planLedger.groups.empty")}</p>
+        ) : (
+          groupsList.map((group) => (
+            <div key={group.id} className="badge mb-2 p-3" data-test="group-row">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-gray-200">
+                  {group.name ?? t(`planLedger.refinementState.${group.refinement_state}`)}
+                </span>
+                <span className="text-[10px] text-gray-400">
+                  {t(`planLedger.reviewStatus.${group.review_status}`)}
+                </span>
+              </div>
+              {group.summary_sentence && (
+                <p className="text-xs text-gray-400 mt-1">{group.summary_sentence}</p>
+              )}
+              {group.rationale && (
+                <p className="text-[11px] text-gray-500 mt-1 italic">{group.rationale}</p>
+              )}
+              {/* BL-9 fix: render the server's own `member_availability_counts`
+                  verbatim — never re-derive a count from `group.members`
+                  (the exact §9.1 DERIVED-DUAL-VIEW re-derivation the
+                  component's own comment above already disclaims). The
+                  total below is the SUM of the server's three counts, never
+                  `group.members.length`; each of the three states below
+                  renders its own server-provided number under its own
+                  `data-test` hook so the three states are distinguishable,
+                  not merely present. */}
+              <p className="text-[11px] text-gray-500 mt-1" data-test="group-member-counts">
+                {t("planLedger.groups.membersLabel")}:{" "}
+                {(group.member_availability_counts.available ?? 0) +
+                  (group.member_availability_counts.already_claimed ?? 0) +
+                  (group.member_availability_counts.no_longer_in_pool ?? 0)}
+              </p>
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span
+                  data-test="availability-count-available"
+                  className="text-[10px] text-gray-400"
+                >
+                  {t("planLedger.memberAvailability.available")}:{" "}
+                  {group.member_availability_counts.available ?? 0}
+                </span>
+                <span
+                  data-test="availability-count-already_claimed"
+                  className="text-[10px] text-gray-400"
+                >
+                  {t("planLedger.memberAvailability.already_claimed")}:{" "}
+                  {group.member_availability_counts.already_claimed ?? 0}
+                </span>
+                <span
+                  data-test="availability-count-no_longer_in_pool"
+                  className="text-[10px] text-gray-400"
+                >
+                  {t("planLedger.memberAvailability.no_longer_in_pool")}:{" "}
+                  {group.member_availability_counts.no_longer_in_pool ?? 0}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {group.members.map((m) => (
+                  <span
+                    key={m.unitKey}
+                    data-availability-state={m.availability}
+                    className="text-[10px] px-1.5 py-0.5 rounded-md border border-border text-gray-400"
+                    title={m.unitKey}
+                  >
+                    {t(`planLedger.memberAvailability.${m.availability}`)}
+                  </span>
+                ))}
+              </div>
+              {group.review_status === "proposed" && (
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApproveGroup(group.id)}
+                    className="text-[11px] text-accent hover:underline"
+                    data-test="group-approve-button"
+                  >
+                    {t("planLedger.groups.approve")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDismissGroup(group.id)}
+                    className="text-[11px] text-gray-400 hover:underline"
+                    data-test="group-dismiss-button"
+                  >
+                    {t("planLedger.groups.dismiss")}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </div>
     </section>
   );

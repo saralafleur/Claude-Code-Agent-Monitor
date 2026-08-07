@@ -1193,6 +1193,17 @@ See [docs/API.md → Metrics](./docs/API.md#metrics) for the full metric list an
 | `POST`   | `/api/webhooks/:id/test`          | Send a synthetic test alert and report the delivery result                           |
 | `GET`    | `/api/webhooks/:id/deliveries`    | Recent delivery log for a target (`limit`, `offset`)                                  |
 
+### Project Plans — Value Pool Groups
+
+Value Pool Slice 3 (auto-group proposal). Mounted under `server/routes/project-plans.js`, path-parameterized by `:projectId` (not a `project_id` body param). Proposing is server-gated on altitude coverage being complete (`409 blocked_coverage_incomplete` otherwise) and is pure disclosure — it never creates a `value_claims` row, a plan item, or any other durable action; approve/dismiss are pure `review_status` bookkeeping over an already-proposed group, never a claim.
+
+| Method | Path                                                  | Description                                                                                                                    |
+| ------ | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/project-plans/:projectId/groups/propose`          | Starts (or reuses) an auto-grouping run over the live value pool. `202` when a fresh run starts, `200` for `already_running`/`reused_unchanged` (unchanged input digest), `409 blocked_coverage_incomplete` when coverage isn't complete yet |
+| `GET`  | `/api/project-plans/:projectId/groups`                   | The latest run plus its proposed groups, each carrying a read-time `member_availability_counts` partition (`available` / `already_claimed` / `no_longer_in_pool`) computed fresh on every read, never persisted |
+| `POST` | `/api/project-plans/:projectId/groups/:groupId/approve`  | Marks a proposed group `review_status='approved'` (bookkeeping only)                                                            |
+| `POST` | `/api/project-plans/:projectId/groups/:groupId/dismiss`  | Marks a proposed group `review_status='dismissed'` (bookkeeping only)                                                           |
+
 ### Settings
 
 | Method | Path                           | Description                                      |

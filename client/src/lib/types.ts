@@ -2857,6 +2857,99 @@ export interface ValueAltitudesUpdatedPayload {
   coverage?: CoverageSnapshot;
 }
 
+// ── Value Pool Slice 3 — auto-group proposal engine ──────────────────────
+// Server-authored, hand-maintained mirrors of server/lib/value-groups.js's
+// six state registries (§9.7-accepted exception — a CJS server module
+// cannot cross the Vite/Node boundary). BL-10: the six wire-value registries
+// themselves (the `GROUP_*` arrays) live in, and are exported from,
+// PlanLedgerPanel.tsx — the one component that actually renders against
+// them — not a separate `registries.ts` (no such file exists; this comment
+// used to claim otherwise). The anchored exemption-set assertions guarding
+// them against silent drift live in
+// `client/src/components/__tests__/PlanLedgerPanel.groups.test.tsx` (C-8).
+
+/** value_group_runs.state's wire set — 'not_attempted' is the ABSENCE of a
+ *  run row, never persisted. Mirrors GROUP_RUN_STATES. */
+export type GroupRunState =
+  | "not_attempted"
+  | "in_progress"
+  | "completed"
+  | "completed_zero_groups"
+  | "failed";
+/** Mirrors GROUP_REFINEMENT_STATES — the batch-disclosure axis. */
+export type GroupRefinementState = "pending" | "refined" | "zero_members" | "failed";
+/** Mirrors GROUP_REVIEW_STATES — 'claimed' reserved/unreachable in Slice 3. */
+export type GroupReviewStatus = "proposed" | "approved" | "dismissed" | "claimed";
+/** Mirrors GROUP_MEMBER_AVAILABILITY — derived at READ time only. */
+export type GroupMemberAvailability = "already_claimed" | "available" | "no_longer_in_pool";
+/** Mirrors GROUP_PROPOSE_OUTCOMES — a response-level signal, not a run state. */
+export type GroupProposeOutcome =
+  | "started"
+  | "reused_unchanged"
+  | "already_running"
+  | "blocked_coverage_incomplete";
+/** Mirrors GROUP_GATE_STATES — kept OUT of GroupRunState. */
+export type GroupGateState = "ready" | "blocked_coverage_incomplete";
+
+/** One `value_group_runs` row, verbatim. */
+export interface ValueGroupRun {
+  id?: string;
+  project_id: string;
+  state: GroupRunState;
+  input_digest?: string | null;
+  model?: string | null;
+  batch_count?: number;
+  oversized_batch_count?: number;
+  group_count?: number;
+  ungrouped_no_signal?: number;
+  ungrouped_not_selected?: number;
+  error_reason?: string | null;
+  started_at?: string;
+  completed_at?: string | null;
+}
+
+/** One proposed group member, with its READ-TIME-derived availability. */
+export interface ValueGroupMember {
+  unitKey: string;
+  availability: GroupMemberAvailability;
+}
+
+/** One `value_groups` row, plus the server-computed member list and
+ *  per-group availability counts (§3.4) — never re-derived client-side. */
+export interface ValueGroup {
+  id: number;
+  run_id: string;
+  name: string | null;
+  summary_sentence: string | null;
+  rationale: string | null;
+  pregroup_signal: "slug" | "time" | "surface" | "mixed";
+  refinement_state: GroupRefinementState;
+  review_status: GroupReviewStatus;
+  created_at?: string;
+  refined_at?: string | null;
+  reviewed_at?: string | null;
+  members: ValueGroupMember[];
+  member_availability_counts: Record<GroupMemberAvailability, number>;
+}
+
+/** `GET /api/project-plans/:projectId/groups`'s response shape. */
+export interface ValueGroupsResponse {
+  run: ValueGroupRun;
+  groups: ValueGroup[];
+  gate: GroupGateState;
+  coverage: CoverageSnapshot;
+}
+
+/** `POST /api/project-plans/:projectId/groups/propose`'s response shape. */
+export interface ValueGroupsProposeResponse {
+  outcome: GroupProposeOutcome;
+  run?: ValueGroupRun;
+  groups?: ValueGroup[];
+  gate?: GroupGateState;
+  coverage?: CoverageSnapshot;
+  error?: { code: string; message: string };
+}
+
 /** Payload for `project_plan_updated` WebSocket messages, broadcast by
  *  `server/routes/project-plans.js` (plan create/update/close/reopen and
  *  item create/update/delete — see the route's own broadcast call sites). */

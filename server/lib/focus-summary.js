@@ -562,4 +562,10 @@ module.exports = {
   bulletBudget,
   localDayChunks,
   nextLocalMidnight,
+  // Value Pool Slice 3 (technical-plan.md §5.1): value-groups.js's time
+  // signal reuses this canonical local-calendar-day label rather than
+  // inventing a second duration/day-bucketing constant (§9.1 rogue
+  // re-derivation) — this export was missing until this build (the
+  // function itself has existed since Focus's window summaries).
+  localDayLabel,
 };

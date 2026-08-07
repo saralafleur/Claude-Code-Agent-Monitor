@@ -537,7 +537,24 @@ design.** It is deleted and replaced in the same commit. It is **never
 "adjusted until it passes"** — that is the §9.4-named temptation this
 project's Slice-2 implementer was praised for refusing. The half of T7 worth
 keeping is its anchored assertion on each route's **response** key set
-(`project-plans-api.test.js:890-902`) — that survives, untouched.
+(`project-plans-api.test.js:890-902`, T6) — that survives, untouched. (BO-2
+correction: T7 is deleted **in full** — zero lines of T7 itself survive; the
+survivor, T6, is a *different, pre-existing* assertion adjacent to T7, not a
+fragment of T7.)
+
+**T7-successor table (BO-2, added post-build; each claim independently
+red-proven before landing):**
+
+| T7 claim | Successor | Priority |
+|---|---|---|
+| T7-C1 — both handlers call `assembleValuePool(dbModule, {id: projectId})` | `single-writer-guard.test.js` G-2 + `value-coverage-probe.test.js` P-1 | `[M]` |
+| T7-C2 — both call `enrichPoolAltitudes(..., {probe: true})` | G-2 + P-5 | `[M]` |
+| T7-C3 — both pass `draining: isDrainingProject(projectId)` | P-6 | `[M]` |
+| T7-C4 — `postKeys === getKeys` (route↔route parity) | **Deliberately NOT replaced** (DEC-S3-4) | `[M]` (negative) |
+| T7-C5 — `postKeys === [computedAt,counts,draining,projectId,requestedAt]` | P-7 (behavioral spy) + P-8 | `[M]` |
+
+DoD line: ~~"T7 deleted"~~ → **"every T7 claim has a named successor, each
+observed red."**
 
 ### 6.2 The replacement guard — single-call-site, NOT route↔route parity (O-3)
 
@@ -547,7 +564,13 @@ In `server/__tests__/single-writer-guard.test.js`, same shape as the existing
 - `buildProbeCoverage` is **defined exactly once**, in
   `server/lib/value-coverage-probe.js`.
 - Its **call-site set is exactly three**, at the three handlers above, each
-  appearing exactly once lexically inside its own handler body.
+  appearing exactly once lexically inside its own handler body. **(Build-time
+  widening, documented in `single-writer-guard.test.js`'s G-2: `GET /groups`
+  turned out to need its own fresh gate/coverage read too — §7's own response
+  shape `{run, groups, gate, coverage}`, exercised by the TT-read mid-flight-
+  regression case. The count is 4 in the shipped build, not 3 — still one
+  composition, never a hand-copy; the guard's own exact-count assertion moved
+  with it, in the same commit as the route.)**
 - **Scope is derived**, by scanning `server/lib` + `server/routes` + `bin/`
   for importers, and **fails closed** on any importer with no disposition. A
   derived scope whose miss branch `continue`s is a hand-typed scan in derived
@@ -675,6 +698,7 @@ here, not just a rogue read).
 | `server/__tests__/single-writer-guard.test.js` | new `buildProbeCoverage` single-call-site guard; new `insertValueGroup*` / `updateValueGroupRunState` writer guards; `assertSingleHome` for `../lib/value-groups` and `../lib/value-coverage-probe`; **consumer-map additions for `../lib/value-ledger` (`:467`) and `../lib/value-summary` (`:413`) naming `../lib/value-groups`**, dispositions for **every** export on both |
 | `server/__tests__/chronology-ordering.test.js` | add `value-groups.js` (and `value-coverage-probe.js`) to `filesToScan` |
 | `server/__tests__/db-migration.test.js` | **no `UPGRADE_CASES`/`REBUILD_CASES` entry** — new tables (§9.6). Confirm the registry-completeness meta-test still passes |
+| `server/__tests__/ledger-metrics-parity.test.js` | BO-4 addition (missing from this table originally): C2.4's `CONSUMERS` literal, title, and failure message updated to the widened 4-entry set (BO-3) in the SAME commit `value-ledger.js` gains the `value-groups.js` consumer entry — otherwise C2.4 goes red by construction with no planned successor |
 
 ### Edited — client
 `client/src/components/PlanLedgerPanel.tsx`,

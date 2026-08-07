@@ -66,8 +66,21 @@ verification" below.)*
   `value-coverage-probe.test.js`,
   `client/src/components/__tests__/PlanLedgerPanel.groups.test.tsx`
 - Edited: `server/__tests__/project-plans-api.test.js` — **T7 (line 905)
-  deleted and replaced in the same commit**; the anchored response-key-set
-  assertion at lines 988-998 survives unmodified
+  deleted IN FULL in the same commit — zero lines survive.** BO-1
+  correction (found by `team-qa`'s 2026-08-06 pre-build pass, confirmed by
+  the build itself): the earlier claim in this brief that "the anchored
+  assertion at lines 988-998 survives unmodified" was wrong. Lines 988-998
+  are T7's OWN five-key `coverageSnapshot`-argument-set anchor
+  (`computedAt/counts/draining/projectId/requestedAt`) and depend on T7's
+  own regex-scan mechanism (`extractCoverageSnapshotKeys`), which returns
+  `[]` post-extraction — that anchor cannot survive detached from T7. The
+  assertion that DOES survive unmodified is **T6** (`:886-903` pre-edit),
+  the HTTP response-BODY key-set anchor (nine `snake_case` keys) — a
+  different assertion, on a different object (`coverageSnapshot`'s
+  *return* shape, not its *argument* shape). T7's five claims each got a
+  named successor instead (`value-coverage-probe.test.js`'s P-1…P-8 +
+  `single-writer-guard.test.js`'s G-1/G-2/G-4); the five-key argument
+  anchor's own successor is P-7.
 - Edited: `server/__tests__/single-writer-guard.test.js` — new
   `buildProbeCoverage` single-call-site guard; new writer guards for the 3
   new tables; `assertSingleHome` consumer-map additions at the existing
