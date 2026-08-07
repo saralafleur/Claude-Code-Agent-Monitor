@@ -138,7 +138,16 @@
       "expand": "展开"
     },
     "items": {
-      "empty": "尚无事项。"
+      "empty": "尚无事项。",
+      "add": "添加事项",
+      "addPlaceholder": "添加一个事项…",
+      "addSubmit": "添加",
+      "parentTopLevel": "顶层",
+      "parentLabel": "上级事项",
+      "edit": "编辑",
+      "save": "保存",
+      "cancel": "取消",
+      "saving": "保存中…"
     },
     "pool": {
       "title": "价值池",

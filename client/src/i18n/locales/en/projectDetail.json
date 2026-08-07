@@ -138,7 +138,16 @@
       "expand": "Expand"
     },
     "items": {
-      "empty": "No items yet."
+      "empty": "No items yet.",
+      "add": "Add item",
+      "addPlaceholder": "Add an item…",
+      "addSubmit": "Add",
+      "parentTopLevel": "Top-level",
+      "parentLabel": "Parent",
+      "edit": "Edit",
+      "save": "Save",
+      "cancel": "Cancel",
+      "saving": "Saving…"
     },
     "pool": {
       "title": "Value Pool",

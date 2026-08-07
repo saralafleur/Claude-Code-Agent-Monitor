@@ -1,8 +1,8 @@
 /**
  * @file Plan/item CRUD and the plan lifecycle state machine for the
- * portfolio-layer `project_plans` / `project_plan_items` tables
- * (technical-plan.md §3.2, DEC-3/DEC-P5/DEC-P6). Owns two things no other
- * module may do:
+ * portfolio-layer `project_plans` / `project_plan_items` / `value_claims`
+ * tables (technical-plan.md §3.2, DEC-3/DEC-P5/DEC-P6). Owns three things no
+ * other module may do:
  *  (1) `closePlan` — the single closure composer. One transaction, one row
  *      update (`status='open'` guarded in the WHERE clause so a second close
  *      is a detectable zero-row no-op, never a silent overwrite), broadcasts
@@ -16,6 +16,18 @@
  *      `(project_id, imported_content_hash)` — never on `cwd`
  *      (CWD-IDENTITY-FANOUT: two case-variant cwds are one physical file with
  *      one content_hash, so a cwd-keyed import would mint two generation-1s).
+ *  (3) `claimUnitIntoItem` (Slice 4a, DEC-S4-2) — the SOLE writer of
+ *      `value_claims` (single-writer-guard.test.js G-2). Resolves or
+ *      atomically creates the target item, validates the unit fields FIRST
+ *      (before any write), and inserts the claim, all inside ONE
+ *      `dbModule.db.transaction(...)` — so a later validation failure or a
+ *      `UNIQUE` collision can never leave a committed orphan plan item
+ *      behind. `POST /:id/claims` is a thin delegator to this function.
+ * `updateProjectPlanItem`'s re-parent branch (Slice 4a, DEC-S4-7) is the
+ * SOLE writer that may move `parent_item_id` after insert time
+ * (single-writer-guard.test.js G-1) — `reparentProjectPlanItem` in
+ * `server/db.js` is a dedicated statement (COALESCE cannot express "set to
+ * NULL"), guarded by a same-plan + cycle check.
  * There is no path back from closed to open, and no delete path for a closed
  * plan or for any claim of a closed plan — those verbs simply do not exist
  * in this module.
@@ -23,6 +35,11 @@
  */
 
 const cwdIdentity = require("./cwd-identity");
+// value-ledger.js requires this module (for generationOrdinal), so
+// VALUE_SOURCES/ATTRIBUTION_TIERS are require()'d lazily inside
+// claimUnitIntoItem below rather than at module top level — importing
+// value-ledger.js here would create a require cycle where each module could
+// observe the other's exports as still-empty depending on load order.
 
 const VALID_ORIGINS = ["manual", "import", "retroactive_bundle"];
 
@@ -66,10 +83,18 @@ function generationOrdinal(dbModule, plan) {
  * existence is the caller's (route's) responsibility — a 404 on an unknown
  * project is a route-shape concern, not a lib validation concern.
  */
-function insertProjectPlan(
-  dbModule,
-  { project_id: projectId, title, succeeds_plan_id: succeedsPlanId, origin } = {}
-) {
+function insertProjectPlan(dbModule, optsOrProjectId, maybeTitle) {
+  // Additive, backward-compatible calling convention: every existing caller
+  // (the route, importGenerationFromPlan's own composer) passes an options
+  // object and is completely unaffected. server/__tests__/plan-lifecycle.test.js's
+  // new re-parent/composer fixtures (P1-P7, P3-mirror, PA, P5b, PX, A2.20, PZ)
+  // call this with two positional strings instead — accepting that shape here,
+  // rather than editing the test file, is the durable fix for that mismatch.
+  const opts =
+    typeof optsOrProjectId === "string"
+      ? { project_id: optsOrProjectId, title: maybeTitle }
+      : optsOrProjectId || {};
+  const { project_id: projectId, title, succeeds_plan_id: succeedsPlanId, origin } = opts;
   if (!projectId || typeof projectId !== "string" || !projectId.trim()) {
     return domainError("INVALID_INPUT", "project_id is required");
   }
@@ -153,21 +178,104 @@ function insertProjectPlanItem(dbModule, planId, payload = {}) {
   return dbModule.stmts.getProjectPlanItem.get(info.lastInsertRowid);
 }
 
+/** Read-only accessor — thin wrapper the composers above already use
+ *  internally, exported so callers (and tests) never have to reach past this
+ *  module into `dbModule.stmts` directly for a single item row. */
+function getProjectPlanItem(dbModule, itemId) {
+  return dbModule.stmts.getProjectPlanItem.get(itemId);
+}
+
+/**
+ * How far the ancestor walk below may travel before giving up. Bounded by
+ * the plan's own item count (P5b) rather than an unconditional constant, so
+ * a legitimately deep (but acyclic) tree is never mistaken for a cycle; a
+ * pre-existing corrupt self-referencing row still terminates quickly because
+ * the walk also stops the moment it revisits an id (see `walkForCycle`).
+ */
+function planItemCount(dbModule, planId) {
+  const row = dbModule.db
+    .prepare("SELECT COUNT(*) AS n FROM project_plan_items WHERE plan_id = ?")
+    .get(planId);
+  return row ? row.n : 0;
+}
+
+/**
+ * Walk `parent_item_id` upward from `startId`, returning true if `targetId`
+ * is reached. Bounded by `maxSteps` (the plan's item count) AND by a
+ * visited-set, so a pre-existing corrupt self-referencing row (P5b) cannot
+ * hang the request even though it is not itself the cycle being validated.
+ */
+function walkForCycle(dbModule, startId, targetId, maxSteps) {
+  let current = startId;
+  const visited = new Set();
+  let steps = 0;
+  while (current != null && steps <= maxSteps) {
+    if (current === targetId) return true;
+    if (visited.has(current)) return false; // pre-existing corrupt cycle unrelated to targetId
+    visited.add(current);
+    const row = dbModule.stmts.getProjectPlanItem.get(current);
+    if (!row) return false;
+    current = row.parent_item_id;
+    steps += 1;
+  }
+  return false;
+}
+
+/**
+ * Extend the existing five-field partial update (text/acceptance/detail/
+ * checked/position, unchanged behavior) with an explicit-intent placement
+ * change (Slice 4a, DEC-S4-7). `Object.hasOwn` — not `!= null` — detects
+ * intent, because `parent_item_id: null` is the meaningful "promote to
+ * top-level" value and an absent key must leave every existing caller
+ * byte-identical. `reparentProjectPlanItem` is a dedicated statement (not a
+ * widened COALESCE) because COALESCE cannot express "set this column to
+ * NULL". Both the field update and the re-parent share one transaction, so a
+ * rejected placement change cannot leave a partially applied text edit (PA).
+ */
 function updateProjectPlanItem(dbModule, itemId, patch = {}) {
   const item = dbModule.stmts.getProjectPlanItem.get(itemId);
   if (!item) return domainError("NOT_FOUND", "no such item");
   const plan = dbModule.stmts.getProjectPlan.get(item.plan_id);
   if (!plan || plan.status !== "open") return domainError("ALREADY_CLOSED", "plan is closed");
 
+  const hasPlacementIntent = Object.hasOwn(patch, "parent_item_id");
+  let parentItemId = null;
+  if (hasPlacementIntent) {
+    parentItemId = patch.parent_item_id;
+    if (parentItemId != null) {
+      if (parentItemId === itemId) {
+        return domainError("INVALID_INPUT", "an item cannot be its own parent");
+      }
+      const parent = dbModule.stmts.getProjectPlanItem.get(parentItemId);
+      if (!parent) {
+        return domainError("INVALID_INPUT", "parent_item_id does not exist");
+      }
+      if (parent.plan_id !== item.plan_id) {
+        return domainError("INVALID_INPUT", "parent_item_id belongs to a different plan");
+      }
+      const maxSteps = planItemCount(dbModule, item.plan_id);
+      if (walkForCycle(dbModule, parentItemId, itemId, maxSteps)) {
+        return domainError("INVALID_INPUT", "parent_item_id would create a cycle");
+      }
+    }
+  }
+
   const { text, acceptance, detail, checked, position } = patch;
-  dbModule.stmts.updateProjectPlanItem.run(
-    text != null ? text : null,
-    acceptance !== undefined ? acceptance : null,
-    detail !== undefined ? detail : null,
-    checked === undefined || checked === null ? null : checked ? 1 : 0,
-    Number.isInteger(position) ? position : null,
-    itemId
-  );
+
+  dbModule.db.transaction(() => {
+    dbModule.stmts.updateProjectPlanItem.run(
+      text != null ? text : null,
+      acceptance !== undefined ? acceptance : null,
+      detail !== undefined ? detail : null,
+      checked === undefined || checked === null ? null : checked ? 1 : 0,
+      Number.isInteger(position) ? position : null,
+      itemId
+    );
+    if (hasPlacementIntent) {
+      dbModule.stmts.reparentProjectPlanItem.run(parentItemId ?? null, itemId);
+    }
+  })();
+
   return dbModule.stmts.getProjectPlanItem.get(itemId);
 }
 
@@ -178,6 +286,119 @@ function deleteProjectPlanItem(dbModule, itemId) {
   if (!plan || plan.status !== "open") return domainError("ALREADY_CLOSED", "plan is closed");
   dbModule.stmts.deleteProjectPlanItem.run(itemId);
   return { ok: true };
+}
+
+/**
+ * The SOLE writer of `value_claims` (single-writer-guard.test.js G-2).
+ * Resolves or atomically creates the target item, validates the unit's
+ * claim fields, and inserts the claim — all inside ONE transaction, so no
+ * failure path can leave a committed orphan plan item behind (DEC-S4-2).
+ *
+ * Ordering is load-bearing (DEC-S4-2): `value_source` / `attribution` /
+ * `value_ref` are validated FIRST, before any write — this is what makes a
+ * bad claim payload fail before `new_item` is ever inserted. Reordering
+ * alone is not sufficient, though: the `UNIQUE (value_source, value_ref,
+ * source_cwd, item_id)` collision can only be discovered at insert time,
+ * after the item already exists — so the whole sequence also runs inside
+ * `dbModule.db.transaction(...)`, and the `UNIQUE` catch sits OUTSIDE that
+ * transaction callback (never inside it — catching inside would let the
+ * item insert commit before the claim's failure is even observed).
+ *
+ * @param {object} dbModule
+ * @param {number} planId
+ * @param {object} body  item_id | new_item, plus the unit's claim fields
+ * @returns {object} the created claim row, or a domainError
+ */
+function claimUnitIntoItem(dbModule, planId, body = {}) {
+  const plan = dbModule.stmts.getProjectPlan.get(planId);
+  if (!plan) return domainError("NOT_FOUND", "no such plan");
+  if (plan.status !== "open") return domainError("ALREADY_CLOSED", "plan is closed");
+
+  // Lazy require — see the module-header note on the value-ledger.js require
+  // cycle.
+  const { VALUE_SOURCES, ATTRIBUTION_TIERS } = require("./value-ledger");
+
+  const itemIdRaw = body.item_id != null ? Number(body.item_id) : null;
+  if (itemIdRaw == null && !body.new_item) {
+    return domainError("INVALID_INPUT", "item_id or new_item is required");
+  }
+  if (itemIdRaw != null) {
+    const existingItem = dbModule.stmts.getProjectPlanItem.get(itemIdRaw);
+    if (!existingItem || existingItem.plan_id !== planId) {
+      return domainError("INVALID_INPUT", "item_id does not belong to this plan");
+    }
+  }
+
+  const {
+    value_source: valueSource,
+    value_ref: valueRef,
+    source_cwd: sourceCwd,
+    label_snapshot: labelSnapshot,
+    seen_at_snapshot: seenAtSnapshot,
+    stage_snapshot: stageSnapshot,
+    attribution,
+    claimed_by: claimedBy,
+  } = body;
+
+  // Validate FIRST — before any write (DEC-S4-2).
+  if (!VALUE_SOURCES.includes(valueSource)) {
+    return domainError("INVALID_INPUT", `value_source must be one of ${VALUE_SOURCES.join(", ")}`);
+  }
+  if (!ATTRIBUTION_TIERS.includes(attribution)) {
+    return domainError(
+      "INVALID_INPUT",
+      `attribution must be one of ${ATTRIBUTION_TIERS.join(", ")}`
+    );
+  }
+  if (!valueRef) {
+    return domainError("INVALID_INPUT", "value_ref is required");
+  }
+
+  // Canonicalize source_cwd at THIS write seam — the only other seam that
+  // touches a cwd for this feature is pool assembly, both routed through
+  // cwd-identity.js (CWD-IDENTITY-FANOUT).
+  const canonicalCwd = sourceCwd ? cwdIdentity.canonicalizeCwd(sourceCwd) : "";
+
+  let claim;
+  try {
+    claim = dbModule.db.transaction(() => {
+      let itemId = itemIdRaw;
+      if (itemId == null) {
+        const inserted = insertProjectPlanItem(dbModule, planId, body.new_item);
+        if (isDomainError(inserted)) {
+          // Thrown, not returned: this happens inside the transaction
+          // callback, so better-sqlite3 rolls back anything the callback
+          // has already written. The catch below is for the UNIQUE
+          // collision only — this is a distinct, always-rolled-back path.
+          throw Object.assign(new Error(inserted.error.message), { domainError: inserted });
+        }
+        itemId = inserted.id;
+      }
+
+      const info = dbModule.stmts.insertValueClaim.run(
+        plan.project_id,
+        planId,
+        itemId,
+        valueSource,
+        String(valueRef),
+        canonicalCwd,
+        labelSnapshot ?? null,
+        seenAtSnapshot ?? null,
+        stageSnapshot ?? null,
+        attribution,
+        claimedBy === "llm" ? "llm" : "human"
+      );
+      return dbModule.stmts.getValueClaim.get(info.lastInsertRowid);
+    })();
+  } catch (e) {
+    if (e && e.domainError) return e.domainError;
+    if (String(e && e.message).includes("UNIQUE")) {
+      return domainError("DUPLICATE_CLAIM", "this unit is already claimed into this item");
+    }
+    throw e;
+  }
+
+  return claim;
 }
 
 /**
@@ -326,8 +547,10 @@ module.exports = {
   insertProjectPlan,
   updatePlanTitle,
   insertProjectPlanItem,
+  getProjectPlanItem,
   updateProjectPlanItem,
   deleteProjectPlanItem,
+  claimUnitIntoItem,
   closePlan,
   importGenerationFromPlan,
 };

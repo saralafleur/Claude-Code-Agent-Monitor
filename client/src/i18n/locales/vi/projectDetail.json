@@ -138,7 +138,16 @@
       "expand": "Mở rộng"
     },
     "items": {
-      "empty": "Chưa có mục nào."
+      "empty": "Chưa có mục nào.",
+      "add": "Thêm mục",
+      "addPlaceholder": "Thêm một mục…",
+      "addSubmit": "Thêm",
+      "parentTopLevel": "Cấp cao nhất",
+      "parentLabel": "Mục cha",
+      "edit": "Sửa",
+      "save": "Lưu",
+      "cancel": "Hủy",
+      "saving": "Đang lưu…"
     },
     "pool": {
       "title": "Kho giá trị",

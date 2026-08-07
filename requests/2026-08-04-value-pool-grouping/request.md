@@ -99,3 +99,24 @@ how long it will take, and when something they saw before has changed.
   rather than duplicate.
 - Slices ship independently, in order, each through the full
   team-intake → team-qa → team-build pipeline on its own effort branch.
+
+## Corrections
+
+**2026-08-06, by Slice 4's intake (`intake-project-manager`, per `DEC-S4-5`).**
+Two premises above are now known false. Recorded here, append-only — the text
+above is Sara's own and is left intact.
+
+1. **"OPEN-4 (env tune `MAX_PROJECTS_PER_TICK`) is still undecided by Sara"**
+   (the `## Constraints / carry-forwards` bullet above) — **closed**, not
+   pending. `DEC-3` (Slice 2, 2026-08-05) settled `MAX_PROJECTS_PER_TICK`'s
+   default of 3 as a spec; there is to be no second tuning mechanism. See
+   `DEC-3` in Slice 2's `decisions.md`; do not re-argue it.
+2. **"the claims API's atomic inline `new_item` already supports the shape"**
+   (the acceptance-signal bullet above, on group-or-unit claim into a new
+   item/sub-item) — **false since 2026-08-02.** `POST /:id(\d+)/claims`'s
+   `new_item` path inserts the plan item **before** validating
+   `value_source`/`attribution`/`value_ref`, with no
+   `dbModule.db.transaction(...)` anywhere in the handler — a valid `new_item`
+   plus an invalid `value_source` leaves a committed, orphaned plan item. Fixed
+   in Slice 4a as an our-cost bug carve-out; see `DEC-S4-2` in this slice's
+   `decisions.md`.

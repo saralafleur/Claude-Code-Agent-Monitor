@@ -29,9 +29,11 @@ const valueLedger = require("../lib/value-ledger");
 const { enrichPoolAltitudes } = require("../lib/value-summary");
 const { coverageSnapshot } = require("../lib/value-coverage");
 const { runCoverageDrain, isDrainingProject } = require("../lib/value-summary-tick");
-const cwdIdentity = require("../lib/cwd-identity");
 
-const { VALUE_SOURCES, ATTRIBUTION_TIERS } = valueLedger;
+// ATTRIBUTION_TIERS and cwd-identity.js moved with the claims write path into
+// plan-lifecycle.js's claimUnitIntoItem (DEC-S4-2); VALUE_SOURCES is still
+// used below by the pool-filtering route.
+const { VALUE_SOURCES } = valueLedger;
 
 const router = Router();
 
@@ -478,99 +480,17 @@ router.delete("/items/:itemId(\\d+)", (req, res) => {
 // ── Claims (DEC-7 cardinality, DEC-P4 snapshot ceiling) ─────────────────
 
 // POST /api/project-plans/:id/claims - claim a unit into an existing item or
-// an inline {new_item:{...}} created atomically in the same request.
+// an inline {new_item:{...}} created atomically in the same request. Thin
+// delegator: the whole write path (validate → resolve/create item → insert
+// claim, one transaction) lives in plan-lifecycle.js's claimUnitIntoItem —
+// the SOLE writer of value_claims (DEC-S4-2, single-writer-guard.test.js
+// G-2). `broadcast` fires only after the transaction returns, never inside
+// it — a WS message for a rolled-back write would be worse than a late one.
 router.post("/:id(\\d+)/claims", (req, res) => {
-  const planId = Number(req.params.id);
-  const plan = dbModule.stmts.getProjectPlan.get(planId);
-  if (!plan) return res.status(404).json({ error: { code: "NOT_FOUND", message: "no such plan" } });
-  if (plan.status !== "open") {
-    return res.status(409).json({ error: { code: "ALREADY_CLOSED", message: "plan is closed" } });
-  }
-
-  const body = req.body || {};
-  let itemId = body.item_id != null ? Number(body.item_id) : null;
-  if (itemId != null) {
-    const item = dbModule.stmts.getProjectPlanItem.get(itemId);
-    if (!item || item.plan_id !== planId) {
-      return res.status(400).json({
-        error: { code: "INVALID_INPUT", message: "item_id does not belong to this plan" },
-      });
-    }
-  } else if (body.new_item) {
-    const inserted = planLifecycle.insertProjectPlanItem(dbModule, planId, body.new_item);
-    if (planLifecycle.isDomainError(inserted)) return respondDomainError(res, inserted);
-    itemId = inserted.id;
-  } else {
-    return res
-      .status(400)
-      .json({ error: { code: "INVALID_INPUT", message: "item_id or new_item is required" } });
-  }
-
-  const {
-    value_source: valueSource,
-    value_ref: valueRef,
-    source_cwd: sourceCwd,
-    label_snapshot: labelSnapshot,
-    seen_at_snapshot: seenAtSnapshot,
-    stage_snapshot: stageSnapshot,
-    attribution,
-    claimed_by: claimedBy,
-  } = body;
-
-  if (!VALUE_SOURCES.includes(valueSource)) {
-    return res.status(400).json({
-      error: {
-        code: "INVALID_INPUT",
-        message: `value_source must be one of ${VALUE_SOURCES.join(", ")}`,
-      },
-    });
-  }
-  if (!ATTRIBUTION_TIERS.includes(attribution)) {
-    return res.status(400).json({
-      error: {
-        code: "INVALID_INPUT",
-        message: `attribution must be one of ${ATTRIBUTION_TIERS.join(", ")}`,
-      },
-    });
-  }
-  if (!valueRef) {
-    return res
-      .status(400)
-      .json({ error: { code: "INVALID_INPUT", message: "value_ref is required" } });
-  }
-
-  // Canonicalize source_cwd at THIS write seam — the only other seam that
-  // touches a cwd for this feature is pool assembly, both routed through
-  // cwd-identity.js (CWD-IDENTITY-FANOUT).
-  const canonicalCwd = sourceCwd ? cwdIdentity.canonicalizeCwd(sourceCwd) : "";
-
-  let claim;
-  try {
-    const info = dbModule.stmts.insertValueClaim.run(
-      plan.project_id,
-      planId,
-      itemId,
-      valueSource,
-      String(valueRef),
-      canonicalCwd,
-      labelSnapshot ?? null,
-      seenAtSnapshot ?? null,
-      stageSnapshot ?? null,
-      attribution,
-      claimedBy === "llm" ? "llm" : "human"
-    );
-    claim = dbModule.stmts.getValueClaim.get(info.lastInsertRowid);
-  } catch (e) {
-    if (String(e && e.message).includes("UNIQUE")) {
-      return res.status(409).json({
-        error: { code: "DUPLICATE_CLAIM", message: "this unit is already claimed into this item" },
-      });
-    }
-    throw e;
-  }
-
-  broadcast("value_claim_updated", { claim });
-  res.status(201).json({ claim });
+  const result = planLifecycle.claimUnitIntoItem(dbModule, Number(req.params.id), req.body || {});
+  if (planLifecycle.isDomainError(result)) return respondDomainError(res, result);
+  broadcast("value_claim_updated", { claim: result });
+  res.status(201).json({ claim: result });
 });
 
 // DELETE /api/project-plans/claims/:claimId - explicit human unclaim.

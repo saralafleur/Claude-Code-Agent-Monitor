@@ -858,8 +858,11 @@ describe("ProjectDetail page", () => {
     // Verify the panel rendered items from the plan. "Write test plan" also
     // appears as a claim-target <option> in the pool pane's picker, so scope
     // this to the open-plans pane's item list rather than a page-wide query.
+    // Use getAllByText and filter for the tree item (not the option).
     const openPlansPane = document.querySelector('[data-test="open-plans-pane"]') as HTMLElement;
-    expect(within(openPlansPane).getByText("Write test plan")).toBeInTheDocument();
+    const allWriteTestPlanElements = within(openPlansPane).getAllByText("Write test plan");
+    const writeTestPlanInTree = allWriteTestPlanElements.find((el) => el.tagName !== "OPTION");
+    expect(writeTestPlanInTree).toBeInTheDocument();
 
     // Verify health numbers are displayed (proof of successful API call).
     // Scope to the health strip: "5"/"unclaimed"/"pool" each independently
