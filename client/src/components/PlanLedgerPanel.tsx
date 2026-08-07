@@ -32,7 +32,7 @@
  * @author Son Nguyen <hoangson091104@gmail.com>
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Info, X } from "lucide-react";
 import { api } from "../lib/api";
@@ -329,7 +329,13 @@ type ItemNode = ProjectPlanItem & { children: ItemNode[] };
  *  array nested under each top-level item, recursively. Items whose
  *  `parent_item_id` doesn't resolve within this same plan (shouldn't
  *  happen, but a stale/partial fetch is not this component's job to
- *  validate) fall back to top-level so nothing silently disappears. */
+ *  validate) fall back to top-level. **This does NOT hold for a cycle**:
+ *  every item in a cycle has a `parent_item_id` that *does* resolve (to
+ *  another item in the same cycle), so none of them ever reaches this
+ *  fallback or `roots` — a cycle silently removes its members from the
+ *  tree entirely (§9.8 OVERLOADED-ABSENCE). The server-side cycle guard
+ *  (`updateProjectPlanItem`, `DEC-S4-7`) exists specifically so this
+ *  function is never asked to render one. */
 function buildItemTree(items: ProjectPlanItem[]): ItemNode[] {
   const byId = new Map<number, ItemNode>();
   for (const item of items) byId.set(item.id, { ...item, children: [] });
@@ -342,55 +348,255 @@ function buildItemTree(items: ProjectPlanItem[]): ItemNode[] {
   return roots;
 }
 
-function ItemNodeRow({ node, depth }: { node: ItemNode; depth: number }) {
+/** Depth-first flattening of {@link buildItemTree}'s output — the ONE
+ *  hierarchy derivation, projected for consumers that need a flat sequence
+ *  (the claim-target `<select>`, the add-item/edit-in-place parent pickers).
+ *  Never re-walks `parent_item_id`: it takes `ItemNode[]` (already-nested
+ *  output), so a second nesting rule is structurally impossible here (§9.1
+ *  DERIVED-DUAL-VIEW). */
+function flattenItemTree(nodes: ItemNode[], depth = 0): Array<{ node: ItemNode; depth: number }> {
+  const out: Array<{ node: ItemNode; depth: number }> = [];
+  for (const node of nodes) {
+    out.push({ node, depth });
+    out.push(...flattenItemTree(node.children, depth + 1));
+  }
+  return out;
+}
+
+/** This node's own id plus every descendant's id, walked via `ItemNode`'s
+ *  already-materialized `children` (never re-derived from `parent_item_id`)
+ *  — the set an edit-in-place parent picker must exclude, per Override 3 /
+ *  §9.8 OVERLOADED-ABSENCE: offering a descendant as a valid new parent is
+ *  a directly-reachable cycle. */
+function selfAndDescendantIds(node: ItemNode): Set<number> {
+  const ids = new Set<number>([node.id]);
+  for (const child of node.children) {
+    for (const id of selfAndDescendantIds(child)) ids.add(id);
+  }
+  return ids;
+}
+
+/** The sentinel `<select>` value meaning "no parent / promote to top-level"
+ *  — a literal string, never empty-string, so an explicit choice of it is
+ *  distinguishable at the DOM layer from "nothing selected yet". */
+const TOP_LEVEL_VALUE = "null";
+
+/** One item row, open plans only gaining edit-in-place (Slice 4a, DEC-S4-3/
+ *  DEC-S4-7). `flatItems` is this SAME plan's own `flattenItemTree(buildItemTree(...))`
+ *  output, computed once by {@link ItemTree} and threaded down — never
+ *  re-derived per row. The parent picker excludes this node and all of its
+ *  descendants (`selfAndDescendantIds`, walking `ItemNode.children`, never
+ *  re-deriving from `parent_item_id`) — the UI half of the cycle guard
+ *  (Override 3); the server enforces the same rule independently. */
+function ItemNodeRow({
+  node,
+  depth,
+  closed,
+  flatItems,
+  onSave,
+  t,
+}: {
+  node: ItemNode;
+  depth: number;
+  closed: boolean;
+  flatItems: Array<{ node: ItemNode; depth: number }>;
+  onSave: (itemId: number, patch: { text?: string; parent_item_id?: number | null }) => void;
+  t: TFunc;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(node.text);
+  const originalParentValue =
+    node.parent_item_id != null ? String(node.parent_item_id) : TOP_LEVEL_VALUE;
+  const [editParent, setEditParent] = useState(originalParentValue);
+
+  const startEdit = () => {
+    setEditText(node.text);
+    setEditParent(originalParentValue);
+    setEditing(true);
+  };
+  const cancelEdit = () => setEditing(false);
+  const saveEdit = () => {
+    const patch: { text?: string; parent_item_id?: number | null } = {};
+    const trimmed = editText.trim();
+    if (trimmed && trimmed !== node.text) patch.text = trimmed;
+    if (editParent !== originalParentValue) {
+      patch.parent_item_id = editParent === TOP_LEVEL_VALUE ? null : Number(editParent);
+    }
+    onSave(node.id, patch);
+    setEditing(false);
+  };
+
+  const excludeIds = selfAndDescendantIds(node);
+  const parentOptions = flatItems.filter(({ node: n }) => !excludeIds.has(n.id));
+
   return (
-    <div style={{ paddingLeft: depth * 16 }} className="text-xs text-gray-300 py-0.5">
-      <span>{node.text}</span>
-      {node.claims.length > 0 && (
-        <span className="ml-2 text-[10px] text-emerald-400">
-          {node.claims.map((c) => c.label_snapshot || c.value_ref).join(", ")}
-        </span>
+    <div
+      data-test="item-row"
+      data-testid={`item-row-${node.id}`}
+      data-depth={depth}
+      style={{ paddingLeft: depth * 16 }}
+      className="text-xs text-gray-300 py-0.5"
+    >
+      {editing ? (
+        <div className="flex items-center gap-1.5 flex-wrap py-0.5">
+          <input
+            type="text"
+            data-test="item-edit-text"
+            data-testid="item-edit-text"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            className="text-[11px] bg-surface-2 border border-border rounded px-1.5 py-0.5 text-gray-300"
+          />
+          <select
+            aria-label={t("planLedger.items.parentLabel")}
+            data-test="item-parent-select"
+            data-testid="item-parent-select"
+            value={editParent}
+            onChange={(e) => setEditParent(e.target.value)}
+            className="text-[11px] bg-surface-2 border border-border rounded px-1 py-0.5 text-gray-300"
+          >
+            <option value={TOP_LEVEL_VALUE}>{t("planLedger.items.parentTopLevel")}</option>
+            {parentOptions.map(({ node: n, depth: d }) => (
+              <option key={n.id} value={n.id}>
+                {d > 0 ? "  ".repeat(d) + "└ " : ""}
+                {n.text}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            data-test="item-edit-save"
+            data-testid="item-edit-save"
+            onClick={saveEdit}
+            className="text-[11px] px-2 py-0.5 rounded-md border border-accent/40 text-accent hover:bg-accent/10"
+          >
+            {t("planLedger.items.save")}
+          </button>
+          <button
+            type="button"
+            data-test="item-edit-cancel"
+            data-testid="item-edit-cancel"
+            onClick={cancelEdit}
+            className="text-[11px] px-2 py-0.5 rounded-md border border-border text-gray-400"
+          >
+            {t("planLedger.items.cancel")}
+          </button>
+        </div>
+      ) : (
+        <>
+          <span>{node.text}</span>
+          {node.claims.length > 0 && (
+            <span className="ml-2 text-[10px] text-emerald-400">
+              {node.claims.map((c) => c.label_snapshot || c.value_ref).join(", ")}
+            </span>
+          )}
+          {!closed && (
+            <button
+              type="button"
+              data-test="item-edit-button"
+              data-testid="item-edit-button"
+              onClick={startEdit}
+              aria-label={t("planLedger.items.edit")}
+              title={t("planLedger.items.edit")}
+              className="ml-2 text-[10px] text-gray-500 hover:text-accent"
+            >
+              {t("planLedger.items.edit")}
+            </button>
+          )}
+        </>
       )}
       {node.children.map((child) => (
-        <ItemNodeRow key={child.id} node={child} depth={depth + 1} />
+        <ItemNodeRow
+          key={child.id}
+          node={child}
+          depth={depth + 1}
+          closed={closed}
+          flatItems={flatItems}
+          onSave={onSave}
+          t={t}
+        />
       ))}
     </div>
   );
 }
 
-function ItemTree({ items, t }: { items: ProjectPlanItem[]; t: TFunc }) {
+function ItemTree({
+  items,
+  closed,
+  onSaveItem,
+  t,
+}: {
+  items: ProjectPlanItem[];
+  closed: boolean;
+  onSaveItem: (itemId: number, patch: { text?: string; parent_item_id?: number | null }) => void;
+  t: TFunc;
+}) {
   const tree = buildItemTree(items);
   if (tree.length === 0) {
     return <p className="text-xs text-gray-500 italic">{t("planLedger.items.empty")}</p>;
   }
+  // ONE derivation, computed once per render and threaded to every row —
+  // never re-walked per node (§9.1 DERIVED-DUAL-VIEW).
+  const flatItems = flattenItemTree(tree);
   return (
     <div>
       {tree.map((node) => (
-        <ItemNodeRow key={node.id} node={node} depth={0} />
+        <ItemNodeRow
+          key={node.id}
+          node={node}
+          depth={0}
+          closed={closed}
+          flatItems={flatItems}
+          onSave={onSaveItem}
+          t={t}
+        />
       ))}
     </div>
   );
 }
 
-/** One plan's card: title, (open-only) close control, and its item tree.
- *  Closed plans render exactly the same item tree with zero extra
- *  affordances — the "no edit/claim/unclaim on a closed plan" rule is
- *  satisfied by simply never wiring those controls up for any item here,
- *  not by hiding them conditionally per plan. */
+/** One plan's card: title, (open-only) close control, its item tree, and
+ *  (open-only) an add-item form. Closed plans render exactly the same item
+ *  tree with zero extra affordances — the "no add/edit/claim/unclaim on a
+ *  closed plan" rule is satisfied by simply never wiring those controls up
+ *  for any item here, not by hiding them conditionally per plan. */
 function PlanSection({
   entry,
   closed,
   busy,
   onClose,
+  onAddItem,
+  onUpdateItem,
   t,
 }: {
   entry: ProjectPlanWithItems;
   closed: boolean;
   busy?: boolean;
   onClose?: (note: string) => void;
+  onAddItem?: (planId: number, payload: { text: string; parent_item_id?: number }) => void;
+  onUpdateItem?: (itemId: number, patch: { text?: string; parent_item_id?: number | null }) => void;
   t: TFunc;
 }) {
   const [note, setNote] = useState("");
+  const [newItemText, setNewItemText] = useState("");
+  const [newItemParent, setNewItemParent] = useState(TOP_LEVEL_VALUE);
+
+  // Sourced from THIS plan's own items only — the "top-level + this plan's
+  // items" scope is what makes cross-plan parenting structurally unreachable
+  // from the add-item form (DEC-S4-3).
+  const flatItems = flattenItemTree(buildItemTree(entry.items));
+
+  const handleAddSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = newItemText.trim();
+    if (!trimmed || !onAddItem) return;
+    const payload: { text: string; parent_item_id?: number } = { text: trimmed };
+    if (newItemParent !== TOP_LEVEL_VALUE) payload.parent_item_id = Number(newItemParent);
+    onAddItem(entry.plan.id, payload);
+    setNewItemText("");
+    setNewItemParent(TOP_LEVEL_VALUE);
+  };
+
   return (
     <div
       data-test="plan-section"
@@ -421,7 +627,51 @@ function PlanSection({
       {closed && entry.plan.closure_note && (
         <p className="text-[11px] text-gray-500 italic">{entry.plan.closure_note}</p>
       )}
-      <ItemTree items={entry.items} t={t} />
+      <ItemTree
+        items={entry.items}
+        closed={closed}
+        onSaveItem={(itemId, patch) => onUpdateItem && onUpdateItem(itemId, patch)}
+        t={t}
+      />
+      {!closed && onAddItem && (
+        <form
+          data-test="add-item-form"
+          data-testid="add-item-form"
+          aria-label={t("planLedger.items.add")}
+          onSubmit={handleAddSubmit}
+          className="flex items-center gap-1.5 flex-wrap pt-1"
+        >
+          <input
+            type="text"
+            value={newItemText}
+            onChange={(e) => setNewItemText(e.target.value)}
+            placeholder={t("planLedger.items.addPlaceholder")}
+            className="text-[11px] bg-surface-2 border border-border rounded px-1.5 py-0.5 text-gray-300 flex-1 min-w-[6rem]"
+          />
+          <select
+            aria-label={t("planLedger.items.parentLabel")}
+            value={newItemParent}
+            onChange={(e) => setNewItemParent(e.target.value)}
+            className="text-[11px] bg-surface-2 border border-border rounded px-1 py-0.5 text-gray-300"
+          >
+            <option value={TOP_LEVEL_VALUE}>{t("planLedger.items.parentTopLevel")}</option>
+            {flatItems.map(({ node: n, depth: d }) => (
+              <option key={n.id} value={n.id}>
+                {d > 0 ? "  ".repeat(d) + "└ " : ""}
+                {n.text}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            data-test="add-item-submit"
+            data-testid="add-item-submit"
+            className="text-[11px] px-2 py-1 rounded-md border border-accent/40 text-accent hover:bg-accent/10"
+          >
+            {t("planLedger.items.addSubmit")}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -544,13 +794,23 @@ function ValueUnitRow({
 }: {
   unit: ValueUnit;
   altitude: Altitude;
-  openItems: Array<{ id: number; text: string }>;
+  openItems: Array<{ id: number; text: string; depth: number }>;
   busy: boolean;
   onClaim: (unit: ValueUnit, itemId: number) => void;
   onAcknowledge: (unit: ValueUnit, altitude: ResolvedAltitude) => void;
   t: TFunc;
 }) {
   const [targetItemId, setTargetItemId] = useState<number | null>(openItems[0]?.id ?? null);
+  // Render-time fallback, no extra state and no effect: `openItems` can now
+  // change while this row stays mounted (an item is added, re-parented, or
+  // deleted out from under the current selection) — `targetItemId` is
+  // initial-value-only `useState`, so without this the claim control could
+  // stay permanently pointed at a stale id (or, for a plan that started with
+  // zero items, permanently disabled after the first item is added).
+  const effectiveTargetId =
+    targetItemId != null && openItems.some((i) => i.id === targetItemId)
+      ? targetItemId
+      : (openItems[0]?.id ?? null);
   // A resolved entry only (never "queued"/"unavailable"/undefined) can carry
   // a freshness marker — `altitude[field]` above already narrows this same
   // way for AltitudeText's own object branch.
@@ -638,20 +898,21 @@ function ValueUnitRow({
         <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-border pl-6">
           <select
             aria-label={t("planLedger.pool.claimTarget")}
-            value={targetItemId ?? ""}
+            value={effectiveTargetId ?? ""}
             onChange={(e) => setTargetItemId(Number(e.target.value))}
             className="text-[11px] bg-surface-2 border border-border rounded px-1 py-0.5 text-gray-300 max-w-[8rem]"
           >
             {openItems.map((item) => (
               <option key={item.id} value={item.id}>
+                {item.depth > 0 ? "  ".repeat(item.depth) + "└ " : ""}
                 {item.text}
               </option>
             ))}
           </select>
           <button
             type="button"
-            disabled={busy || targetItemId == null}
-            onClick={() => targetItemId != null && onClaim(unit, targetItemId)}
+            disabled={busy || effectiveTargetId == null}
+            onClick={() => effectiveTargetId != null && onClaim(unit, effectiveTargetId)}
             className="text-[11px] px-2 py-1 rounded-md border border-accent/40 text-accent hover:bg-accent/10 disabled:opacity-60"
           >
             {busy ? t("planLedger.pool.claiming") : t("planLedger.pool.claim")}
@@ -1179,9 +1440,47 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
     [projectId, load]
   );
 
+  // Slice 4a item CRUD (DEC-S4-3/DEC-S4-7): both route through `load()`
+  // afterward, same pattern as `handleClaim`/`handleClose` above, so every
+  // pane stays one consistent snapshot rather than an optimistic local patch.
+  const handleAddItem = useCallback(
+    async (planId: number, payload: { text: string; parent_item_id?: number }) => {
+      try {
+        await api.projectPlans.addItem(planId, payload);
+        await load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [load]
+  );
+
+  const handleUpdateItem = useCallback(
+    async (itemId: number, patch: { text?: string; parent_item_id?: number | null }) => {
+      try {
+        await api.projectPlans.updateItem(itemId, patch);
+        await load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [load]
+  );
+
   const openPlans = plans.filter((p) => p.plan.status === "open");
   const closedPlans = plans.filter((p) => p.plan.status === "closed");
-  const openItems = openPlans.flatMap((p) => p.items.map((it) => ({ id: it.id, text: it.text })));
+  // Rebuilt from the tree (§9.1 DERIVED-DUAL-VIEW): same ids/membership as
+  // the flat `p.items.map(...)` this replaces, now carrying `depth` and
+  // ordered depth-first via `flattenItemTree(buildItemTree(...))` — the ONE
+  // hierarchy derivation, never a second hand-rolled flattening.
+  const openItems = openPlans.flatMap((p) =>
+    flattenItemTree(buildItemTree(p.items)).map(({ node, depth }) => ({
+      id: node.id,
+      text: node.text,
+      depth,
+      planId: p.plan.id,
+    }))
+  );
 
   return (
     <section className="card" data-test="plan-ledger-panel">
@@ -1230,6 +1529,8 @@ export function PlanLedgerPanel({ projectId }: { projectId: string }) {
                 closed={false}
                 busy={closingPlanId === entry.plan.id}
                 onClose={(note) => handleClose(entry.plan.id, note)}
+                onAddItem={handleAddItem}
+                onUpdateItem={handleUpdateItem}
                 t={t}
               />
             ))

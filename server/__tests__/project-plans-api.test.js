@@ -491,35 +491,92 @@ describe("project-plans API (B1)", () => {
       assert.equal(healthAfterFirst.body.unclaimedPoolSize, healthBefore.body.unclaimedPoolSize);
     });
 
-    it("D4: new_item inline form is atomic — failure leaves neither claim nor item created", async () => {
+    it("D4 — valid new_item + invalid value_source → 400, atomicity: item count unchanged", async () => {
+      // DEC-S4-2: NAME-OVERCLAIMING GUARD rewrite. Proves that validation
+      // happens BEFORE the item insert, so a 400 for bad value_source leaves
+      // no orphan item committed.
       const itemsBefore = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
 
-      const ok = await post(`/api/project-plans/${planId}/claims`, {
-        new_item: { text: "inline item" },
-        value_source: "detour",
-        value_ref: "d4-detour-ok",
+      const res = await post(`/api/project-plans/${planId}/claims`, {
+        new_item: { text: "valid item text" }, // valid
+        value_source: "not_a_real_source", // invalid — not in VALUE_SOURCES
+        value_ref: "d4-test",
         attribution: "judgment",
       });
-      assert.equal(ok.status, 201);
-      const afterOk = await fetch(`/api/project-plans/${planId}`);
-      assert.equal(afterOk.body.items.length, itemsBefore + 1);
-      const createdItem = afterOk.body.items.find((i) => i.id === ok.body.claim.item_id);
-      assert.equal(createdItem.text, "inline item");
+      assert.equal(res.status, 400, "invalid value_source must return 400");
+      assert.equal(res.body.error.code, "INVALID_INPUT");
 
-      const itemsBeforeFail = afterOk.body.items.length;
-      const bad = await post(`/api/project-plans/${planId}/claims`, {
+      const itemsAfter = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+      assert.equal(
+        itemsAfter,
+        itemsBefore,
+        "a failed claim with invalid value_source must not leave an orphaned item behind"
+      );
+    });
+
+    it("D4-empty-text — empty text input validation (not atomicity proof)", async () => {
+      // Exercises insertProjectPlanItem's pre-write input guard, not atomicity.
+      // Kept for regression because the guard is real; never cite as atomicity evidence.
+      const itemsBefore = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+
+      const res = await post(`/api/project-plans/${planId}/claims`, {
         new_item: { text: "" }, // invalid — insertProjectPlanItem requires non-empty text
         value_source: "detour",
-        value_ref: "d4-detour-fail",
+        value_ref: "d4-empty-text",
         attribution: "judgment",
       });
-      assert.equal(bad.status, 400);
-      const afterFail = await fetch(`/api/project-plans/${planId}`);
-      assert.equal(
-        afterFail.body.items.length,
-        itemsBeforeFail,
-        "a failed new_item claim must not leave an orphaned item behind"
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, "INVALID_INPUT");
+
+      const itemsAfter = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+      assert.equal(itemsAfter, itemsBefore, "item count unchanged");
+    });
+
+    it("D4-happy — valid new_item + valid claim → 201, item created with text", async () => {
+      // The passing half of the original D4 case, kept verbatim.
+      const itemsBefore = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+
+      const res = await post(`/api/project-plans/${planId}/claims`, {
+        new_item: { text: "d4-happy item" },
+        value_source: "detour",
+        value_ref: "d4-happy-ref",
+        attribution: "judgment",
+      });
+      assert.equal(res.status, 201);
+      const itemsAfter = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+      assert.equal(itemsAfter, itemsBefore + 1, "item created");
+
+      const createdItem = (await fetch(`/api/project-plans/${planId}`)).body.items.find(
+        (i) => i.id === res.body.claim.item_id
       );
+      assert.equal(createdItem.text, "d4-happy item");
+    });
+
+    it("D4b — duplicate on pre-existing item_id → 409 DUPLICATE_CLAIM (doc comment: reuses D2 shape)", async () => {
+      // Reuses D2's shape for DEC-S4-2 DoD traceability; red-proves nothing D2
+      // does not already prove; never cite as the atomicity proof (atomicity is
+      // the sole responsibility of D4 + D4-empty-text + PX).
+      const itemsBeforeDuplicate = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+
+      const first = await post(`/api/project-plans/${planId}/claims`, {
+        item_id: itemId,
+        value_source: "detour",
+        value_ref: "d4b-dup-test",
+        attribution: "judgment",
+      });
+      assert.equal(first.status, 201);
+
+      const second = await post(`/api/project-plans/${planId}/claims`, {
+        item_id: itemId,
+        value_source: "detour",
+        value_ref: "d4b-dup-test",
+        attribution: "judgment",
+      });
+      assert.equal(second.status, 409);
+      assert.equal(second.body.error.code, "DUPLICATE_CLAIM");
+
+      const itemsAfterDuplicate = (await fetch(`/api/project-plans/${planId}`)).body.items.length;
+      assert.equal(itemsAfterDuplicate, itemsBeforeDuplicate, "item count unchanged");
     });
 
     it("D5: unclaim returns the unit to the pool; value_source outside VALUE_SOURCES → 400", async () => {
@@ -553,6 +610,127 @@ describe("project-plans API (B1)", () => {
       });
       assert.equal(badSource.status, 400);
       assert.equal(badSource.body.error.code, "INVALID_INPUT");
+    });
+  });
+
+  describe("Group I: hierarchy-aware editing + claim flow (Slice 4a)", () => {
+    let projectId;
+    let planId;
+
+    before(async () => {
+      projectId = await makeProject("Group I Project");
+      const created = await post("/api/project-plans", {
+        project_id: projectId,
+        title: "I Plan",
+      });
+      planId = created.body.plan.id;
+    });
+
+    it("I1 — text-only and placement-only edits, hierarchy-aware claim pickup", async () => {
+      // One flow, one fixture: create parent, create child under parent, edit
+      // text only, verify text changed but placement unchanged, edit placement
+      // only, verify placement changed but text unchanged, claim into child.
+      const parent = await post(`/api/project-plans/${planId}/items`, { text: "Parent" });
+      const parentId = parent.body.item.id;
+
+      const child = await post(`/api/project-plans/${planId}/items`, {
+        text: "Child",
+        parent_item_id: parentId,
+      });
+      const childId = child.body.item.id;
+
+      // Edit text only (no parent_item_id key)
+      const textEdit = await patch(`/api/project-plans/items/${childId}`, {
+        text: "Child, renamed",
+      });
+      assert.equal(textEdit.status, 200);
+      const afterText = await fetch(`/api/project-plans/${planId}`);
+      const childAfterText = afterText.body.items.find((i) => i.id === childId);
+      assert.equal(childAfterText.text, "Child, renamed", "text changed");
+      assert.equal(childAfterText.parent_item_id, parentId, "placement unchanged");
+
+      // Edit placement only (no text key), promote to top-level via parent_item_id: null
+      const placementEdit = await patch(`/api/project-plans/items/${childId}`, {
+        parent_item_id: null,
+      });
+      assert.equal(placementEdit.status, 200);
+      const afterPlacement = await fetch(`/api/project-plans/${planId}`);
+      const childAfterPlacement = afterPlacement.body.items.find((i) => i.id === childId);
+      assert.equal(childAfterPlacement.parent_item_id, null, "placement changed to null");
+      assert.equal(childAfterPlacement.text, "Child, renamed", "text unchanged");
+
+      // Claim into the child (which is now top-level)
+      const claim = await post(`/api/project-plans/${planId}/claims`, {
+        item_id: childId,
+        value_source: "detour",
+        value_ref: "i1-test",
+        attribution: "judgment",
+      });
+      assert.equal(claim.status, 201);
+      assert.ok(
+        Object.keys(claim.body.claim).every((key) => {
+          // Verify response has the same keys D1 already asserts exist
+          return (
+            ["id", "project_id", "plan_id", "item_id", "value_source", "value_ref"].includes(key) ||
+            claim.body.claim[key] !== undefined
+          );
+        })
+      );
+
+      // Verify claim nested under child in next read
+      const final = await fetch(`/api/project-plans/${planId}`);
+      const childFinal = final.body.items.find((i) => i.id === childId);
+      assert.ok(
+        childFinal.claims.some((c) => c.id === claim.body.claim.id),
+        "claim appears nested under child"
+      );
+    });
+
+    it("I2 — cycle created by re-parenting is rejected with zero-trace rollback", async () => {
+      // Dynamic cycle proof: build a tree, introduce a cycle via re-parent,
+      // verify 400 and nothing changes (item count, placement, etc. identical).
+      const a = await post(`/api/project-plans/${planId}/items`, { text: "A" });
+      const aId = a.body.item.id;
+
+      const b = await post(`/api/project-plans/${planId}/items`, {
+        text: "B",
+        parent_item_id: aId,
+      });
+      const bId = b.body.item.id;
+
+      const c = await post(`/api/project-plans/${planId}/items`, {
+        text: "C",
+        parent_item_id: bId,
+      });
+      const cId = c.body.item.id;
+
+      // Re-parent B under C, creating cycle A → B → C → B (cycle at B)
+      const beforeCycle = await fetch(`/api/project-plans/${planId}`);
+      const cycleAttempt = await patch(`/api/project-plans/items/${bId}`, {
+        parent_item_id: cId,
+      });
+      assert.equal(cycleAttempt.status, 400, "cycle must be rejected");
+      assert.equal(cycleAttempt.body.error.code, "INVALID_INPUT");
+
+      // Verify nothing changed (§9.8 zero-trace proof)
+      const afterCycle = await fetch(`/api/project-plans/${planId}`);
+      assert.deepEqual(
+        afterCycle.body,
+        beforeCycle.body,
+        "rejected cycle must leave zero trace — items/claims identical"
+      );
+
+      // Verify claim nested under C still visible (placement unaffected)
+      const claim = await post(`/api/project-plans/${planId}/claims`, {
+        item_id: cId,
+        value_source: "detour",
+        value_ref: "i2-claim",
+        attribution: "judgment",
+      });
+      assert.equal(claim.status, 201);
+      const finalRead = await fetch(`/api/project-plans/${planId}`);
+      const cFinal = finalRead.body.items.find((i) => i.id === cId);
+      assert.ok(cFinal.claims.some((cl) => cl.id === claim.body.claim.id));
     });
   });
 

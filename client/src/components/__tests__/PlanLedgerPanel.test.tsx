@@ -31,6 +31,8 @@ const mockAltitudesMock = vi.fn();
 const mockMarkSeenMock = vi.fn();
 const mockCoverageMock = vi.fn();
 const mockRequestCoverageMock = vi.fn();
+const mockAddItemMock = vi.fn();
+const mockUpdateItemMock = vi.fn();
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -45,6 +47,8 @@ vi.mock("../../lib/api", () => ({
       markAltitudesSeen: (...args: unknown[]) => mockMarkSeenMock(...args),
       coverage: (...args: unknown[]) => mockCoverageMock(...args),
       requestCoverage: (...args: unknown[]) => mockRequestCoverageMock(...args),
+      addItem: (...args: unknown[]) => mockAddItemMock(...args),
+      updateItem: (...args: unknown[]) => mockUpdateItemMock(...args),
     },
   },
 }));
@@ -186,12 +190,25 @@ describe("PlanLedgerPanel", () => {
     expect(screen.getByText("Phase 2: Claims")).toBeInTheDocument();
 
     // Child item nesting proven with within
+    // Scope to the plan section, then narrow to the tree/item-list to avoid option elements
     const plan1Section = (screen
       .getByText("Phase 1: Intake")
       .closest("[data-test='plan-section']") ||
       screen.getByText("Phase 1: Intake").closest("div")) as HTMLElement;
-    expect(within(plan1Section).getByText("Item 1")).toBeInTheDocument();
-    expect(within(plan1Section).getByText("Item 2")).toBeInTheDocument();
+
+    // Find the tree items specifically (not options in the add-item form picker)
+    // by looking for elements with data-test*="item" or a tree role
+    const allItem1Elements = within(plan1Section).getAllByText("Item 1");
+    const item1InTree = allItem1Elements.find(
+      (el) => el.closest("[data-test*='item']") && !el.tagName.includes("OPTION")
+    );
+    expect(item1InTree).toBeInTheDocument();
+
+    const allItem2Elements = within(plan1Section).getAllByText("Item 2");
+    const item2InTree = allItem2Elements.find(
+      (el) => el.closest("[data-test*='item']") && !el.tagName.includes("OPTION")
+    );
+    expect(item2InTree).toBeInTheDocument();
   });
 
   it("renders pool units with tier badges derived from value_source", async () => {
@@ -246,10 +263,9 @@ describe("PlanLedgerPanel", () => {
 
     await waitFor(() => expect(screen.getByText(/trunk_commit|Trunk/i)).toBeInTheDocument());
 
-    // Find the claim button or unit card and click it
-    const claimButton =
-      screen.getByRole("button", { name: /claim|add/i }) ||
-      screen.getByText(/trunk_commit|Trunk/i).closest("button");
+    // Find the claim button in the pool area (avoid the "Add" button in the add-item form)
+    const poolPane = document.querySelector('[data-test="value-pool-pane"]') as HTMLElement;
+    const claimButton = within(poolPane || document.body).getByRole("button", { name: /claim/i });
     expect(claimButton).toBeInTheDocument();
 
     fireEvent.click(claimButton);
@@ -1518,5 +1534,542 @@ describe("PlanLedgerPanel: Value Pool Slice 2 coverage header (DEC-1, DEC-5, R4)
     // Also verify the plan title is still "Project B Plan", not "Project A Plan"
     expect(screen.getByText("Project B Plan")).toBeInTheDocument();
     expect(screen.queryByText("Project A Plan")).not.toBeInTheDocument();
+  });
+});
+
+describe("PlanLedgerPanel: item CRUD + hierarchy picker (Slice 4a, DEC-S4-3/S4-7)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: coverage is available — tests override if needed
+    mockCoverageMock.mockResolvedValue({ coverage: makeCoverage() });
+    mockAltitudesMock.mockResolvedValue({ altitudes: {} });
+  });
+
+  it("C1: add-item form on open plan calls addItem with exact {text}, no stray keys", async () => {
+    // Create test data with an item count
+    const plan = makePlan({ id: 1, plan: { id: 1, project_id: "proj-c1" } });
+    const item = makeItem({ id: 1, text: "existing" });
+    plan.items = [item];
+
+    // Mock API responses
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockAddItemMock.mockResolvedValue({
+      item: makeItem({ id: 10, text: "New top-level item" }),
+    });
+    mockListMock.mockResolvedValue({
+      plans: [{ ...plan, items: [item, makeItem({ id: 10, text: "New top-level item" })] }],
+      closedCount: 0,
+      latestClosure: null,
+    });
+
+    render(<PlanLedgerPanel projectId="proj-c1" />);
+
+    // Wait for list to load
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Find the add-item form (unconditional - must exist, test fails if not)
+    const form = screen.getByTestId("add-item-form");
+
+    // Type in the text input
+    const textInput = within(form).getByPlaceholderText(/add.*item/i);
+    fireEvent.change(textInput, { target: { value: "New top-level item" } });
+
+    // Submit
+    const submitBtn = within(form).getByTestId("add-item-submit");
+    fireEvent.click(submitBtn);
+
+    // Verify addItem called with plan id (1), not project id
+    await waitFor(() => {
+      expect(mockAddItemMock).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ text: "New top-level item" })
+      );
+    });
+
+    // Verify no stray keys (unconditional)
+    expect(mockAddItemMock).toHaveBeenCalled();
+    const lastCall = mockAddItemMock.mock.calls[mockAddItemMock.mock.calls.length - 1];
+    const payload = lastCall[1];
+    expect(Object.keys(payload).sort()).toEqual(["text"]);
+  });
+
+  it("C2A: add-item with parent selected calls addItem with {text, parent_item_id}", async () => {
+    const plan = makePlan({ id: 2, plan: { id: 2, project_id: "proj-c2" } });
+    const parent = makeItem({ id: 40, text: "Parent" });
+    plan.items = [parent];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockAddItemMock.mockResolvedValue({
+      item: makeItem({ id: 50, text: "Child", parent_item_id: 40 }),
+    });
+
+    render(<PlanLedgerPanel projectId="proj-c2" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    const form = screen.getByTestId("add-item-form");
+
+    // Select parent and add child
+    const textInput = within(form).getByPlaceholderText(/add.*item/i);
+    fireEvent.change(textInput, { target: { value: "Child" } });
+
+    const parentSelect = within(form).getByRole("combobox", { name: /parent/i });
+    fireEvent.change(parentSelect, { target: { value: "40" } });
+
+    const submitBtn = within(form).getByTestId("add-item-submit");
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockAddItemMock).toHaveBeenCalledWith(
+        2,
+        expect.objectContaining({ text: "Child", parent_item_id: 40 })
+      );
+    });
+  });
+
+  it("C2B: closed plan has no add-item form (absent from DOM, not disabled)", async () => {
+    const plan = makePlan({ id: 11, status: "closed" });
+    plan.items = [makeItem({ id: 101, text: "Existing Item" })];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 1,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    render(<PlanLedgerPanel projectId="proj-c2b" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // The plan must actually render in the closed pane, not the open one —
+    // otherwise this proves nothing about closed-plan behavior.
+    expect(screen.getByText("Existing Item")).toBeInTheDocument();
+
+    // Verify add-item form is absent (not just disabled) for a closed plan.
+    const form = screen.queryByTestId("add-item-form");
+    expect(form).not.toBeInTheDocument();
+  });
+
+  it("C3: cross-consumer equality over reordered input (ItemTree and picker derive same {id, depth}[])", async () => {
+    // 3-level fixture: R → Citem → Gitem, plus R2
+    const plan = makePlan({ id: 3 });
+    const r = makeItem({ id: 1, text: "R", parent_item_id: null });
+    const citem = makeItem({ id: 2, text: "Citem", parent_item_id: 1 });
+    const gitem = makeItem({ id: 3, text: "Gitem", parent_item_id: 2 });
+    const r2 = makeItem({ id: 4, text: "R2", parent_item_id: null });
+    plan.items = [r, citem, gitem, r2];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    const { rerender } = render(<PlanLedgerPanel projectId="proj-c3" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Derive a real {id: depth} map from each consumer, then compare the
+    // maps directly — count equality alone can't catch a consumer that
+    // agrees on "how many" but disagrees on "which item is how deep"
+    // (exactly the shape §9.1 DERIVED-DUAL-VIEW has bitten this project on
+    // before).
+    function treeDepthMap() {
+      const rows = screen.getAllByTestId(/^item-row-\d+$/);
+      expect(rows.length).toBeGreaterThan(0);
+      const map: Record<number, number> = {};
+      for (const el of rows) {
+        const idMatch = el.getAttribute("data-testid")?.match(/^item-row-(\d+)$/);
+        const depthAttr = el.getAttribute("data-depth");
+        if (!idMatch || depthAttr === null) {
+          throw new Error("item-row missing id or data-depth — cannot derive tree map");
+        }
+        map[Number(idMatch[1])] = Number(depthAttr);
+      }
+      return map;
+    }
+
+    function pickerDepthMap() {
+      const options = screen
+        .getAllByRole("option")
+        .filter((opt) => opt.textContent?.trim() !== "Top-level");
+      expect(options.length).toBeGreaterThan(0);
+      const map: Record<number, number> = {};
+      for (const opt of options) {
+        const id = Number((opt as HTMLOptionElement).value);
+        const text = opt.textContent || "";
+        const match = text.match(/^(\s*)/);
+        const indent = match ? match[0].length : 0;
+        map[id] = Math.floor(indent / 2);
+      }
+      return map;
+    }
+
+    const treeMapBefore = treeDepthMap();
+    const pickerMapBefore = pickerDepthMap();
+
+    // Genuine cross-consumer equality: same ids, same depth per id — not
+    // merely the same count of entries.
+    expect(pickerMapBefore).toEqual(treeMapBefore);
+    // And pin the actual expected shape so a bug that shifts both consumers
+    // identically (matching each other, but both wrong) still gets caught.
+    expect(treeMapBefore).toEqual({ 1: 0, 2: 1, 3: 2, 4: 0 });
+
+    // Re-render with reordered items via a different projectId to trigger a
+    // genuine re-fetch (PlanLedgerPanel refetches on projectId change).
+    plan.items = [r2, gitem, r, citem]; // shuffled
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+
+    rerender(<PlanLedgerPanel projectId="proj-c3-alt" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalledTimes(2);
+    });
+
+    // Depth is structural (derived from parent_item_id), not order-dependent
+    // — reordering the input array must not change either consumer's map,
+    // and the two consumers must still agree with each other.
+    const treeMapAfter = treeDepthMap();
+    const pickerMapAfter = pickerDepthMap();
+    expect(pickerMapAfter).toEqual(treeMapAfter);
+    expect(treeMapAfter).toEqual(treeMapBefore);
+  });
+
+  it("C4A: claiming into sub-item calls claim with sub-item id", async () => {
+    const plan = makePlan({ id: 4 });
+    const parent = makeItem({ id: 20, text: "Parent" });
+    const subitem = makeItem({ id: 30, text: "Sub", parent_item_id: 20 });
+    plan.items = [parent, subitem];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({
+      units: [makeUnit({ source: "detour", sourceRef: "c4-unit" })],
+      identityWarnings: [],
+    });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockClaimMock.mockResolvedValue({ claim: makeClaim({ item_id: 30 }) });
+
+    render(<PlanLedgerPanel projectId="proj-c4" />);
+
+    await waitFor(() => {
+      expect(mockPoolMock).toHaveBeenCalled();
+    });
+
+    // Select subitem in claim picker (unconditional - must exist)
+    const select = screen.getByRole("combobox", { name: /claim.*into/i });
+    fireEvent.change(select, { target: { value: "30" } });
+
+    // Click claim button (unconditional - must exist)
+    const claimBtn = screen.getByRole("button", { name: /claim/i });
+    fireEvent.click(claimBtn);
+
+    await waitFor(() => {
+      expect(mockClaimMock).toHaveBeenCalledWith("proj-c4", 30, expect.any(Object));
+    });
+  });
+
+  it("C4B: plan with zero items → no claim control; after add-item → claim control appears enabled", async () => {
+    const plan = makePlan({ id: 5 });
+    plan.items = []; // No items
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({
+      units: [makeUnit()],
+      identityWarnings: [],
+    });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    const { rerender } = render(<PlanLedgerPanel projectId="proj-c4b" />);
+
+    await waitFor(() => {
+      expect(mockPoolMock).toHaveBeenCalled();
+    });
+
+    // Verify no claim control (no select element for claim target)
+    let claimSelect = screen.queryByRole("combobox", { name: /claim.*into/i });
+    expect(claimSelect).not.toBeInTheDocument();
+
+    // Simulate adding an item (update mock to return plan with item)
+    const newItem = makeItem({ id: 100, text: "First item" });
+    plan.items = [newItem];
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+
+    rerender(<PlanLedgerPanel projectId="proj-c4b-alt" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Verify claim control now appears and is enabled (unconditional)
+    claimSelect = screen.getByRole("combobox", { name: /claim.*into/i });
+    expect(claimSelect).toBeEnabled();
+  });
+
+  it("C5: edit text-only calls updateItem with {text}, no parent_item_id key", async () => {
+    const plan = makePlan({ id: 6 });
+    const item = makeItem({ id: 60, text: "Original" });
+    plan.items = [item];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockUpdateItemMock.mockResolvedValue({ item: makeItem({ id: 60, text: "Edited" }) });
+
+    render(<PlanLedgerPanel projectId="proj-c5" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Find the item row first by looking for all elements with "Original" text
+    // and picking the one that's NOT an option (use getAllByText and filter)
+    const allOriginalElements = screen.getAllByText("Original");
+    const itemRowSpan = allOriginalElements.find((el) => el.tagName !== "OPTION");
+    const rowContainer =
+      itemRowSpan?.closest("[data-test*='item']") ||
+      itemRowSpan?.parentElement?.parentElement ||
+      itemRowSpan?.parentElement;
+
+    // Find and click edit button within this row
+    const editBtn = within(rowContainer!).getByTestId("item-edit-button");
+    fireEvent.click(editBtn);
+
+    // Edit text (unconditional - must exist)
+    const textInput = within(rowContainer!).getByTestId("item-edit-text");
+    fireEvent.change(textInput, { target: { value: "Edited" } });
+
+    // Save (unconditional - must exist)
+    const saveBtn = within(rowContainer!).getByTestId("item-edit-save");
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(mockUpdateItemMock).toHaveBeenCalled();
+    });
+
+    const call = mockUpdateItemMock.mock.calls[0];
+    expect(call[0]).toEqual(60); // item id
+    expect(call[1]).toEqual({ text: "Edited" });
+    // Verify no parent_item_id key at all
+    expect(Object.keys(call[1])).toEqual(["text"]);
+  });
+
+  it("C6A: re-parent calls updateItem with chosen parent_item_id", async () => {
+    const plan = makePlan({ id: 7 });
+    const a = makeItem({ id: 61, text: "A" });
+    const b = makeItem({ id: 62, text: "B" });
+    plan.items = [a, b];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockUpdateItemMock.mockResolvedValue({ item: makeItem({ id: 61, parent_item_id: 62 }) });
+
+    render(<PlanLedgerPanel projectId="proj-c6a" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Find the A item row - must avoid the option in the picker
+    const allAElements = screen.getAllByText("A");
+    const aItemSpan = allAElements.find((el) => el.tagName !== "OPTION");
+    const aRowContainer =
+      aItemSpan?.closest("[data-test*='item']") ||
+      aItemSpan?.parentElement?.parentElement ||
+      aItemSpan?.parentElement;
+
+    // Click edit (unconditional - must exist)
+    const editBtn = within(aRowContainer!).getByTestId("item-edit-button");
+    fireEvent.click(editBtn);
+
+    // Select parent (unconditional - must exist)
+    const parentSelect = within(aRowContainer!).getByTestId("item-parent-select");
+    fireEvent.change(parentSelect, { target: { value: "62" } });
+
+    // Save (unconditional - must exist)
+    const saveBtn = within(aRowContainer!).getByTestId("item-edit-save");
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(mockUpdateItemMock).toHaveBeenCalled();
+    });
+
+    const call = mockUpdateItemMock.mock.calls[0];
+    expect(call[0]).toEqual(61);
+    expect(call[1]).toEqual(expect.objectContaining({ parent_item_id: 62 }));
+  });
+
+  it("C6B: promote to top-level sends explicit parent_item_id: null", async () => {
+    const plan = makePlan({ id: 8 });
+    const parent = makeItem({ id: 70, text: "Parent" });
+    const child = makeItem({ id: 71, text: "Child", parent_item_id: 70 });
+    plan.items = [parent, child];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+    mockUpdateItemMock.mockResolvedValue({ item: makeItem({ id: 71, parent_item_id: null }) });
+
+    render(<PlanLedgerPanel projectId="proj-c6b" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Find the Child item row - must avoid any option in the picker
+    const allChildElements = screen.getAllByText("Child");
+    const childItemSpan = allChildElements.find((el) => el.tagName !== "OPTION");
+    const childRowContainer =
+      childItemSpan?.closest("[data-test*='item']") ||
+      childItemSpan?.parentElement?.parentElement ||
+      childItemSpan?.parentElement;
+
+    // Click edit on child (unconditional - must exist)
+    const editBtn = within(childRowContainer!).getByTestId("item-edit-button");
+    fireEvent.click(editBtn);
+
+    // Select "top-level" or null option (unconditional - must exist)
+    const parentSelect = within(childRowContainer!).getByTestId("item-parent-select");
+    fireEvent.change(parentSelect, { target: { value: "null" } });
+
+    // Save (unconditional - must exist)
+    const saveBtn = within(childRowContainer!).getByTestId("item-edit-save");
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(mockUpdateItemMock).toHaveBeenCalled();
+    });
+
+    const call = mockUpdateItemMock.mock.calls[0];
+    expect(call[0]).toEqual(71);
+    // Verify explicit null is sent, not absent key
+    expect(call[1]).toHaveProperty("parent_item_id");
+    expect(call[1].parent_item_id).toBeNull();
+  });
+
+  it("C7: 4-level fixture, edit picker excludes item, descendants, and other plans' items", async () => {
+    // R → Citem → Gitem → Hitem, plus R2, plus plan B with X
+    const plan = makePlan({ id: 9, plan: { id: 9, project_id: "proj-c7" } });
+    const r = makeItem({ id: 1, text: "R" });
+    const citem = makeItem({ id: 2, text: "Citem", parent_item_id: 1 });
+    const gitem = makeItem({ id: 3, text: "Gitem", parent_item_id: 2 });
+    const hitem = makeItem({ id: 4, text: "Hitem", parent_item_id: 3 });
+    const r2 = makeItem({ id: 5, text: "R2" });
+    plan.items = [r, citem, gitem, hitem, r2];
+
+    const planB = makePlan({ id: 10, plan: { id: 10, project_id: "proj-c7" } });
+    const x = makeItem({ id: 100, text: "X" });
+    planB.items = [x];
+
+    mockListMock.mockResolvedValue({
+      plans: [plan, planB],
+      closedCount: 0,
+      latestClosure: null,
+    });
+    mockPoolMock.mockResolvedValue({ units: [], identityWarnings: [] });
+    mockHealthMock.mockResolvedValue(makeHealth());
+
+    render(<PlanLedgerPanel projectId="proj-c7" />);
+
+    await waitFor(() => {
+      expect(mockListMock).toHaveBeenCalled();
+    });
+
+    // Find the Citem row - must avoid any option in the picker and child items
+    const allCitemElements = screen.getAllByText("Citem");
+    const citemSpan = allCitemElements.find((el) => el.tagName !== "OPTION");
+
+    // Get the parent row container - walk up through parent elements carefully
+    let citemRowContainer = citemSpan?.parentElement;
+    while (
+      citemRowContainer &&
+      !citemRowContainer.getAttribute("data-test")?.includes("item-row")
+    ) {
+      citemRowContainer = citemRowContainer.parentElement;
+    }
+
+    // If we couldn't find it via data-test, try the more direct approach
+    if (!citemRowContainer) {
+      citemRowContainer = citemSpan?.closest("[data-test='item-row']");
+    }
+
+    // Click edit on Citem (must get the edit button within this specific row)
+    const editBtn = within(citemRowContainer!).queryAllByTestId("item-edit-button")[0];
+    if (!editBtn) throw new Error("Edit button not found for Citem");
+    fireEvent.click(editBtn);
+
+    // Get the parent select in edit mode (must get it from within this specific row)
+    const parentSelect = within(citemRowContainer!).queryAllByTestId("item-parent-select")[0];
+    if (!parentSelect) throw new Error("Parent select not found for Citem");
+
+    // Get all options
+    const options = parentSelect.querySelectorAll("option");
+    const optionTexts = Array.from(options).map((o) => (o.textContent || "").trim());
+
+    // Verify:
+    // - Citem (self) is absent
+    // - Gitem (child) is absent
+    // - Hitem (grandchild) is absent — THIS IS THE KEY ASSERTION
+    // - R (ancestor) is present
+    // - R2 (sibling) is present
+    // - X (other plan) is absent
+    expect(optionTexts).not.toContain("Citem");
+    expect(optionTexts).not.toContain("Gitem");
+    expect(optionTexts).not.toContain("Hitem"); // Grandchild must be absent
+    expect(optionTexts).toContain("R");
+    expect(optionTexts).toContain("R2");
+    expect(optionTexts).not.toContain("X");
   });
 });

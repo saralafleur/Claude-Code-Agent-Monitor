@@ -890,6 +890,7 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
       "../lib/value-groups": {},
       "../lib/value-coverage-probe": {},
       "../lib/value-summary": {},
+      "../lib/plan-lifecycle": {},
     });
     assertConsumerScopeDerived("../lib/value-summary", {
       "../routes/project-plans": {},
@@ -1010,5 +1011,64 @@ describe("Single-writer structural guard (§9.1 DERIVED-DUAL-VIEW)", () => {
       0,
       `setValueGroupReviewStatus should only appear in db.js and project-plans.js, not in: ${reviewOther.join(", ")}`
     );
+  });
+});
+
+describe("Structural guard: table writers (Slice 4a, DEC-S4-8)", () => {
+  const { assertTableWritersSingleHome } = require("./helpers/table-writers");
+  const serverDir = path.resolve(__dirname, "..");
+
+  it("G-1: project_plan_items has exactly one canonical writer per statement (multi-writer table)", () => {
+    // Never widen this list silently to make a real new violation go away.
+    assertTableWritersSingleHome("project_plan_items", {
+      statementHomes: {
+        deleteProjectPlanItem: [
+          { file: "lib/plan-lifecycle.js", anchor: "function deleteProjectPlanItem" },
+        ],
+        insertProjectPlanItem: [
+          { file: "lib/plan-lifecycle.js", anchor: "function insertProjectPlanItem" },
+          {
+            file: "lib/plan-lifecycle.js",
+            anchor: "const doImport =",
+            dated: "2026-08-06",
+            reason:
+              "legacy AGENT-PLAN.md two-pass import — insert-all-then-resolve-nesting is structurally incompatible with insertProjectPlanItem's single-pass signature; pre-existing, unrelated to 4a",
+          },
+        ],
+        reparentProjectPlanItem: [
+          { file: "lib/plan-lifecycle.js", anchor: "function updateProjectPlanItem" },
+        ],
+        updateProjectPlanItem: [
+          { file: "lib/plan-lifecycle.js", anchor: "function updateProjectPlanItem" },
+        ],
+      },
+      inlineWriterDispositions: {
+        "lib/plan-lifecycle.js:288-290": {
+          sql: "UPDATE project_plan_items SET parent_item_id = ? WHERE id = ?",
+          dated: "2026-08-06",
+          reason:
+            "legacy import's second pass; obligation to route through reparentProjectPlanItem when the import path is next touched (WATCH-S4-I)",
+        },
+      },
+    });
+  });
+
+  it("G-2: value_claims single writer guard", () => {
+    // Never widen this list silently to make a real new violation go away.
+    assertTableWritersSingleHome("value_claims", {
+      statementHomes: {
+        deleteValueClaim: [
+          {
+            file: "routes/project-plans.js",
+            anchor: 'router.delete("/claims/:claimId',
+            dated: "2026-08-06",
+            reason:
+              "unclaim path not yet extracted into a composer; 4b's batch unclaim must extract it rather than add a second call site (WATCH-S4-J)",
+          },
+        ],
+        insertValueClaim: [{ file: "lib/plan-lifecycle.js", anchor: "function claimUnitIntoItem" }],
+      },
+      inlineWriterDispositions: {},
+    });
   });
 });

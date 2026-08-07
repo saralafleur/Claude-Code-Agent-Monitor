@@ -3429,6 +3429,17 @@ const stmts = {
      WHERE id = ?`
   ),
   deleteProjectPlanItem: db.prepare(`DELETE FROM project_plan_items WHERE id = ?`),
+  // Sole writer of parent_item_id after insert time — server/lib/plan-lifecycle.js
+  // updateProjectPlanItem's re-parent branch (single-writer-guard.test.js G-1).
+  // A dedicated statement rather than widening updateProjectPlanItem's own
+  // COALESCE idiom: COALESCE(?, parent_item_id) cannot express "set to NULL"
+  // (promote to top-level), which is a required, reachable case here.
+  reparentProjectPlanItem: db.prepare(
+    `UPDATE project_plan_items SET
+       parent_item_id = ?,
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id = ?`
+  ),
   insertValueClaim: db.prepare(
     `INSERT INTO value_claims
        (project_id, plan_id, item_id, value_source, value_ref, source_cwd, label_snapshot, seen_at_snapshot, stage_snapshot, attribution, claimed_by)

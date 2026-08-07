@@ -667,10 +667,11 @@ body, an existence-only check (`assert.ok(stmts.listX)`), a literal
 `assert.ok(true, "…")` placeholder, an escape hatch (`assert.ok(x || true, …)`),
 a tautology (asserting that rows returned by an `ORDER BY created_at` re-query
 are in `created_at` order), a shared assertion helper that is imported and never
-called, or a fixture in a state no real call site can produce. The suite is
-green, the Definition of Done shows a tick, and the guard protects nothing. This
-is more dangerous than no test: the next change reads the checkmark and stops
-looking.
+called, or a fixture in a state no real call site can produce, or a guard whose
+assertions are entirely honest but whose *name* claims a broader guarantee than
+the failure mode it actually exercises. The suite is green, the Definition of
+Done shows a tick, and the guard protects nothing. This is more dangerous than
+no test: the next change reads the checkmark and stops looking.
 
 **Flagged in:** `intake/2026-08-01-build-project-manager/` — found across
 **five** spec files, survived **two** consecutive BLOCKED verifier passes (the
@@ -1209,6 +1210,34 @@ fail. **The recommendation is hereby upgraded from "do not trim the reviewer
 on this file family" to "do not trim the reviewer on this file family under
 any mode, and treat a single GREEN verifier pass on it as a checkpoint, not a
 gate."**
+
+**Also flagged in:** `intake/2026-08-06-plan-editing-ui/` (2026-08-06) — a
+**seventh shape**, and the first found in already-shipped production code rather
+than in a build under review. `server/__tests__/project-plans-api.test.js`'s
+`D4: new_item inline form is atomic — failure leaves neither claim nor item
+created` has been green since 2026-08-02 (`plan-lifecycle-value-ledger`). Its
+assertions are real, its failure case is real, and its failure case is
+`new_item: { text: "" }` — which fails inside `insertProjectPlanItem`'s own
+`INVALID_INPUT` guard **before any row is written**, i.e. the one failure mode
+that *cannot* produce the orphan the test's name denies. Meanwhile
+`POST /:id(\d+)/claims` inserts the `new_item` row, **then** validates
+`value_source` / `attribution` / `value_ref`, **then** inserts the claim, with no
+`dbModule.db.transaction(...)` anywhere in the handler — so a valid `new_item`
+plus an invalid `value_source` returns a 400 and leaves a committed, orphaned
+plan item. Found independently by `intake-engineer` §2 and `intake-qa` §2, and
+re-verified by `intake-project-manager` before ruling. Disposition:
+**DEC-S4-2** — folded into Slice 4a's scope as an our-cost `bug` carve-out; the
+whole sequence is wrapped in one transaction (reordering validation first is
+also correct but **not sufficient alone** — the `UNIQUE (value_source, value_ref,
+source_cwd, item_id)` collision is only discoverable at insert time), and D4 is
+**rewritten, not adjusted** — same disposition WATCH-S3-D set for T7.
+
+**Promoted out:** the seventh shape found here — a guard whose assertions are
+honest but whose *name* claims a broader guarantee than it exercises — is now
+its own entry, **§9.9 NAME-OVERCLAIMING GUARD** (promoted 2026-08-06 on its
+second live occurrence, per this entry's own promotion rule). §9.3 remains the
+home for the six shapes that are vacuous *on their face*; §9.9 is the home for
+the shape that is not.
 
 ### 9.4 FIX-ROUND-REGRESSION (the fix round is a build round)
 
@@ -1932,6 +1961,23 @@ question. Recorded here so the deferral has a trigger: **the first consumer of
 any of these modules added under `mcp/src`, `scripts/`, or `desktop/` is
 unregistered and undetected.**
 
+**Design-time pre-flag (2026-08-06, `intake/2026-08-06-plan-editing-ui/` — NOT
+an occurrence, count unchanged at 7).** Slice 4a's new G-A/G-B guards were
+specified with a derived file axis (`scanFiles`) and a hand-typed *statement*
+axis, and their exception list was drafted as a **call-site count**
+(`matches.length === KNOWN_MULTI_CALL_SITES[x].length`) rather than an identity
+check — so deleting the one legitimate legacy call site and adding a rogue one
+elsewhere would keep the count at 2 and the guard green. That is occurrence 7's
+own defect (`assertSingleHome`'s hand-typed consumer axis) reproduced inside the
+cure written to avoid it. Caught pre-build and dispositioned by **DEC-S4-8**:
+assert the enclosing *function name* of each call site, and derive the writer set
+from `server/db.js`'s own statement definitions via a shared
+`assertTableWritersSingleHome(tableName)`. **If that helper lands, it is the
+first built instance of the cure this entry has recommended since occurrence 6 —
+check it at Slice 4a's build review and update this note either way.**
+See also **§9.9**, which diagnoses this entry and itself as the same defect from
+opposite ends.
+
 ### 9.8 OVERLOADED-ABSENCE (distinguishable outcomes collapsed into one absent value)
 
 **PROMOTED from candidate to a numbered entry 2026-08-04** by `team-qa`
@@ -2276,6 +2322,118 @@ two more, and once a second test in the same family). Transplanting the shape
 transplants the flake. Fix separately (Slice-2 debt); do not copy the assertion
 form.
 
+### 9.9 NAME-OVERCLAIMING GUARD (the assertion is honest; the name is a superset)
+
+The assertions are real, they really pass, and they would really fail if the
+thing they check broke. The defect is **scope**: the artifact names a guarantee
+and exercises only a subset of it — often the one subset that cannot violate the
+named property. This is harder to catch than any of §9.3's six shapes because
+nothing about it looks vacuous. There is no empty body, no tautology, no
+`assert.ok(true)`, no escape hatch, no uncalled helper, no impossible fixture.
+Everything in it is real. Only its title is bigger than its coverage. **And the
+title is what the next reader believes.**
+
+**Why it earns its own entry rather than staying a §9.3 sub-shape: it does not
+merely fail to catch a defect — it propagates a false guarantee into the
+vocabulary of later work.** D4's title ("atomic") became a documented premise in
+an approved requirements document (`requests/2026-08-04-value-pool-grouping/request.md`:
+*"the claims API's atomic inline `new_item` already supports the shape"*), which
+three subsequent intake documents quoted forward as a design instruction, and on
+which Slice 4's acceptance signal 4 and AC-12 were built. This is §9.1's
+second-hand-copy mechanism operating one level up: not a copied implementation,
+a copied *guarantee*.
+
+**Occurrence 1 — 2026-08-06, found in shipped code, `intake/2026-08-06-plan-editing-ui/`
+(the naming instance).** `server/__tests__/project-plans-api.test.js`'s
+`D4: new_item inline form is atomic — failure leaves neither claim nor item
+created`, green since 2026-08-02. Its failure case is `new_item: { text: "" }`,
+which fails inside `insertProjectPlanItem`'s own `INVALID_INPUT` guard **before
+any row is written** — the one failure mode that cannot produce the orphan the
+name denies. Meanwhile `POST /:id(\d+)/claims` inserts the item, **then**
+validates `value_source`/`attribution`/`value_ref`, **then** inserts the claim,
+with no `dbModule.db.transaction(...)` anywhere. Disposition: **DEC-S4-2** —
+fixed in Slice 4a as an our-cost bug carve-out; D4 rewritten, not adjusted.
+
+**Occurrence 2 — 2026-08-06, same intake, `team-qa` pass — an entire file.**
+`server/__tests__/plan-lifecycle.test.js`: **11 of its 19 cases** state a specific
+behavioral property in the name and assert `assert.ok(typeof planLifecycle.X ===
+"function")` in the body. Verbatim examples:
+`A2.4: closePlan stamps status:'closed' + ISO closed_at + note` ·
+`A2.9: PATCH /items/:itemId on closed plan → 409` ·
+`A2.10: DELETE /items/:itemId on closed plan → 409` ·
+`A2.15: claim rows deepEqual-identical across closePlan` ·
+`A2.18: same unit claimable into items of both plans, closing A leaves B's claims untouched`.
+The named behaviors *are* genuinely covered — one layer up, in
+`project-plans-api.test.js` (closed-plan 409s at lines 351-366, double-close at
+320-328) — so this is duplicated ticks in the wrong file, not absent coverage.
+The damage is that the file reads as a thorough behavioral spec for the module
+Slice 4a extends most heavily, and is not one. This is also how
+`deleteProjectPlanItem`'s FK/raw-500 defect (**DEC-S4-9**) stayed invisible: the
+only test naming that path is `A2.10`, which promises a 409 and checks a `typeof`.
+Disposition: **WATCH-S4-H** — each of the 11 is made real or deleted with the
+covering case cited by id; never adjusted until green.
+
+**Design-time pre-flags (2026-08-06, NOT occurrences, count unchanged at 2) —
+recorded because they show the shape is not confined to test names:**
+1. **A structural guard's own name.** `technical-plan.md` §5's **G-B** is named
+   *"`project_plan_items` writers"* and scopes itself to two regexes, covering
+   `insertProjectPlanItem` and `reparentProjectPlanItem` but not
+   `updateProjectPlanItem.run(` or `deleteProjectPlanItem.run(` — both real
+   writers of that table. Caught before the guard was written. Disposition:
+   **DEC-S4-8** — widened to all four, and the writer set is derived from
+   `server/db.js` rather than hand-listed.
+2. **A doc comment.** `client/src/components/PlanLedgerPanel.tsx:261-264`'s
+   `buildItemTree` comment asserts *"nothing silently disappears"* — true for the
+   *orphan* case (unresolved parent falls back to top-level), **false** for the
+   *cycle* case Slice 4a makes reachable, where every member resolves to another
+   member and none reach `roots`. Same shape as the `unitFacts`/`compareUnitInputs`
+   header-overclaim §9.1 recorded on 2026-08-05.
+3. **A TypeScript type.** `client/src/lib/api.ts`'s `updateItem` has advertised
+   `parent_item_id: number | null` while the server silently dropped the field —
+   a type-level guarantee with no implementation behind it (**DEC-S4-7**).
+
+**The unifying diagnosis (2026-08-06).** §9.9 and **§9.7 HAND-SCOPED STRUCTURAL
+SCAN** are the same defect from opposite ends: §9.7 is *the scan enumerates its
+own blind spot*; §9.9 is *the name covers the blind spot with a promise*. Both
+exist because **scope is hand-typed and names are free text, with nothing
+deriving one from the other.** Fixing either one in isolation leaves the
+mechanism intact.
+
+**Acceptance criterion.** For any artifact that states a guarantee — test name,
+guard name, doc comment, file header, or type — either the artifact names the
+enumeration its scope is derived from, or its stated scope is narrow enough that
+no derivation is implied. A broad name over a narrow case is not acceptable in
+either direction.
+
+**Detector (cheap, do it at review time).** For any artifact whose name or text
+states a *property* — "atomic", "idempotent", "never", "exactly once", "all or
+nothing", "nothing silently disappears", "the writers of X", "→ 409" — read what
+it actually exercises and ask whether the product code could violate the named
+property **by a path that artifact does not reach**. If it can, it is
+name-overclaiming. Two mechanical sweeps that would have caught both occurrences
+above in seconds:
+```
+# a test whose name promises behavior but whose body only checks existence
+awk '/it\("/{n=$0; getline; if ($0 ~ /typeof/) print FILENAME": "n}' server/__tests__/*.test.js
+# a guard naming a table's "writers" — cross-check against db.js's real statement set
+grep -n "INSERT INTO <table>\|UPDATE <table>\|DELETE FROM <table>" server/db.js
+```
+
+**How to comply.**
+- **Replace, never extend.** Extending a name-overclaiming guard leaves the
+  original green assertion in place as evidence for a claim it never supported.
+  (Same disposition WATCH-S3-D set for T7 and DEC-S4-2 set for D4.)
+- **Prefer a derived name to a checked one.** The durable cure is to make the
+  name a *function of* the enumeration — e.g. `assertTableWritersSingleHome("project_plan_items")`,
+  which reads the writer set out of `server/db.js` — so a new writer added
+  tomorrow is in scope automatically and the name cannot drift wider than the
+  scope. **DEC-S4-8** builds the first instance of this in Slice 4a; it is the
+  same cure §9.7 has recommended since occurrence 6 and which that entry's own
+  text says *"remains half-built."*
+- **When the narrow scope is deliberate, say so in the name**, and record the
+  exception with a name, a date and a reason (the `GRANDFATHERED_QUERIES` /
+  `FILE_DISPOSITIONS` / `KNOWN_MULTI_CALL_SITES` pattern), never as a silently
+  narrowed regex.
 
 ### Candidate new pattern, NOT yet catalogued — CWD-IDENTITY-FANOUT
 
